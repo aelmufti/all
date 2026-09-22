@@ -1,0 +1,12 @@
+# Xcode build artifacts
+all/build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Tooling scratch
+.playwright-mcp/
+
+# macOS
+.DS_Store
