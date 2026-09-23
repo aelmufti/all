@@ -292,6 +292,36 @@ struct HomeProgrammeDetail: Decodable {
     // partagés (sens différent selon le domaine, cf. commentaire ci-dessus)
     let total: Int?
     let hits: Int?
+
+    /// Init membre-à-membre avec valeurs par défaut : les champs « sommeil »
+    /// (axis/strip/nights/staleDays/to/hits) sont optionnels à la construction
+    /// pour que les appelants « entraînement » (et les tests) n'aient pas à les
+    /// fournir. Le décodage `Decodable` reste synthétisé indépendamment.
+    init(
+        focus: [HomeFocusItem]? = nil,
+        sessions: [HomeProgrammeSession]? = nil,
+        done: Int? = nil,
+        missed: Int? = nil,
+        axis: HomeSleepAxis? = nil,
+        strip: [HomeNightPoint]? = nil,
+        nights: Int? = nil,
+        staleDays: Int? = nil,
+        to: String? = nil,
+        total: Int? = nil,
+        hits: Int? = nil
+    ) {
+        self.focus = focus
+        self.sessions = sessions
+        self.done = done
+        self.missed = missed
+        self.axis = axis
+        self.strip = strip
+        self.nights = nights
+        self.staleDays = staleDays
+        self.to = to
+        self.total = total
+        self.hits = hits
+    }
 }
 
 /// Un domaine de programme (`training`, `sleep`, …) — l'Accueil ne s'intéresse
