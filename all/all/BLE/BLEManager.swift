@@ -126,6 +126,14 @@ final class BLEManager: NSObject, ObservableObject {
     /// Session GFDI active, si la montre expose le service ML V2. `nil` tant que
     /// la découverte n'a pas tranché ou si le périphérique ne parle pas V2.
     @Published private(set) var garminSession: GarminSession?
+    /// Session temps réel (Live-2, `RealtimeSession.swift`) — construite en
+    /// même temps que `garminSession`, sur le MÊME `CommunicatorV2` (qui
+    /// conforme à la fois `GfdiCommunicating` et `RealtimeMlCommunicating`) :
+    /// une seule instance par lien BLE, jamais indépendante de la session GFDI.
+    /// PARALLÈLE au handshake/sync GFDI, jamais couplée : aucun service
+    /// `REALTIME_*` n'est enregistré ici, seulement construite prête à
+    /// recevoir des toggles utilisateur (cf. `RealtimeMetricsView`).
+    @Published private(set) var realtimeSession: RealtimeSession?
     /// Abonnement à `GarminSession.state` — sert uniquement à savoir **quand**
     /// requalifier un lien en cours de revalidation comme réellement exploitable
     /// (cf. `checkLinkLivenessIfRevalidating`). Ne duplique aucune logique
@@ -404,6 +412,7 @@ final class BLEManager: NSObject, ObservableObject {
         pendingCharacteristicDiscoveries = 0
         garminCommunicator = nil
         garminSession = nil
+        realtimeSession = nil
         garminSessionStateSubscription?.cancel()
         garminSessionStateSubscription = nil
     }
@@ -723,8 +732,13 @@ extension BLEManager: CBPeripheralDelegate {
                 log.error("SpoolStore indisponible — le téléchargement de fichiers ne pourra pas écrire sur disque")
             }
             let session = GarminSession(communicator: communicator, spoolStore: spoolStore, uploader: pulseUploader)
+            // Live-2 : même `communicator` (conforme aux deux protocoles),
+            // aucun service REALTIME_* enregistré ici — juste prête à recevoir
+            // des toggles utilisateur (cf. commentaire de la propriété).
+            let realtime = RealtimeSession(communicator: communicator)
             garminCommunicator = communicator
             garminSession = session
+            realtimeSession = realtime
             // Observe l'état publié de la session pour savoir dès que le canal
             // GFDI s'ouvre (preuve de lien exploitable) — utile quand on est en
             // train de revalider un lien restauré/présumé (cf.
