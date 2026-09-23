@@ -4,8 +4,12 @@
 //
 //  Réassemblage + reprise d'un téléchargement de fichier GFDI (FILE_TRANSFER_DATA,
 //  message 5004), extrait de `GarminSession` en un type PUR pour être testable
-//  sans CoreBluetooth (`GarminSession` exige un `CBPeripheral` réel via
-//  `CommunicatorV2`, cf. son commentaire de classe).
+//  sans CoreBluetooth. `GarminSession` elle-même reste testable sans
+//  `CBPeripheral` réel depuis l'introduction du seam `GfdiCommunicating`
+//  (`CommunicatorV2.swift`) — cf. `TransferResilienceTests.swift`, qui pilote
+//  `GarminSession` de bout en bout avec un communicator factice pour couvrir ce
+//  que ce type pur ne voit pas seul (traînard après fin, interleaving de
+//  l'archivage avec le téléchargement suivant).
 //
 //  Porté de gadgetbridge/garmin-bridge, AGPL-3.0 — l'algorithme est celui de
 //  `net.garminbridge.session.GarminSession.answeredAFragmentOutOfStep` /

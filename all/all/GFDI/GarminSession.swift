@@ -3,7 +3,10 @@
 //  all (bridge-connect)
 //
 //  Poignée de main GFDI + listing du manifeste directory + téléchargement du
-//  contenu d'un fichier, au-dessus de `CommunicatorV2`. Porté de
+//  contenu d'un fichier, au-dessus d'un `GfdiCommunicating` (protocole implémenté
+//  par `CommunicatorV2` en production, cf. son commentaire — le seam existe pour
+//  qu'un communicator factice puisse piloter `GarminSession` en test sans
+//  CoreBluetooth réel, cf. `TransferResilienceTests.swift`). Porté de
 //  gadgetbridge/garmin-bridge, AGPL-3.0 (session/GarminSession.java pour
 //  l'enchaînement, les accusés et la reprise de fragment,
 //  session/ProtobufAck.java pour les réponses protobuf codées en dur,
@@ -103,7 +106,13 @@ final class GarminSession: ObservableObject {
         static let authNegotiation: UInt16 = 5101
     }
 
-    private let communicator: CommunicatorV2
+    /// Typé sur le protocole `GfdiCommunicating` (pas la classe concrète
+    /// `CommunicatorV2`) pour rester testable avec un communicator factice
+    /// (`TransferResilienceTests.swift`) — `BLEManager` continue de construire
+    /// et d'y passer une vraie `CommunicatorV2` en production, seule
+    /// conformance existante ; ce n'est qu'un seam de test, aucun comportement
+    /// n'en dépend.
+    private let communicator: GfdiCommunicating
     /// `nil` si le spool n'a pas pu s'initialiser (cf. `SpoolStore.init`, qui
     /// peut lever) — un téléchargement de fichier reste alors possible mais ses
     /// octets ne seront pas écrits sur disque (journalisé en erreur au finish).
@@ -163,7 +172,7 @@ final class GarminSession: ObservableObject {
     /// un traînard (cf. `handleFileTransferData`), pas une erreur.
     private var currentDownload: FileTransferReassembler?
 
-    init(communicator: CommunicatorV2, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil) {
+    init(communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil) {
         self.communicator = communicator
         self.spoolStore = spoolStore
         self.uploader = uploader

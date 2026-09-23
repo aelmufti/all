@@ -69,11 +69,27 @@ struct MicroLinkCharacteristics {
     }
 }
 
+/// Les quatre points d'entrée que `GarminSession` utilise réellement d'un
+/// transport GFDI — extrait de `CommunicatorV2` UNIQUEMENT pour permettre un
+/// communicator factice en test (`TransferResilienceTests.swift`) : jamais de
+/// vrai CoreBluetooth/BLE en test (règle immuable CLAUDE.md), et `CBPeripheral`
+/// ne se sous-classe/simule pas. Aucune logique ici, aucun comportement modifié
+/// pour `CommunicatorV2` (seule conformance de production) — pur seam de test,
+/// même famille que `SpoolUploading` (Sync/PulseUploader.swift).
+protocol GfdiCommunicating: AnyObject {
+    /// Rappelé à chaque trame GFDI complète décodée sur le service GFDI.
+    var onGfdiFrame: ((GfdiFrame) -> Void)? { get set }
+    /// Rappelé une fois le service GFDI (ré)enregistré et prêt à émettre.
+    var onGfdiChannelReady: (() -> Void)? { get set }
+    func start()
+    func sendGfdiMessage(_ frame: Data, taskName: String)
+}
+
 /// Transport GFDI V2 (Micro-Link) : enregistrement du service GFDI par handle
 /// puis relais des fragments vers/depuis `GfdiTransport`. Une instance par lien
 /// BLE ; pilotée par `BLEManager` (délégué CoreBluetooth), qui lui relaie les
 /// notifications et écritures.
-final class CommunicatorV2 {
+final class CommunicatorV2: GfdiCommunicating {
     private let log = Logger(subsystem: "CleanYourRoom.all", category: "gfdi")
 
     /// Identifiant client ML, valeur du pont (`GADGETBRIDGE_CLIENT_ID`) gardée à
