@@ -79,6 +79,37 @@ final class BLEManager: NSObject, ObservableObject {
     private var peripheral: CBPeripheral?
     private var notifyingCharacteristic: CBCharacteristic?
 
+    // MARK: - FC live (incrément Live-1a)
+    //
+    // Profil Bluetooth standard Heart Rate (service 0x180D, caractéristique
+    // Heart Rate Measurement 0x2A37) — PAS GFDI. Coexiste avec le canal ML
+    // sur le même lien ACL : abonnement indépendant de la décision
+    // GFDI/générique prise par `activateProtocolIfPossible`. Portage complet
+    // de la logique de décodage/fraîcheur dans `LiveHeartRate.swift` (libre
+    // de CoreBluetooth, testable) ; ce fichier ne fait que le pont vers
+    // `CBCharacteristic`.
+
+    private static let heartRateCharacteristicUUID = CBUUID(string: "2A37")
+
+    private let liveHeartRateEngine = LiveHeartRate.Engine()
+
+    /// Intention de l'app (vue live à l'écran) — indépendante de la présence
+    /// effective de la caractéristique, pour qu'ouvrir la vue avant que la
+    /// montre soit connectée s'abonne automatiquement dès que la découverte
+    /// de services aboutit (cf. `activateProtocolIfPossible`).
+    private var wantsLiveHeartRate = false
+
+    /// Recalcule `liveHeartRate` à intervalle régulier pendant que la vue
+    /// live est ouverte : contrairement aux autres états publiés ici, celui-
+    /// ci dépend de l'écoulement du temps autant que des trames reçues (le
+    /// passage à « périmé » doit se produire même si plus aucune trame
+    /// n'arrive jamais).
+    private var liveHeartRateRefreshTimer: Timer?
+
+    /// État FC affiché par `LiveHeartRateView`. `LiveHeartRate.Reading.off`
+    /// tant qu'aucune vue live n'a démarré d'abonnement.
+    @Published private(set) var liveHeartRate: LiveHeartRate.Reading = .off
+
     // MARK: - Chemin GFDI V2 (Micro-Link)
     //
     // Caractéristiques accumulées au fil des découvertes CoreBluetooth (une par
@@ -243,6 +274,71 @@ final class BLEManager: NSObject, ObservableObject {
         notificationCount = 0
         connectionState = .disconnected
         log.info("Appareil oublié")
+    }
+
+    // MARK: - FC live (incrément Live-1a)
+
+    /// À appeler à l'apparition de la vue live (`onAppear`). No-op si la
+    /// caractéristique 0x2A37 n'est pas encore découverte (montre pas encore
+    /// connectée) — `wantsLiveHeartRate` reste vrai, et
+    /// `activateProtocolIfPossible` s'abonnera dès que la découverte de
+    /// services aboutira.
+    func startLiveHeartRate() {
+        let now = Date()
+        wantsLiveHeartRate = true
+        liveHeartRateEngine.start(now: now)
+        liveHeartRate = liveHeartRateEngine.reading(now: now)
+        log.info("FC live on")
+        subscribeToLiveHeartRateIfPossible()
+        startLiveHeartRateRefreshTimer()
+    }
+
+    /// À appeler à la disparition de la vue live (`onDisappear`). Coupe
+    /// l'abonnement GATT si actif — le capteur optique de la montre ne doit
+    /// pas tourner quand personne ne regarde.
+    func stopLiveHeartRate() {
+        guard wantsLiveHeartRate else { return }
+        wantsLiveHeartRate = false
+        stopLiveHeartRateRefreshTimer()
+        if let peripheral,
+           let characteristic = characteristicsByUUID[Self.heartRateCharacteristicUUID],
+           characteristic.isNotifying {
+            peripheral.setNotifyValue(false, for: characteristic)
+        }
+        liveHeartRateEngine.stop()
+        liveHeartRate = .off
+        log.info("FC live off")
+    }
+
+    /// S'abonne à la caractéristique FC si elle est connue et qu'on n'y est
+    /// pas déjà — appelé au démarrage de la vue live et à chaque découverte
+    /// de services aboutie (connexion initiale, reconnexion, revalidation).
+    private func subscribeToLiveHeartRateIfPossible() {
+        guard wantsLiveHeartRate,
+              let peripheral,
+              let characteristic = characteristicsByUUID[Self.heartRateCharacteristicUUID],
+              !characteristic.isNotifying else { return }
+        peripheral.setNotifyValue(true, for: characteristic)
+    }
+
+    /// Recalcule `liveHeartRate` chaque seconde pendant que la vue live est
+    /// ouverte : c'est ce qui fait passer l'état à « périmé » même en
+    /// l'absence de toute nouvelle trame (lien mort sans déconnexion
+    /// CoreBluetooth explicite, montre qui a cessé de diffuser sans que la
+    /// caractéristique ne renvoie plus rien).
+    private func startLiveHeartRateRefreshTimer() {
+        liveHeartRateRefreshTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, self.wantsLiveHeartRate else { return }
+            self.liveHeartRate = self.liveHeartRateEngine.reading(now: Date())
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        liveHeartRateRefreshTimer = timer
+    }
+
+    private func stopLiveHeartRateRefreshTimer() {
+        liveHeartRateRefreshTimer?.invalidate()
+        liveHeartRateRefreshTimer = nil
     }
 
     private func startScan() {
@@ -577,6 +673,12 @@ extension BLEManager: CBPeripheralDelegate {
     /// paire de caractéristiques ML connue ; sinon repli sur l'abonnement
     /// générique de l'incrément 1 (première caractéristique notifiable trouvée).
     private func activateProtocolIfPossible(on peripheral: CBPeripheral) {
+        // FC live : indépendant de la décision GFDI/générique ci-dessous (la
+        // caractéristique 0x2A37 coexiste avec le canal ML sur le même lien
+        // ACL) — tenté à chaque découverte de services aboutie, y compris les
+        // reconnexions/revalidations où `garminSession` est déjà décidé.
+        subscribeToLiveHeartRateIfPossible()
+
         guard garminSession == nil else { return } // déjà décidé pour ce lien
         if let communicator = CommunicatorV2(peripheral: peripheral, characteristicsByUUID: characteristicsByUUID) {
             log.info("Service GFDI ML (V2) détecté — bascule sur le chemin GFDI")
@@ -637,6 +739,14 @@ extension BLEManager: CBPeripheralDelegate {
 
         if let garminCommunicator, characteristic.uuid == garminCommunicator.receiveCharacteristicUUID {
             garminCommunicator.handleIncoming(characteristic.value ?? Data())
+        }
+
+        if characteristic.uuid == Self.heartRateCharacteristicUUID {
+            // Décodage + republication seulement — pas de log ici au-delà de
+            // la ligne générique ci-dessus (octets, pas bpm) : rien de plus
+            // n'est journalisé que « on »/« off » de l'abonnement.
+            liveHeartRateEngine.onFrame(characteristic.value ?? Data(), now: Date())
+            liveHeartRate = liveHeartRateEngine.reading(now: Date())
         }
     }
 

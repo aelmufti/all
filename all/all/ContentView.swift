@@ -30,6 +30,11 @@ struct ContentView: View {
 
             BLEDiagnosticView()
                 .tabItem { Label("BLE", systemImage: "antenna.radiowaves.left.and.right") }
+
+            // Incrément Live-1a : FC en direct, profil Bluetooth standard
+            // (0x2A37), affichage natif, aucun réseau (cf. CLAUDE.md).
+            LiveHeartRateView()
+                .tabItem { Label("FC", systemImage: "heart.fill") }
         }
     }
 
