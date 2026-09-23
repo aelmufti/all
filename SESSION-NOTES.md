@@ -4,6 +4,20 @@
 > Notes courtes : état + décisions + prochaine étape. Le plan de fond vit dans
 > `CADRAGE.md` (§8 = incréments), les invariants dans `CLAUDE.md`.
 
+## 2026-09-23 (validation matériel) — ✅ Live-1a + Live-1b VALIDÉS SUR MATÉRIEL
+
+L'utilisateur confirme : FC native (onglet FC) OK sur device ; et après le correctif de
+découplage, l'animation « Maintenant » de Pulse suit le pouls depuis n'importe quel onglet.
+Serveur Pulse redéployé + source réglée sur iPhone (BLE). Build device + install faits (via
+`xcodebuild ... -derivedDataPath /tmp/all-devicebuild` + `devicectl install`). Tout commité+poussé
+(app `all` : Live-1a `e053ffa`, Live-1b `5a43664`, découplage `bbe5f84` ; custom-connect `b4805cf`).
+
+**Correctif clé de cette validation** : la mesure/push FC était liée à l'onglet FC natif
+(onAppear/onDisappear) → quitter l'onglet pour regarder Pulse coupait le flux. Désormais piloté
+par le cycle de vie de l'app (scenePhase premier-plan/arrière-plan) + connexion montre, quel que
+soit l'onglet. La friction « ouvrir l'onglet FC avant Pulse » est donc levée (l'app pousse dès
+qu'elle est au premier plan et connectée).
+
 ## 2026-09-23 — Live-1b : push FC téléphone → Pulse (code, revu Opus, tests verts)
 
 **Décisions** : transport = POST+cache (pas WebSocket) ; push seulement onglet FC ouvert
