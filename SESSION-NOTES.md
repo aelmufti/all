@@ -58,6 +58,31 @@ intégrés dans l'arbre principal, build+test combiné vert (135 tests), commit�
    `BLEManager` inchangé). Note : `docs/robustesse-transferts.md`. Divergence CRC assumée (ré-accusé
    actif vs attente silencieuse du pont) — jugée meilleure, documentée.
 
+## 2026-09-23 (soir) — FC realtime fiabilisée + fix ingestion MONITOR (422)
+
+**FC temps réel fiable sur matériel** (`daee53e`) : la FC via `REALTIME_HR` ne recevait aucune
+trame — on enregistrait les services `REALTIME_*` AVANT la poignée de main, et le
+`closeAllServices()` de `CommunicatorV2.start()` les refermait aussitôt (handles attribués mais
+0 stream, confirmé par logs device). Fix : `enableRealtimeIfReady()` n'active qu'une fois la
+session GFDI au-delà du handshake (`.initialized/.listing/.listed`), piloté par
+`GarminSession.$state`. **Confirmé matériel : la FC tient maintenant.** (gadgetbridge : pas de
+message « start » pour FC/pas/SpO2/respiration/VFC ; seul l'accéléromètre en a un, non utilisé.)
+
+**Bug ingestion MONITOR → 422 (diagnostiqué + corrigé)** : les uploads `.fit` MONITOR du
+téléphone étaient rejetés en 422 (activités OK). Cause : `fit-parser.decode()` levait dès
+erreur SDK + 0 message session/monitoring ; or les petits MONITOR **intraday** de la Venu 2 ont
+un `fileId monitoringB` valide mais 0 `monitoringMesg`. Conséquence : jamais livré → jamais
+archivé sur la montre → boucle de re-téléchargement + **risque de saturation de l'index**
+(panne connue, CLAUDE.md). Vérifié qu'archivage est bien verrouillé sur 2xx (pas de trou de
+données). **Fix serveur** (`custom-connect a54c90d`) : ne lever que si rien n'est décodé (pas
+même un fileId) → petit MONITOR classé wellness (vide) → 2xx → archivé, boucle cassée. **Fix
+app** (`83ccdcd`) : logue le code HTTP exact + corps sur rejet (diagnostic).
+
+**À FAIRE utilisateur** : **redéployer Pulse** (`git pull && docker compose up -d`) pour
+appliquer le fix ingestion. Fix basé sur l'hypothèse « fileId + erreur + 0 monitoring » (fichier
+défaillant pas dispo en local) → si des MONITOR échouent ENCORE après redéploiement, le nouveau
+log app (`pulse-upload`, « Upload Pulse rejeté <code> … <corps> ») donnera la vraie erreur.
+
 ## 2026-09-23 (validation matériel) — ✅ Live-1a + Live-1b VALIDÉS SUR MATÉRIEL
 
 L'utilisateur confirme : FC native (onglet FC) OK sur device ; et après le correctif de
