@@ -294,8 +294,28 @@ final class BLEManager: NSObject, ObservableObject {
     /// construite sur le lien à venir.
     func startRealtime() {
         wantsRealtime = true
-        realtimeSession?.enableKnownMetrics()
+        // Ne pas activer directement : `enableRealtimeIfReady` vérifie que la
+        // poignée de main GFDI est terminée (sinon `closeAllServices()` du
+        // rattachement fermerait les services REALTIME_* — cf. commentaire dans
+        // `activateProtocolIfPossible`). Si le lien n'est pas encore prêt,
+        // `wantsRealtime` reste vrai et l'abonnement d'état de la session
+        // activera le temps réel dès qu'elle atteint un état exploitable.
+        enableRealtimeIfReady()
         log.info("Temps réel on (métriques connues)")
+    }
+
+    /// Active les métriques connues UNIQUEMENT si la session GFDI a dépassé la
+    /// poignée de main (état exploitable). Idempotent (`enableKnownMetrics` se
+    /// garde par service) : appelé à chaque changement d'état de la session ET
+    /// au passage au premier plan, il ne (ré)enregistre rien de déjà actif.
+    private func enableRealtimeIfReady() {
+        guard wantsRealtime, let state = garminSession?.state else { return }
+        switch state {
+        case .initialized, .listingDirectory, .listed:
+            realtimeSession?.enableKnownMetrics()
+        default:
+            break // .idle / .gfdiChannelOpen (avant handshake) / .failed
+        }
     }
 
     /// À appeler quand l'app passe en arrière-plan (`allApp.swift`, scenePhase
@@ -694,21 +714,22 @@ extension BLEManager: CBPeripheralDelegate {
             // `checkLinkLivenessIfRevalidating`) ; sans effet sinon (le
             // `guard connectionState == .reconnecting` y renvoie tôt).
             garminSessionStateSubscription = session.$state
-                .sink { [weak self] _ in self?.checkLinkLivenessIfRevalidating() }
+                .sink { [weak self] _ in
+                    self?.checkLinkLivenessIfRevalidating()
+                    // Active le temps réel SEULEMENT une fois la poignée de main
+                    // terminée (cf. `enableRealtimeIfReady`). L'enregistrer avant
+                    // `session.start()` le faisait balayer par le `closeAllServices()`
+                    // du rattachement : la montre attribuait bien les handles
+                    // REALTIME_* puis ne streamait JAMAIS (confirmé par les logs
+                    // device). gadgetbridge n'active le temps réel qu'après
+                    // connexion établie — on fait pareil.
+                    self?.enableRealtimeIfReady()
+                }
             // Repointage Live-1b : republie chaque nouvelle FC GFDI vers Pulse
             // (cf. `handleRealtimeHeartRate`). Nouvel abonnement à chaque
             // nouvelle session temps réel, comme ci-dessus pour `GarminSession`.
             realtimeHeartRateSubscription = realtime.$heartRate
                 .sink { [weak self] heartRate in self?.handleRealtimeHeartRate(heartRate) }
-            // Temps réel toujours actif : si l'app est déjà au premier plan au
-            // moment où ce nouveau lien aboutit (`wantsRealtime` déjà vrai —
-            // reconnexion, revalidation, ou connexion initiale après un premier
-            // plan déjà établi), active les métriques connues tout de suite
-            // plutôt que d'attendre le prochain passage au premier plan (cf.
-            // ancien `subscribeToLiveHeartRateIfPossible`, même rôle pour 0x2A37).
-            if wantsRealtime {
-                realtime.enableKnownMetrics()
-            }
             session.start()
             return
         }
