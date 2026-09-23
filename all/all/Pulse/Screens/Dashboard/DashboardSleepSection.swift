@@ -96,7 +96,7 @@ private struct DashboardSleepDebtCard: View {
                             .font(PulseFont.metricLabel)
                             .padding(.horizontal, PulseSpacing.sm)
                             .padding(.vertical, 3)
-                            .background(Color.pulseSurfaceAlt)
+                            .background(badgeBackground)
                             .foregroundStyle(badgeColor)
                             .clipShape(Capsule())
                     }
@@ -131,11 +131,21 @@ private struct DashboardSleepDebtCard: View {
         }
     }
 
+    // Le web ne marque en « bon » que "faible" — "à jour" reste au pill gris
+    // par défaut ([class.good]="debtLevel() === 'faible'" dans le template).
     private var badgeColor: Color {
         switch viewModel.debtLevel {
         case "élevée": return .pulseDanger
-        case "à jour", "faible": return .pulseSuccess
+        case "faible": return .pulseSuccess
         default: return .pulseTextSecondary
+        }
+    }
+
+    private var badgeBackground: Color {
+        switch viewModel.debtLevel {
+        case "élevée": return Color.pulseDanger.opacity(0.14)
+        case "faible": return Color.pulseSuccess.opacity(0.14)
+        default: return .pulseSurfaceAlt
         }
     }
 }

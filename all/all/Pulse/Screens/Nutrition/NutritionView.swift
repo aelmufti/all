@@ -4,12 +4,14 @@
 //
 //  Écran Nutrition natif — équivalent SwiftUI de la page Angular `/nutrition`
 //  (`custom-connect/web/src/app/pages/nutrition/nutrition.component.ts`).
-//  Priorité à l'affichage fidèle (objectif du jour, macros, journal,
-//  timing, suggestions) ; les écritures sont volontairement limitées à
-//  trois gestes à faible risque (supprimer une entrée, ajout rapide depuis
-//  un aliment fréquent, ajouter une suggestion) — cf. rendu de l'agent pour
-//  le détail de ce qui a été laissé de côté (recherche, scan de code-barres,
-//  saisie manuelle, détail du calcul de l'objectif, plan de macros).
+//  Affichage fidèle (objectif du jour, macros — avec leurs couleurs par
+//  métrique, cf. `nutritionBars(for:)` — journal, timing, suggestions) et
+//  ajout complet d'un aliment (bouton flottant « + » → `NutritionAddFoodSheet`,
+//  dans `NutritionAddFoodSheet.swift` du même dossier) : recherche
+//  bibliothèque locale, recherche Open Food Facts, saisie manuelle, aliments
+//  fréquents. Laissé de côté : scan de code-barres (caméra, hors périmètre),
+//  modification d'une entrée déjà journalisée, détail du calcul de
+//  l'objectif et plan de macros détaillé — cf. rendu de l'agent.
 //
 //  Toutes les déclarations de ce fichier sont `private` (fileprivate) ou
 //  préfixées `Nutrition*` pour ne rien exposer qui puisse entrer en
@@ -84,7 +86,41 @@ struct NutritionView: View {
                 }
             }
             .padding(PulseSpacing.lg)
+            // Espace pour ne pas laisser le FAB recouvrir la dernière carte.
+            .padding(.bottom, PulseSpacing.xxl)
         }
+        .overlay(alignment: .bottomTrailing) {
+            NutritionFab {
+                viewModel.openAddSheet()
+            }
+            .padding(PulseSpacing.lg)
+        }
+        .sheet(isPresented: Binding(
+            get: { viewModel.addSheetOpen },
+            set: { open in if !open { viewModel.closeAddSheet() } }
+        )) {
+            NutritionAddFoodSheet(viewModel: viewModel)
+        }
+    }
+}
+
+/// Bouton flottant « + » qui ouvre l'ajout d'aliment — miroir de `.fab`
+/// (Angular, visible uniquement en layout mobile ; cet écran n'a qu'une
+/// mise en page, donc toujours visible ici).
+private struct NutritionFab: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.pulseSurface)
+                .frame(width: 56, height: 56)
+                .background(Color.pulseTextPrimary)
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.25), radius: 10, x: 0, y: 4)
+        }
+        .accessibilityLabel("Ajouter un aliment")
     }
 }
 
@@ -220,12 +256,17 @@ private struct NutritionBarModel: Identifiable {
 /// et l'échelle max de la jauge (`max(fourchette, cible, consommé) × 1,35`).
 private func nutritionBars(for day: NutritionDay) -> [NutritionBarModel] {
     let logged = !day.entries.isEmpty
+    // Couleurs alignées sur `NutritionComponent.bars()` (Angular) — pas sur
+    // une intuition : kcal reste en texte neutre (déjà mis en avant par sa
+    // taille), protéines en `--accent`, mais lipides/glucides/fibres
+    // reprennent volontairement des teintes d'autres métriques du thème
+    // (`--m-sleep`/`--m-cal`/`--m-steps`), fidèlement reportées ici.
     let defs: [(key: String, label: String, unit: String, color: Color, consumed: Double?, target: Double?)] = [
         ("kcal", "Calories", "kcal", .pulseTextPrimary, logged ? day.totals.kcal : nil, day.targets.kcal),
         ("protein", "Protéines", "g", .pulseAccent, logged ? day.totals.protein : nil, day.targets.protein),
-        ("fat", "Lipides", "g", .pulseDanger, logged ? day.totals.fat : nil, day.targets.fat),
-        ("carbs", "Glucides", "g", .pulseSuccess, logged ? day.totals.carbs : nil, day.targets.carbs),
-        ("fiber", "Fibres", "g", .pulseTextSecondary, logged ? day.totals.fiber : nil, day.targets.fiber),
+        ("fat", "Lipides", "g", .pulseSleep, logged ? day.totals.fat : nil, day.targets.fat),
+        ("carbs", "Glucides", "g", .pulseCalories, logged ? day.totals.carbs : nil, day.targets.carbs),
+        ("fiber", "Fibres", "g", .pulseSteps, logged ? day.totals.fiber : nil, day.targets.fiber),
     ]
     return defs.map { def in
         let range = day.targetRanges?[def.key]

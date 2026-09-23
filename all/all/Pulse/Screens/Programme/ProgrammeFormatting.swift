@@ -30,6 +30,35 @@ struct ProgrammeLegendDot: View {
     }
 }
 
+/// Encart d'avertissement — équivalent `.warn` (SCSS, entête `<p class="warn">`) :
+/// fond `--surface-2`, liseré gauche `--m-stress`, texte `--text-dim`. Utilisé
+/// par la carte alimentation (poids manquant) et la carte sommeil (frise
+/// périmée/incomplète).
+struct ProgrammeWarnBox: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(Color.pulseTextSecondary)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.pulseSurfaceAlt)
+            .clipShape(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 8,
+                    topTrailingRadius: 8
+                )
+            )
+            .overlay(alignment: .leading) {
+                Rectangle().fill(Color.pulseStress).frame(width: 2)
+            }
+    }
+}
+
 // MARK: - Badge de progression (entête des cartes de domaine)
 
 /// "semaine 2 / 4", "fin · 4 semaines" ou "jour 12" — équivalent `badge()`.
@@ -272,14 +301,13 @@ func programmeSleepTargetText(_ metric: ProgrammeSleepMetric) -> String {
     return "au plus \(programmeSleepBound(metric, max!))"
 }
 
-/// Équivalent `markerColor()`. Le socle natif n'a pas d'équivalent à
-/// `--m-stress` (SCSS) : "sous la cible" est représenté avec `.pulseAccent`
-/// plutôt qu'une quatrième couleur sémantique dédiée.
+/// Équivalent `markerColor()` : "sous la cible" reprend `--m-stress` (SCSS),
+/// comme la jauge macro de la carte alimentation (`ProgrammeMacroGaugeRow`).
 func programmeSleepMarkerColor(_ metric: ProgrammeSleepMetric) -> Color {
     if metric.informative || metric.value == nil { return .pulseTextSecondary }
     switch metric.status {
     case .hit: return .pulseSuccess
-    case .under: return .pulseAccent
+    case .under: return .pulseStress
     case .over: return .pulseDanger
     case .unknown: return .pulseTextSecondary
     }

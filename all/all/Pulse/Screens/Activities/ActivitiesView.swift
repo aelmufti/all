@@ -125,9 +125,9 @@ private struct ActivityRow: View {
         HStack(spacing: PulseSpacing.md) {
             Image(systemName: ActivitySport.icon(sport: activity.sport))
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.pulseAccent)
+                .foregroundStyle(sportTint)
                 .frame(width: 38, height: 38)
-                .background(Color.pulseSurfaceAlt)
+                .background(sportTint.opacity(0.15))
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: PulseSpacing.xs) {
@@ -146,6 +146,12 @@ private struct ActivityRow: View {
             }
         }
         .padding(.vertical, PulseSpacing.xs)
+    }
+
+    /// Couleur d'icône par sport — équivalent `<app-sport-icon>` (Angular) :
+    /// jamais l'accent bleu générique, cf. `ActivitySport.color`.
+    private var sportTint: Color {
+        ActivitySport.color(sport: activity.sport)
     }
 
     private var summary: String {

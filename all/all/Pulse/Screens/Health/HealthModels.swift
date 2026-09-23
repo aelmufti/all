@@ -24,7 +24,13 @@ import Foundation
 /// corporelle. `ts` en secondes epoch Unix (déjà décalé au fuseau
 /// d'affichage côté serveur, cf. `tzOffsetSeconds` dans le contrôleur).
 struct WellnessSample: Decodable {
-    let ts: Int
+    // `ts` en secondes epoch. **Double** et non `Int` : les séries mesurées
+    // (FC/stress/SpO2/respiration) ont un `ts` entier, mais le pivot d'énergie
+    // corporelle (`bodyBatteryPivot`, série simulée côté serveur) a un `ts`
+    // **fractionnaire** (ex. `1790150874.993`). Un `Int` ici fait échouer tout
+    // le décodage du jour (le parseur JSON d'iOS rejette un flottant dans un Int
+    // en « donnée invalide à la racine »).
+    let ts: Double
     let value: Double
 }
 

@@ -38,9 +38,7 @@ struct ProgrammeSleepSection: View {
             }
 
             if let warning = programmeSleepStripWarning(detail) {
-                Text(warning)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseTextSecondary)
+                ProgrammeWarnBox(text: warning)
             }
 
             metricsList
@@ -68,7 +66,7 @@ struct ProgrammeSleepSection: View {
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(detail.nights > 0 ? "\(detail.hits)" : "—")
                     .font(PulseFont.metricValue)
-                    .foregroundStyle(detail.nights > 0 ? Color.pulseTextPrimary : Color.pulseTextSecondary)
+                    .foregroundStyle(detail.nights > 0 ? Color.pulseTextPrimary : Color.pulseAbsent)
                 Text("/\(detail.total)")
                     .font(.title2)
                     .foregroundStyle(Color.pulseTextSecondary)
@@ -84,7 +82,7 @@ struct ProgrammeSleepSection: View {
             ForEach(detail.strip) { night in
                 VStack(spacing: 4) {
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(night.workDay ? Color.pulseAccent : Color.pulseAccent.opacity(0.4))
+                        .fill(night.workDay ? Color.pulseSleep : Color.pulseSleep.opacity(0.42))
                         .frame(height: max(4, CGFloat(night.sleepMin) / 8))
                     Text(ProgrammeDate.weekdayLetters[max(0, min(6, night.weekday))])
                         .font(.system(size: 9, design: .monospaced))
@@ -99,8 +97,8 @@ struct ProgrammeSleepSection: View {
 
     private var legend: some View {
         HStack(spacing: PulseSpacing.md) {
-            ProgrammeLegendDot(color: .pulseAccent, label: "avant un jour travaillé")
-            ProgrammeLegendDot(color: .pulseAccent.opacity(0.4), label: "avant un jour libre")
+            ProgrammeLegendDot(color: .pulseSleep, label: "avant un jour travaillé")
+            ProgrammeLegendDot(color: .pulseSleep.opacity(0.42), label: "avant un jour libre")
         }
         .font(.system(size: 10, design: .monospaced))
     }

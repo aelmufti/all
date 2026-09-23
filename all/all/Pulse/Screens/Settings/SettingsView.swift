@@ -27,12 +27,14 @@ import UIKit
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
     private let auth = AuthStore.shared
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Paramètres")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbar { SheetCloseButton { dismiss() } }
         }
         .task {
             await viewModel.load()
@@ -237,7 +239,9 @@ private struct SettingsStatusSection: View {
         case "running": return .pulseAccent
         case "ok": return .pulseSuccess
         case "error": return .pulseDanger
-        default: return .pulseTextSecondary
+        // État neutre ("idle") — même jeton que le point du lien BLE côté
+        // écran Statut (`--absent`, distinct de `--text-dim`).
+        default: return .pulseAbsent
         }
     }
 

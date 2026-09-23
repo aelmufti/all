@@ -57,6 +57,48 @@ extension Color {
 
     /// Texte lisible sur `pulseAccent` (boutons pleins…) — SCSS `--on-accent`.
     static let pulseOnAccent = Color(light: 0xFFFFFF, dark: 0x15181B)
+
+    // MARK: Couleurs par métrique — SCSS `--m-*`
+    // Chaque métrique a sa teinte propre dans Pulse ; les tuiles/graphes NE
+    // doivent PAS retomber sur `pulseAccent` bleu. Utiliser ces jetons pour la
+    // valeur, l'icône et les aires de courbe de la métrique correspondante.
+    static let pulseSleep = Color(light: 0x7A5CD8, dark: 0xA98CF0)   // sommeil
+    static let pulseBattery = Color(light: 0x17968A, dark: 0x3FC9B8) // batterie corps
+    static let pulseStress = Color(light: 0xC08519, dark: 0xE0AF49)  // stress
+    static let pulseHR = Color(light: 0xCF4B5C, dark: 0xF0808C)      // fréquence cardiaque
+    static let pulseSteps = Color(light: 0x3F9455, dark: 0x6CC47F)   // pas
+    static let pulseCalories = Color(light: 0xCF6F34, dark: 0xEF9560) // calories
+    static let pulseSpo2 = Color(light: 0x3B8FC4, dark: 0x6CB8E8)    // SpO2
+    static let pulseResp = Color(light: 0xA8547F, dark: 0xD47AB0)    // respiration
+
+    // MARK: Phases de sommeil — SCSS `--p-*`
+    static let pulseSleepDeep = Color(light: 0x2F3F96, dark: 0x7D8AE6)
+    static let pulseSleepLight = Color(light: 0x6F61C9, dark: 0xA794F0)
+    static let pulseSleepRem = Color(light: 0x4AA3D1, dark: 0x6CC0E8)
+    static let pulseSleepAwake = Color(light: 0x9AA0A6, dark: 0x7C848A)
+
+    // MARK: Zones de stress — SCSS `--s-*`
+    static let pulseStressRest = Color(light: 0x8FB6CF, dark: 0x7FA7C0)
+    static let pulseStressLow = Color(light: 0xE0C078, dark: 0xE5CB8F)
+    static let pulseStressMid = Color(light: 0xC08519, dark: 0xE0AF49)
+    static let pulseStressHigh = Color(light: 0xC4483F, dark: 0xEF7D72)
+
+    // MARK: Heatmap (intensité) — SCSS `--heat-*`
+    static let pulseHeat1 = Color(light: 0x2A78D6, dark: 0x5AA3F0)
+    static let pulseHeat2 = Color(light: 0x16815A, dark: 0x35C78D)
+    static let pulseHeat3 = Color(light: 0xA87A05, dark: 0xE0A52C)
+    static let pulseHeat4 = Color(light: 0xB5322C, dark: 0xF26A68)
+
+    // MARK: Surfaces d'alerte — SCSS `--danger-bg/-border/-text`
+    static let pulseDangerBg = Color(light: 0xFAECEB, dark: 0x2C1F1E)
+    static let pulseDangerBorder = Color(light: 0xEDC9C6, dark: 0x4A3230)
+    static let pulseDangerText = Color(light: 0xA13B33, dark: 0xF0A49C)
+
+    // MARK: États vides / squelettes — SCSS `--empty/--absent/--sk-*`
+    static let pulseEmpty = Color(light: 0xC9CCCB, dark: 0x4A5157)
+    static let pulseAbsent = Color(light: 0x8A908E, dark: 0x767E83)
+    static let pulseSkeletonShape = Color(light: 0xE3E5E4, dark: 0x2F353A)
+    static let pulseSkeletonZone = Color(light: 0xEDEFEE, dark: 0x262B30)
 }
 
 // MARK: - Espacements / rayons
@@ -160,6 +202,20 @@ struct SectionHeader<Trailing: View>: View {
                 .foregroundStyle(Color.pulseTextPrimary)
             Spacer()
             trailing
+        }
+    }
+}
+
+/// Bouton « Terminé » standard pour un écran présenté en feuille (`.sheet`)
+/// depuis le menu système (roue crantée). Garantit une sortie explicite —
+/// aucun écran présenté modalement ne doit pouvoir piéger l'utilisateur.
+struct SheetCloseButton: ToolbarContent {
+    let action: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Terminé", action: action)
+                .tint(Color.pulseAccent)
         }
     }
 }

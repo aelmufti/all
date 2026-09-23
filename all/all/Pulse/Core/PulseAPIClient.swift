@@ -19,6 +19,7 @@
 //
 
 import Foundation
+import os
 
 final class PulseAPIClient {
     /// Instance partagée — c'est celle-ci que consomment les écrans et
@@ -60,6 +61,11 @@ final class PulseAPIClient {
     static let encoder: JSONEncoder = {
         JSONEncoder()
     }()
+
+    /// Journal des échecs réseau/décodage (visible dans Console.app, subsystem
+    /// `CleanYourRoom.all`, catégorie `pulse-api`) — complément du message
+    /// affiché à l'écran, pour diagnostiquer précisément une réponse illisible.
+    private static let logger = Logger(subsystem: "CleanYourRoom.all", category: "pulse-api")
 
     private let session: URLSession
     private let baseURLProvider: () -> URL?
@@ -104,8 +110,8 @@ final class PulseAPIClient {
     func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
         var request = try makeRequest(path: path, method: "GET", query: query)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, _) = try await perform(request)
-        return try decode(data)
+        let (data, response) = try await perform(request)
+        return try decode(data, path: path, status: response.statusCode)
     }
 
     /// `POST path` avec un corps `Encodable`.
@@ -113,16 +119,16 @@ final class PulseAPIClient {
         var request = try makeRequest(path: path, method: "POST", query: [:])
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request = try attach(body: body, to: request)
-        let (data, _) = try await perform(request)
-        return try decode(data)
+        let (data, response) = try await perform(request)
+        return try decode(data, path: path, status: response.statusCode)
     }
 
     /// `POST path` sans corps (ex. `api/auth/logout`).
     func post<T: Decodable>(_ path: String) async throws -> T {
         var request = try makeRequest(path: path, method: "POST", query: [:])
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, _) = try await perform(request)
-        return try decode(data)
+        let (data, response) = try await perform(request)
+        return try decode(data, path: path, status: response.statusCode)
     }
 
     /// `PUT path` avec un corps `Encodable`.
@@ -130,8 +136,8 @@ final class PulseAPIClient {
         var request = try makeRequest(path: path, method: "PUT", query: [:])
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request = try attach(body: body, to: request)
-        let (data, _) = try await perform(request)
-        return try decode(data)
+        let (data, response) = try await perform(request)
+        return try decode(data, path: path, status: response.statusCode)
     }
 
     /// `DELETE path`. Pas de corps de réponse exploité par le socle (les
@@ -208,13 +214,106 @@ final class PulseAPIClient {
         return (data, http)
     }
 
-    private func decode<T: Decodable>(_ data: Data) throws -> T {
+    private func decode<T: Decodable>(_ data: Data, path: String, status: Int) throws -> T {
+        // Chemin normal.
         do {
             return try Self.decoder.decode(T.self, from: data)
-        } catch {
-            throw PulseAPIError.decoding(error)
+        } catch let firstError {
+            // Diagnostic : écrit le corps brut fautif dans le conteneur de l'app
+            // pour analyse hors ligne (récupéré via `devicectl`, aucun réseau).
+            Self.dumpFailingBody(data, path: path)
+            // Le parseur natif de `JSONDecoder` (Foundation Swift) rejette parfois
+            // un corps pourtant **valide** que `JSONSerialization` accepte. On
+            // reparse via `JSONSerialization`, on ré-émet un JSON canonique, puis
+            // on redécode. Deux issues :
+            //  - ça décode → c'était un caprice du parseur natif, résolu ;
+            //  - ça échoue encore → c'est un vrai décalage de modèle, et l'erreur
+            //    de CE décodage-ci (clé/type/chemin) est la bonne à remonter, pas
+            //    le « not valid JSON » trompeur du brut.
+            if let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+               let normalized = try? JSONSerialization.data(withJSONObject: object, options: [.fragmentsAllowed]) {
+                do {
+                    let value = try Self.decoder.decode(T.self, from: normalized)
+                    Self.logger.warning("Décodé après normalisation JSONSerialization (\(path, privacy: .public))")
+                    return value
+                } catch let normalizedError {
+                    let detail = Self.decodeFailureDetail(normalizedError, data: normalized, status: status, note: "après normalisation")
+                    Self.logger.error("Décodage échoué (\(path, privacy: .public)) : \(detail, privacy: .public)")
+                    throw PulseAPIError.decoding(PulseDecodingFailure(path: path, detail: detail))
+                }
+            }
+            // `JSONSerialization` n'a pas pu parser non plus : corps réellement
+            // invalide (tronqué, non-UTF-8, HTML de repli, vide…).
+            let detail = Self.decodeFailureDetail(firstError, data: data, status: status, note: "corps non-JSON")
+            Self.logger.error("Décodage échoué (\(path, privacy: .public)) : \(detail, privacy: .public)")
+            throw PulseAPIError.decoding(PulseDecodingFailure(path: path, detail: detail))
         }
     }
+
+    /// Écrit le corps brut d'une réponse non décodable dans
+    /// `Documents/pulse-echec-<endpoint>.json` (récupérable via `devicectl`,
+    /// zéro réseau) pour analyse octet-près hors ligne. Diagnostic temporaire.
+    private static func dumpFailingBody(_ data: Data, path: String) {
+        let name = "pulse-echec-" + path.replacingOccurrences(of: "/", with: "_") + ".json"
+        guard let dir = try? FileManager.default.url(
+            for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true
+        ) else { return }
+        try? data.write(to: dir.appendingPathComponent(name))
+    }
+
+    /// Construit le détail affiché : la clé/type/chemin fautifs (placés **en
+    /// tête**, donc lisibles même si le message est long) + le code HTTP, et —
+    /// pour un corps qui n'est pas du JSON du tout — un aperçu taille/début/fin.
+    private static func decodeFailureDetail(_ error: Error, data: Data, status: Int, note: String) -> String {
+        guard let decodingError = error as? DecodingError else {
+            return "\(note) — \(error) [HTTP \(status)]"
+        }
+        var detail = "\(note) — \(describe(decodingError)) [HTTP \(status)]"
+        if case .dataCorrupted = decodingError {
+            func snippet(_ slice: Data) -> String {
+                (String(data: slice, encoding: .utf8) ?? "\(slice.count) o non-UTF8")
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            detail += " ; taille \(data.count) o ; début: \(snippet(data.prefix(120))) ; fin: \(snippet(data.suffix(120)))"
+        }
+        return detail
+    }
+
+    /// Traduit une `DecodingError` en une phrase courte et exploitable :
+    /// **quelle clé** (ou quel index) et **quel type** ont fait échouer le
+    /// décodage, avec le chemin depuis la racine — pour pointer le champ du
+    /// modèle Swift à corriger vis-à-vis de la vraie réponse de Pulse.
+    private static func describe(_ error: DecodingError) -> String {
+        func pathString(_ context: DecodingError.Context) -> String {
+            let path = context.codingPath
+                .map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }
+                .joined(separator: ".")
+            return path.isEmpty ? "racine" : path
+        }
+        switch error {
+        case .keyNotFound(let key, let context):
+            return "clé manquante « \(key.stringValue) » (sous \(pathString(context)))"
+        case .typeMismatch(let type, let context):
+            return "type inattendu, \(type) attendu à \(pathString(context))"
+        case .valueNotFound(let type, let context):
+            return "valeur nulle inattendue (\(type)) à \(pathString(context))"
+        case .dataCorrupted(let context):
+            return "donnée invalide à \(pathString(context)) : \(context.debugDescription)"
+        @unknown default:
+            return String(describing: error)
+        }
+    }
+}
+
+/// Échec de décodage enrichi : porte l'endpoint et la clé/type fautifs pour
+/// que le message affiché (`ErrorView`) soit directement diagnostique, au lieu
+/// du générique « Réponse illisible ». Transporté dans `PulseAPIError.decoding`
+/// (la forme de l'énum ne change pas).
+struct PulseDecodingFailure: Error, LocalizedError {
+    let path: String
+    let detail: String
+    var errorDescription: String? { "Réponse illisible (\(path)) : \(detail)" }
 }
 
 /// Erreurs typées du socle réseau. Les écrans/`AuthStore` distinguent
@@ -244,8 +343,10 @@ extension PulseAPIError: LocalizedError {
             return "Session expirée — reconnecte-toi."
         case .http(let status, _):
             return "Pulse a répondu \(status)."
-        case .decoding:
-            return "Réponse de Pulse illisible."
+        case .decoding(let error):
+            // Si l'erreur sous-jacente est enrichie (endpoint + clé/type),
+            // on affiche ce détail plutôt que le message générique.
+            return (error as? LocalizedError)?.errorDescription ?? "Réponse de Pulse illisible."
         case .transport:
             return "Pulse est inatteignable."
         }

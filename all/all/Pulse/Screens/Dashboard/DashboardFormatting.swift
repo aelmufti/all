@@ -86,19 +86,17 @@ func dashboardFormatPace(secPerKm: Double) -> String {
 
 // MARK: - Sports (`sports.ts`)
 
-/// Palette qualitative propre à l'écran (les variables SCSS `--m-steps`,
-/// `--m-sleep`, `--m-cal`, `--m-spo2`, `--m-hr`, `--m-stress` n'ont pas
-/// d'équivalent dans `DesignSystem.swift`, qui n'expose que la palette
-/// sémantique accent/success/danger) — couleurs système adaptatives
-/// light/dark, pas besoin de dupliquer l'init `Color(light:dark:)` privée de
-/// `DesignSystem.swift`.
+/// Alias vers la palette par métrique de `DesignSystem.swift` (SCSS `--m-steps`,
+/// `--m-sleep`, `--m-cal`, `--m-spo2`, `--m-hr`, `--m-stress`) — jamais de
+/// couleur système générique ici : chaque métrique garde sa teinte de marque,
+/// jamais un repli sur le bleu `pulseAccent`.
 enum DashboardMetricColor {
-    static let steps = Color.green
-    static let sleep = Color.indigo
-    static let calories = Color.orange
-    static let spo2 = Color.teal
-    static let heartRate = Color.red
-    static let stress = Color.yellow
+    static let steps = Color.pulseSteps
+    static let sleep = Color.pulseSleep
+    static let calories = Color.pulseCalories
+    static let spo2 = Color.pulseSpo2
+    static let heartRate = Color.pulseHR
+    static let stress = Color.pulseStress
 }
 
 private let dashboardSportLabels: [String: String] = [

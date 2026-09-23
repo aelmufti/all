@@ -18,12 +18,14 @@ import SwiftUI
 
 struct StatusView: View {
     @State private var viewModel = StatusViewModel()
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             content
                 .navigationTitle("Statut")
                 .background(Color.pulseBackground)
+                .toolbar { SheetCloseButton { dismiss() } }
         }
         .task { await viewModel.load() }
     }
@@ -118,7 +120,9 @@ private struct StatusLinkCard: View {
         switch viewModel.linkTone {
         case .ok: return .pulseSuccess
         case .bad: return .pulseDanger
-        case .warn, .idle: return .pulseTextSecondary
+        // Web : `.dot { background: var(--absent) }` par défaut (pas
+        // `--text-dim`) — état neutre/inconnu, distinct du texte discret.
+        case .warn, .idle: return .pulseAbsent
         }
     }
 }
