@@ -4,6 +4,32 @@
 > Notes courtes : état + décisions + prochaine étape. Le plan de fond vit dans
 > `CADRAGE.md` (§8 = incréments), les invariants dans `CLAUDE.md`.
 
+## 2026-09-23 — 3 agents Sonnet (Live-2 prépa / Path B web / robustesse), revus Opus, intégrés
+
+Lancés en parallèle (1 & 3 en worktree isolé sur `all`, 2 sur custom-connect), revus Opus,
+intégrés dans l'arbre principal, build+test combiné vert (135 tests), commités+poussés
+(app : `32c2958` ; custom-connect Path B : `07ee8ad`).
+
+1. **Live-2 (préparation, INERTE)** — `all/docs/live2-realtime-design.md` + `RealtimeDecoders.swift`
+   + 20 tests. **Mécanisme tranché : services ML `REALTIME_*` (REGISTER_ML par handle), PAS le
+   protobuf** (la piste `REALTIME_SETTINGS` = `GdiSettingsService` champ 42, déjà mort sur Venu 2).
+   → la règle « pas de swift-protobuf » n'est pas menacée. Décodables (preuve upstream) : FC, pas,
+   accéléromètre, SpO2, respiration, VFC/RR. **Hardware-only** (format non documenté, capture montre
+   requise avant de coder) : calories, intensité, stress, body battery. **Rien n'est activé** :
+   `CommunicatorV2` inchangé, aucun service `REALTIME_*` enregistré, rien ne stream. Pour faire
+   Live-2 « pour de vrai » : décider + câbler l'enregistrement des services + session de capture.
+2. **Path B (client web live phone-aware)** — `custom-connect/web/.../live-hr.service.ts`. Sous
+   source `phone`, un trou transitoire n'abandonne plus la session (`stall()` + auto-reprise) ;
+   bridge inchangé. Source lue via `GET /api/sync/source` (canal existant). **Nécessite un redéploiement
+   serveur pour prendre effet.** Pas de tests web (le projet n'a aucun harnais `.spec.ts`) → valider
+   au navigateur après déploiement.
+3. **Robustesse transferts** — audit des 3 chemins (reprise fragment / CRC invalide / interleaving
+   ARCHIVE) vs le pont : **aucun vrai écart de comportement, AUCUN fix nécessaire** — le port est
+   fidèle. Ajouté 7 tests (`TransferResilienceTests`) + un seam de test non-comportemental
+   `GfdiCommunicating` (protocole extrait de `CommunicatorV2`, `GarminSession.init` retypé dessus ;
+   `BLEManager` inchangé). Note : `docs/robustesse-transferts.md`. Divergence CRC assumée (ré-accusé
+   actif vs attente silencieuse du pont) — jugée meilleure, documentée.
+
 ## 2026-09-23 (validation matériel) — ✅ Live-1a + Live-1b VALIDÉS SUR MATÉRIEL
 
 L'utilisateur confirme : FC native (onglet FC) OK sur device ; et après le correctif de
