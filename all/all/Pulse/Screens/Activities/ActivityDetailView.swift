@@ -45,7 +45,7 @@ struct ActivityDetailView: View {
                     ActivityHeroCard(detail: detail)
 
                     if detail.track.count > 1 {
-                        ActivityMapCard(coordinates: coordinates(from: detail.track))
+                        ActivityMapCard(coordinates: coordinates(from: detail.track), sport: detail.sport)
                     }
 
                     if let streams = detail.streams {
@@ -87,9 +87,9 @@ private struct ActivityHeroCard: View {
             HStack(spacing: PulseSpacing.md) {
                 Image(systemName: ActivitySport.icon(sport: detail.sport))
                     .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Color.pulseOnAccent)
+                    .foregroundStyle(sportTint)
                     .frame(width: 44, height: 44)
-                    .background(Color.pulseAccent)
+                    .background(sportTint.opacity(0.15))
                     .clipShape(Circle())
                 VStack(alignment: .leading, spacing: PulseSpacing.xs) {
                     Text(ActivitySport.label(sport: detail.sport, subSport: detail.subSport))
@@ -105,54 +105,73 @@ private struct ActivityHeroCard: View {
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
                 spacing: PulseSpacing.lg
             ) {
-                StatTile(label: "Durée", value: ActivityFormat.duration(detail.durationS))
+                StatTile(label: "Durée", value: ActivityFormat.duration(detail.durationS), accent: .pulseTextPrimary)
                 if let distanceM = detail.distanceM, distanceM > 0 {
-                    StatTile(label: "Distance", value: ActivityFormat.distanceKm(distanceM) ?? "—")
+                    StatTile(
+                        label: "Distance",
+                        value: ActivityFormat.distanceKm(distanceM) ?? "—",
+                        accent: .pulseTextPrimary
+                    )
                     StatTile(
                         label: "Allure /km",
-                        value: ActivityFormat.pace(durationS: detail.durationS, distanceM: distanceM)
+                        value: ActivityFormat.pace(durationS: detail.durationS, distanceM: distanceM),
+                        accent: .pulseTextPrimary
                     )
                 }
                 if let avgHr = detail.avgHr, avgHr > 0 {
-                    StatTile(label: "FC moy", value: "\(Int(avgHr.rounded()))", accent: .pulseDanger)
+                    StatTile(label: "FC moy", value: "\(Int(avgHr.rounded()))", accent: .pulseHR)
                 }
                 if let maxHr = detail.maxHr, maxHr > 0 {
-                    StatTile(label: "FC max", value: "\(Int(maxHr.rounded()))", accent: .pulseDanger)
+                    StatTile(label: "FC max", value: "\(Int(maxHr.rounded()))", accent: .pulseHR)
                 }
                 if let calories = detail.calories, calories > 0 {
-                    StatTile(label: "kcal", value: "\(Int(calories.rounded()))")
+                    StatTile(label: "kcal", value: "\(Int(calories.rounded()))", accent: .pulseCalories)
                 }
             }
             .padding(.top, PulseSpacing.xs)
         }
+    }
+
+    /// Couleur d'icône par sport — équivalent `<app-sport-icon>` (Angular) :
+    /// jamais l'accent bleu générique, cf. `ActivitySport.color`.
+    private var sportTint: Color {
+        ActivitySport.color(sport: detail.sport)
     }
 }
 
 // MARK: - Carte
 
 /// Parcours GPS — équivalent `.map-card` (Leaflet). Cadrage automatique sur
-/// la trace, marqueurs départ/arrivée.
+/// la trace, marqueurs départ/arrivée. Tracé et marqueur de départ reprennent
+/// la couleur du sport (`sportColor`, Angular `renderMap`/`resolveColor`),
+/// jamais l'accent bleu générique ; l'arrivée reste neutre (`--text`), comme
+/// le front.
 private struct ActivityMapCard: View {
     let coordinates: [CLLocationCoordinate2D]
+    let sport: String?
 
     var body: some View {
         PulseCard {
             SectionHeader("Parcours")
             Map(initialPosition: cameraPosition) {
                 MapPolyline(coordinates: coordinates)
-                    .stroke(Color.pulseAccent, lineWidth: 4)
+                    .stroke(routeColor, lineWidth: 4)
                 if let first = coordinates.first {
                     Marker("Départ", coordinate: first)
-                        .tint(.green)
+                        .tint(routeColor)
                 }
                 if let last = coordinates.last {
                     Marker("Arrivée", coordinate: last)
-                        .tint(Color.pulseDanger)
+                        .tint(Color.pulseTextPrimary)
                 }
             }
             .frame(height: 220)
             .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
         }
+    }
+
+    private var routeColor: Color {
+        ActivitySport.color(sport: sport)
     }
 
     private var cameraPosition: MapCameraPosition {
@@ -272,14 +291,14 @@ private struct ActivityMetricChartCard: View {
     private func chart(for tab: ChartTab) -> some View {
         switch tab {
         case .cardio:
-            lineChart(points(streams.hr), color: .pulseDanger)
+            lineChart(points(streams.hr), color: .pulseHR)
         case .allure:
             let series = points(streams.speed).map { entry in
                 (time: entry.time, value: entry.value > 0.5 ? 1000 / entry.value : 0)
             }
             lineChart(series, color: .pulseAccent)
         case .altitude:
-            lineChart(points(streams.altitude), color: .pulseSuccess)
+            lineChart(points(streams.altitude), color: .pulseSteps)
         }
     }
 
@@ -345,7 +364,7 @@ private struct ActivityMetricChartCard: View {
 private struct ActivityZonesCard: View {
     let zones: [HrZone]
 
-    private static let colors: [Color] = [.pulseAccent, .pulseSuccess, .pulseTextPrimary, .pulseTextSecondary, .pulseDanger]
+    private static let colors: [Color] = [.pulseAccent, .pulseSteps, .pulseCalories, .pulseHR, .pulseDanger]
 
     var body: some View {
         let total = zones.reduce(0.0) { $0 + $1.seconds }

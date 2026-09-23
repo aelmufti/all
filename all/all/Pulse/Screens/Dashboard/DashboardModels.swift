@@ -150,7 +150,7 @@ func dashboardSubViews(for tab: DashboardTab) -> [DashboardSubView] {
 struct DashboardTrainingTab: Decodable, Equatable {
     let days: Int
     let count: Int
-    let totalS: Int
+    let totalS: Double
     let perWeek: Double
     let avgHr: Int?
     let activeKcal: Int
@@ -166,7 +166,7 @@ struct DashboardTrainingWeek: Decodable, Equatable, Identifiable {
     let week: String
     let label: String
     let load: Int
-    let durationS: Int
+    let durationS: Double
     let sessions: Int
     let avg4: Int?
     let overload: Bool
@@ -176,7 +176,7 @@ struct DashboardTrainingWeek: Decodable, Equatable, Identifiable {
 
 struct DashboardSportShare: Decodable, Equatable, Identifiable {
     let sport: String
-    let durationS: Int
+    let durationS: Double
     let pct: Int
 
     var id: String { sport }
@@ -189,7 +189,7 @@ struct DashboardStreak: Decodable, Equatable {
 
 struct DashboardZone: Decodable, Equatable, Identifiable {
     let zone: Int
-    let seconds: Int
+    let seconds: Double
 
     var id: Int { zone }
 }
@@ -215,14 +215,15 @@ struct DashboardPeriodRecord: Decodable, Equatable {
 
 struct DashboardHealthTab: Decodable, Equatable {
     let days: Int
-    let restingHr: Int?
+    let restingHr: Double?
     let respiration: Double?
     let spo2Night: Double?
     let stress: Int?
     let weightKg: Double?
     let sleepHours: Double?
     let restingSeries: [DashboardHealthPoint]
-    let restingDelta: Int?
+    // FC de repos = moyenne fractionnaire (ex. `46.4`) → `Double?` (et non `Int`).
+    let restingDelta: Double?
     let respirationSeries: [DashboardHealthPoint]
     let respirationBand: DashboardRange?
     let spo2Buckets: [DashboardSpo2Bucket]

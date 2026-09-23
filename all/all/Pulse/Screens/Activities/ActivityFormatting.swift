@@ -17,6 +17,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 /// Libellés/icônes par sport — mêmes clés que le front (`running`,
 /// `training`, `walking`...).
@@ -108,6 +109,27 @@ enum ActivitySport {
 
     static func icon(sport: String?) -> String {
         icons[sport ?? ""] ?? "figure.mixed.cardio"
+    }
+
+    /// Couleur par sport — équivalent `sportColor`/`SPORT_COLORS` (Angular,
+    /// `core/sports.ts`) : chaque sport reprend la teinte d'une métrique
+    /// (course/marche → vert « pas », vélo → rose « FC », escalade → orange
+    /// « calories »…), jamais l'accent bleu générique. Repli neutre
+    /// (`--text-dim`) pour un sport non mappé, comme le front.
+    private static let colors: [String: Color] = [
+        "running": .pulseSteps,
+        "training": .pulseSleep,
+        "walking": .pulseSteps,
+        "rockClimbing": .pulseCalories,
+        "floorClimbing": .pulseCalories,
+        "swimming": .pulseSpo2,
+        "cycling": .pulseHR,
+        "rowing": .pulseSpo2,
+        "racket": .pulseStress,
+    ]
+
+    static func color(sport: String?) -> Color {
+        colors[sport ?? ""] ?? .pulseTextSecondary
     }
 
     static func exerciseName(_ category: String?) -> String {

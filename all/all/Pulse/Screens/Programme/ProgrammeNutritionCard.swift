@@ -38,9 +38,7 @@ struct ProgrammeNutritionCard: View {
             .padding(.top, PulseSpacing.xs)
 
             if detail.weightKg == nil {
-                Text("Aucun poids enregistré : les cibles par kilo restent vides.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseDanger)
+                ProgrammeWarnBox(text: "Aucun poids enregistré : les cibles par kilo restent vides.")
             }
 
             ForEach(domain.active?.notes ?? [], id: \.self) { note in
@@ -117,11 +115,15 @@ private struct ProgrammeMacroGaugeRow: View {
         return "\(Int(value.rounded()))\(unit.isEmpty ? "" : " " + unit)"
     }
 
+    /// Équivalent `MARKER_COLOR` (`macro-gauge.component.ts`) : "sous la
+    /// cible" reprend `--m-stress`, quel que soit le macro (protéines,
+    /// glucides, lipides ou kcal) — le web n'a pas de teinte dédiée aux
+    /// calories sur cet écran, uniquement ce statut par cible.
     private var color: Color {
         switch rule.status {
         case .hit: return .pulseSuccess
         case .over: return .pulseDanger
-        case .under: return .pulseAccent
+        case .under: return .pulseStress
         case .unknown: return .pulseTextSecondary
         }
     }

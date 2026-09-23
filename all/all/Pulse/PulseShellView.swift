@@ -2,146 +2,161 @@
 //  PulseShellView.swift
 //  all (bridge-connect)
 //
-//  Coquille de navigation post-login : Pulse devient la coquille de l'app
-//  (cf. CLAUDE.md), les fonctions collecteur existantes (BLE diag + Temps
-//  réel) passent en section secondaire « Montre ».
+//  Coquille de navigation post-login. Reproduit **1-1** la barre de navigation
+//  mobile du front Pulse (`custom-connect/web/src/app/app.component.ts`) : une
+//  barre d'onglets plate en bas à **6 destinations**, dans le même ordre —
+//  Accueil · Activités · Santé · Nutrition · Programme · Statistiques.
 //
-//  Point d'extension pour les agents d'écran suivants : chaque cas de
-//  `PulseTab` a un commentaire `// TODO(écran …)` qui indique quoi brancher
-//  et où. Remplacer le contenu du `case` correspondant dans le `switch` de
-//  `PulseShellView.body` par le vrai écran — ne pas toucher aux autres cas,
-//  ni à `PulseTab`, ni à `WatchSectionView` (section « Montre », déjà
-//  branchée sur les vues collecteur existantes, ne pas la modifier).
+//  iOS `TabView` ne montre que 5 onglets avant de replier le 6ᵉ dans un « More »
+//  système (le fouillis qu'on veut éviter). On construit donc une **barre
+//  d'onglets maison** (`PulseTabBar`) posée en `safeAreaInset` sous le contenu,
+//  stylée comme le web (fond `--surface`, bord haut `--border`, actif `--accent`).
+//
+//  Les fonctions **secondaires / propres à l'iPhone** (Paramètres, Statut,
+//  Rapport SpO2, et la section collecteur « Montre » = BLE) ne sont PAS dans la
+//  barre — comme sur le web où Paramètres est hors barre mobile. Elles vivent
+//  derrière la **roue crantée** en haut de l'Accueil (`SystemMenuView`), en
+//  feuille, chacune avec une sortie explicite (`SheetCloseButton`).
+//
+//  Chaque écran d'onglet possède déjà sa propre `NavigationStack` — on les
+//  garde vivants (lazy : instanciés au premier passage puis conservés) pour ne
+//  pas recharger les données à chaque bascule d'onglet.
 //
 
 import SwiftUI
 
-/// Onglets de la coquille. `Hashable` pour servir de `selection` à `TabView`
-/// (permet à un futur écran de forcer l'onglet actif, ex. après une action).
-enum PulseTab: Hashable {
+/// Les 6 onglets primaires, dans l'ordre exact de la barre web.
+enum PulseTab: String, CaseIterable, Identifiable {
     case accueil
-    case sante
     case activites
+    case sante
     case nutrition
-    case plus
-    /// Section secondaire — collecteur BLE existant, pas un écran Pulse.
-    case montre
+    case programme
+    case statistiques
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .accueil: return "Accueil"
+        case .activites: return "Activités"
+        case .sante: return "Santé"
+        case .nutrition: return "Nutrition"
+        case .programme: return "Programme"
+        case .statistiques: return "Stats"
+        }
+    }
+
+    /// SF Symbol au plus proche de l'icône Material du web
+    /// (schedule · directions_run · favorite · restaurant · calendar_month · bar_chart).
+    var icon: String {
+        switch self {
+        case .accueil: return "clock"
+        case .activites: return "figure.run"
+        case .sante: return "heart.fill"
+        case .nutrition: return "fork.knife"
+        case .programme: return "calendar"
+        case .statistiques: return "chart.bar.fill"
+        }
+    }
 }
 
 struct PulseShellView: View {
-    @State private var selection: PulseTab = .accueil
+    @State private var tab: PulseTab = .accueil
+    /// Onglets déjà visités — instanciés une fois puis conservés (état + scroll
+    /// préservés, pas de rechargement réseau à chaque bascule).
+    @State private var visited: Set<PulseTab> = [.accueil]
 
     var body: some View {
-        TabView(selection: $selection) {
-            // Écran Accueil (page Angular `/`, entraînement + intensité du jour) —
-            // `HomeView` est auto-suffisante (possède sa propre `NavigationStack`).
-            HomeView()
-                .tabItem { Label("Accueil", systemImage: "house.fill") }
-                .tag(PulseTab.accueil)
-
-            // Écran Santé (page `/health` — FC, stress, SpO2, sommeil,
-            // intensité du jour, poids).
-            HealthView()
-                .tabItem { Label("Santé", systemImage: "heart.fill") }
-                .tag(PulseTab.sante)
-
-            // Écran Activités (liste `/activities` + détail `/activity/:id`) —
-            // `ActivitiesView` possède sa propre `NavigationStack` et pousse
-            // `ActivityDetailView`.
-            ActivitiesView()
-                .tabItem { Label("Activités", systemImage: "figure.run") }
-                .tag(PulseTab.activites)
-
-            // Écran Nutrition (page `/nutrition` — macros/objectif/journal du jour).
-            NutritionView()
-                .tabItem { Label("Nutrition", systemImage: "fork.knife") }
-                .tag(PulseTab.nutrition)
-
-            // Hub « Plus » (`PlusView`) : accès aux écrans sans onglet primaire
-            // — Tableau de bord, Programme, Rapport SpO2, Paramètres, Statut.
-            PlusView()
-                .tabItem { Label("Plus", systemImage: "ellipsis.circle.fill") }
-                .tag(PulseTab.plus)
-
-            // Section secondaire : collecteur BLE existant (ne pas modifier
-            // `BLEDiagnosticView`/`RealtimeMetricsView`, définies dans
-            // `all/BLE/`). Ne pas brancher de nouvel écran ici.
-            WatchSectionView()
-                .tabItem { Label("Montre", systemImage: "antenna.radiowaves.left.and.right") }
-                .tag(PulseTab.montre)
-        }
-        .tint(Color.pulseAccent)
-    }
-}
-
-/// Section secondaire « Montre » : les deux vues collecteur existantes
-/// (`BLEDiagnosticView`, `RealtimeMetricsView`) ont chacune déjà leur propre
-/// `NavigationStack` interne — les re-wrapper dans une troisième (via
-/// `NavigationLink` depuis un `NavigationStack` extérieur, ou un sous-`TabView`
-/// qui empilerait une deuxième barre d'onglets) double les barres de
-/// navigation. Un sélecteur segmenté au-dessus évite le problème sans toucher
-/// aux deux vues.
-private struct WatchSectionView: View {
-    private enum Screen: String, CaseIterable, Identifiable {
-        case diagnostic = "Diagnostic"
-        case realtime = "Temps réel"
-        var id: String { rawValue }
-    }
-
-    @State private var screen: Screen = .diagnostic
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("Vue", selection: $screen) {
-                ForEach(Screen.allCases) { screen in
-                    Text(screen.rawValue).tag(screen)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(PulseSpacing.md)
-
-            Group {
-                switch screen {
-                case .diagnostic:
-                    BLEDiagnosticView()
-                case .realtime:
-                    RealtimeMetricsView()
+        ZStack {
+            ForEach(PulseTab.allCases) { candidate in
+                if visited.contains(candidate) {
+                    screen(for: candidate)
+                        .opacity(candidate == tab ? 1 : 0)
+                        .allowsHitTesting(candidate == tab)
+                        .zIndex(candidate == tab ? 1 : 0)
                 }
             }
         }
-        .background(Color.pulseBackground)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            PulseTabBar(selection: $tab)
+        }
+        .onChange(of: tab) { _, newTab in
+            visited.insert(newTab)
+        }
+    }
+
+    @ViewBuilder
+    private func screen(for tab: PulseTab) -> some View {
+        switch tab {
+        case .accueil: HomeView()
+        case .activites: ActivitiesView()
+        case .sante: HealthView()
+        case .nutrition: NutritionView()
+        case .programme: ProgrammeView()
+        case .statistiques: DashboardView()
+        }
     }
 }
 
-/// Placeholder générique « à venir » — remplacé onglet par onglet à mesure
-/// que les écrans réels sont branchés (voir TODO dans `PulseShellView.body`).
-private struct ComingSoonView: View {
-    let title: String
-    let systemImage: String
+/// Barre d'onglets maison — reproduction de `.nav` (mobile) du front Pulse :
+/// fond `--surface`, filet haut `--border`, item actif `--accent`, inactif
+/// `--text-dim`, léger « scale » à l'appui.
+struct PulseTabBar: View {
+    @Binding var selection: PulseTab
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: PulseSpacing.lg) {
-                PulseCard {
-                    VStack(spacing: PulseSpacing.md) {
-                        Image(systemName: systemImage)
-                            .font(.system(size: 40))
-                            .foregroundStyle(Color.pulseAccent)
-                        Text("\(title) — à venir")
-                            .font(PulseFont.sectionTitle)
-                            .foregroundStyle(Color.pulseTextPrimary)
-                        Text("Cet écran sera branché sur l'API Pulse dans un prochain incrément.")
-                            .font(.footnote)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .padding(PulseSpacing.lg)
-                Spacer()
+        HStack(spacing: 0) {
+            ForEach(PulseTab.allCases) { tab in
+                TabBarButton(
+                    tab: tab,
+                    isSelected: selection == tab,
+                    action: { selection = tab }
+                )
             }
-            .background(Color.pulseBackground)
-            .navigationTitle(title)
+        }
+        .frame(height: 54)
+        .padding(.top, 6)
+        .background(
+            Color.pulseSurface
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.pulseBorder)
+                        .frame(height: 0.5)
+                }
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    private struct TabBarButton: View {
+        let tab: PulseTab
+        let isSelected: Bool
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 3) {
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 21, weight: isSelected ? .semibold : .regular))
+                    Text(tab.label)
+                        .font(.system(size: 10, weight: .medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                .foregroundStyle(isSelected ? Color.pulseAccent : Color.pulseTextSecondary)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(TabBarButtonStyle())
+        }
+    }
+
+    /// Enfonce l'icône (scale 0.88) à l'appui — écho de `.nav a:active .ms` du web.
+    private struct TabBarButtonStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .scaleEffect(configuration.isPressed ? 0.9 : 1)
+                .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
         }
     }
 }

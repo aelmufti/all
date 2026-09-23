@@ -324,7 +324,7 @@ final class HealthViewModel {
 
     var nightSpo2: NightSpo2? {
         guard let main = day?.sleep.main, let spo2 = day?.spo2, !spo2.isEmpty else { return nil }
-        let inside = spo2.filter { $0.ts >= main.from && $0.ts <= main.to }.map(\.value)
+        let inside = spo2.filter { $0.ts >= Double(main.from) && $0.ts <= Double(main.to) }.map(\.value)
         guard !inside.isEmpty else { return nil }
         let mean = inside.reduce(0, +) / Double(inside.count)
         return NightSpo2(

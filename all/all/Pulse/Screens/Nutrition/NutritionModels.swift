@@ -19,8 +19,10 @@
 //  cet écran, donc absents des structs ci-dessous — `Decodable` ignore les
 //  clés JSON en trop) : détail de calcul de l'objectif (`detail.sessions`,
 //  bonus de protéines, plan de macros du programme…), réglages bruts
-//  (`settings`), historique de dates (`history`), recherche/scan/aliments
-//  (`foods`, `search`, `barcode`) — cf. rendu final pour la justification.
+//  (`settings`), historique de dates (`history`), code-barres
+//  (`barcode/:code` — scan non repris, cf. rendu de l'agent). La recherche
+//  (`foods`, `search`) et l'écriture bibliothèque (`foods` POST/PUT) sont en
+//  revanche couvertes plus bas (ajout d'aliment).
 //
 
 import Foundation
@@ -235,4 +237,41 @@ struct NutritionLogRequest: Encodable {
 
 struct NutritionLogResponse: Decodable {
     let id: Int
+}
+
+// MARK: - Ajout d'un aliment (`GET foods`, `GET search`, `POST/PUT foods`)
+
+/// Fiche aliment « légère » — forme commune aux trois sources que propose
+/// l'ajout : la bibliothèque locale (`GET api/nutrition/foods?q=`, `id`
+/// renseigné), Open Food Facts (`GET api/nutrition/search?q=`, `id` absent —
+/// `Omit<Food, 'id'>` côté serveur) et le résultat d'un aliment fréquent
+/// repris pour édition (construit côté client, cf. `NutritionViewModel.pick`).
+/// Miroir de l'interface `FoodLite` (Angular).
+struct NutritionFoodLite: Decodable {
+    let id: Int?
+    let barcode: String?
+    let name: String
+    let kcal: Double?
+    let protein: Double?
+    let carbs: Double?
+    let fiber: Double?
+    let fat: Double?
+    let unitLabel: String?
+    let unitGrams: Double?
+}
+
+/// Corps de `POST api/nutrition/foods` / `PUT api/nutrition/foods/:id` —
+/// enregistrement dans la bibliothèque personnelle (case « Enregistrer dans
+/// ma bibliothèque » de la saisie manuelle). Miroir de `Partial<Food>` côté
+/// serveur (`NutritionController.createFood`/`updateFood`).
+struct NutritionFoodCreateRequest: Encodable {
+    var name: String
+    var barcode: String?
+    var kcal: Double?
+    var protein: Double?
+    var carbs: Double?
+    var fiber: Double?
+    var fat: Double?
+    var unitLabel: String?
+    var unitGrams: Double?
 }

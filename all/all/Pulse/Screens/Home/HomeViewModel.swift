@@ -2,16 +2,16 @@
 //  HomeViewModel.swift
 //  all (bridge-connect)
 //
-//  View-model de l'écran Accueil — port de la logique de calcul de
-//  `custom-connect/web/src/app/pages/home/home.component.ts`, restreint au
-//  périmètre annoncé par `PulseShellView` (« entraînement + intensité du
-//  jour ») + FC « Maintenant » en option. Le sommeil, les pas/calories et la
-//  nutrition (sections « Depuis le réveil »/« Nuit dernière » côté Angular)
-//  ne sont pas repris ici : ils appartiennent à l'écran Santé.
+//  View-model de l'écran Accueil — port 1-1 de la logique de calcul de
+//  `custom-connect/web/src/app/pages/home/home.component.ts` : FC
+//  « Maintenant », entraînement de la semaine + intensité, séance du
+//  jour/à venir, « Depuis le réveil » (pas/calories) et « Nuit dernière »
+//  (durée, hypnogramme, régularité du coucher).
 //
-//  Trois requêtes bloquantes (jour + activités + programme), l'intensité et
-//  la FC en direct sont best-effort (une erreur n'empêche pas le reste de
-//  s'afficher, comme `loadIntensity()` côté Angular).
+//  La requête jour + activités est bloquante ; programme, intensité, FC en
+//  direct, dette de sommeil et nutrition sont best-effort (une erreur
+//  n'empêche pas le reste de s'afficher, comme `loadSideData()` côté
+//  Angular).
 //
 
 import Foundation
@@ -62,6 +62,68 @@ final class HomeViewModel {
         let doneLabel: String
     }
 
+    // MARK: - « Depuis le réveil »
+
+    struct WakeDelta {
+        let sign: String
+        let value: Double
+        let hit: Bool
+    }
+
+    struct WakeMetric: Identifiable {
+        let id: String
+        let label: String
+        let value: Double?
+        /// Part de l'objectif atteinte (0…1+), `nil` sans objectif connu —
+        /// position du point de jauge (`gauge().top` côté Angular).
+        let reached: Double?
+        let delta: WakeDelta?
+    }
+
+    // MARK: - « Nuit dernière »
+
+    struct NightDelta {
+        let label: String
+        let short: Bool
+    }
+
+    struct NightMissing {
+        let title: String
+        let sub: String
+    }
+
+    struct HypnogramBlock: Identifiable {
+        let id: Int
+        let stage: HomeSleepStageKind
+        let width: Double
+    }
+
+    struct BedtimeDot: Identifiable {
+        var id: String { date }
+        let date: String
+        /// Position 0…1 le long de la bande — équivalent fraction de
+        /// `d.at` (pourcentage) côté Angular.
+        let at: Double
+        let free: Bool
+        let title: String
+    }
+
+    struct BedtimeTick: Identifiable {
+        let id = UUID()
+        let at: Double
+        let label: String
+    }
+
+    struct Bedtime {
+        let clock: String
+        let bandLeft: Double
+        let bandWidth: Double
+        let meanAt: Double
+        let dots: [BedtimeDot]
+        let ticks: [BedtimeTick]
+        let note: String
+    }
+
     private(set) var state: LoadState = .loading
 
     private(set) var day: HomeDayDetail?
@@ -69,6 +131,10 @@ final class HomeViewModel {
     private(set) var programme: [HomeProgrammeDomain] = []
     private(set) var intensity: HomeIntensityReport?
     private(set) var live: HomeLiveHeartRate?
+    private(set) var sleepDebt: HomeSleepDebt?
+    private(set) var dayTarget: HomeDayTargetAuto?
+    private(set) var intake: HomeNutritionAmount?
+    private(set) var intakeTarget: HomeNutritionAmount?
 
     private let client: PulseAPIClient
 
@@ -103,7 +169,9 @@ final class HomeViewModel {
             async let programmeTask = loadProgramme(date: today)
             async let intensityTask = loadIntensity()
             async let liveTask = refreshLive()
-            _ = await (programmeTask, intensityTask, liveTask)
+            async let sleepDebtTask = loadSleepDebt()
+            async let nutritionTask = loadNutrition(date: today)
+            _ = await (programmeTask, intensityTask, liveTask, sleepDebtTask, nutritionTask)
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -124,6 +192,37 @@ final class HomeViewModel {
             intensity = try await client.get("api/wellness/intensity")
         } catch {
             intensity = nil
+        }
+    }
+
+    /// `GET api/stats/sleep-debt` — alimente `nightDelta` (écart de la nuit
+    /// affichée vs l'habitude récente), `sleepDebt()` côté Angular.
+    private func loadSleepDebt() async {
+        do {
+            sleepDebt = try await client.get("api/stats/sleep-debt")
+        } catch {
+            sleepDebt = nil
+        }
+    }
+
+    /// `GET api/nutrition/day/:date` + `GET api/nutrition/targets` —
+    /// alimente la jauge « Cal. mangées » de « Depuis le réveil »,
+    /// `loadSideData()` côté Angular.
+    private func loadNutrition(date: String) async {
+        do {
+            async let dayTask: HomeNutritionDayResponse = client.get("api/nutrition/day/\(date)")
+            async let targetsTask: HomeNutritionTargetsResponse = client.get(
+                "api/nutrition/targets", query: ["date": date])
+            let day = try await dayTask
+            let targets = try await targetsTask
+            // Miroir de `intake.set(day.entries.length > 0 ? day.totals : null)`.
+            intake = day.entries.isEmpty ? nil : day.totals
+            intakeTarget = day.targets
+            dayTarget = targets.auto
+        } catch {
+            intake = nil
+            intakeTarget = nil
+            dayTarget = nil
         }
     }
 
@@ -165,7 +264,7 @@ final class HomeViewModel {
     }
 
     var lastHr: Int? { Self.last(day?.hr ?? []) }
-    var restingHr: Int? { day?.summary.restingHr }
+    var restingHr: Int? { day?.summary.restingHr.map { Int($0.rounded()) } }
 
     /// FC affichée : le direct s'il est fiable, sinon le dernier relevé du jour.
     var shownHr: Int? {
@@ -411,6 +510,172 @@ final class HomeViewModel {
         )
     }
 
+    // MARK: - « Depuis le réveil »
+
+    private static let stepGoal = 10_000.0
+    private static let paceBandTolerance = 0.06
+
+    /// Fraction du jour écoulée (0…1) — `elapsed()` côté Angular : figée à 1
+    /// pour un jour périmé (plus de rythme à suivre), sinon l'heure actuelle.
+    private var elapsed: Double {
+        if staleLabel != nil { return 1 }
+        let now = Date()
+        let minutes = Double(
+            Calendar.current.component(.hour, from: now) * 60
+                + Calendar.current.component(.minute, from: now))
+        return min(minutes / 1440, 1)
+    }
+
+    var wake: [WakeMetric] {
+        let summary = day?.summary
+        let e = elapsed
+        let burned = Self.sum(summary?.bmrKcal.map { $0 * e }, summary?.activeCalories)
+        return [
+            Self.gauge(id: "steps", label: "Pas marchés", value: summary?.steps, goal: Self.stepGoal, elapsed: e),
+            Self.gauge(
+                id: "burned", label: "Cal. brûlées", value: burned,
+                goal: dayTarget?.expenditureKcal, elapsed: e),
+            Self.gauge(
+                id: "eaten", label: "Cal. mangées", value: intake?.kcal,
+                goal: intakeTarget?.kcal, elapsed: e),
+        ]
+    }
+
+    private static func sum(_ values: Double?...) -> Double? {
+        let present = values.compactMap { $0 }
+        return present.isEmpty ? nil : present.reduce(0, +)
+    }
+
+    private static func gauge(id: String, label: String, value: Double?, goal: Double?, elapsed: Double)
+        -> WakeMetric
+    {
+        let reached: Double? = {
+            guard let value, let goal, goal > 0 else { return nil }
+            return min(value / goal, 1)
+        }()
+        return WakeMetric(
+            id: id, label: label, value: value, reached: reached,
+            delta: paceDelta(value: value, goal: goal, elapsed: elapsed))
+    }
+
+    private static func paceDelta(value: Double?, goal: Double?, elapsed: Double) -> WakeDelta? {
+        guard let value, let goal else { return nil }
+        let pace = goal * elapsed
+        let diff = value - pace
+        if abs(diff) <= max(pace * paceBandTolerance, 1) {
+            return WakeDelta(sign: "±", value: 0, hit: true)
+        }
+        return WakeDelta(sign: diff < 0 ? "−" : "+", value: abs(diff).rounded(), hit: false)
+    }
+
+    // MARK: - « Nuit dernière »
+
+    var nightDurationLabel: String? {
+        guard let seconds = day?.sleep.main?.durationS, seconds > 0 else { return nil }
+        let hours = Int(seconds / 3600)
+        let minutes = Int((seconds.truncatingRemainder(dividingBy: 3600) / 60).rounded())
+        return "\(hours) h \(String(format: "%02d", minutes))"
+    }
+
+    var nightDelta: NightDelta? {
+        guard let seconds = day?.sleep.main?.durationS, seconds > 0,
+            let habitHours = sleepDebt?.avgHours, habitHours > 0
+        else { return nil }
+        let deltaMin = Int((seconds / 60 - habitHours * 60).rounded())
+        if abs(deltaMin) < 10 { return NightDelta(label: "conforme à ton habitude", short: false) }
+        let sign = deltaMin < 0 ? "−" : "+"
+        let absMin = abs(deltaMin)
+        let label = "\(sign)\(absMin / 60) h \(String(format: "%02d", absMin % 60)) vs habitude"
+        return NightDelta(label: label, short: deltaMin < 0)
+    }
+
+    var nightMissing: NightMissing {
+        guard let date = day?.date else {
+            return NightMissing(
+                title: "Aucun relevé importé.",
+                sub: "La nuit apparaîtra après la première synchronisation.")
+        }
+        return NightMissing(
+            title: "La montre n'a pas rendu la nuit du \(Self.shortDate(date)).",
+            sub: "Elle s'affichera dès que son fichier de sommeil sera importé.")
+    }
+
+    var hypnogram: [HypnogramBlock]? {
+        let stages = day?.sleep.stages ?? []
+        guard !stages.isEmpty else { return nil }
+        return stages.enumerated().map { index, stage in
+            HypnogramBlock(id: index, stage: stage.stage, width: max(Double(stage.to - stage.from), 1))
+        }
+    }
+
+    // MARK: - Coucher moyen (régularité, domaine `sleep` du programme)
+
+    private var sleepDomain: HomeProgrammeDomain? {
+        programme.first { $0.kind == "sleep" && $0.active != nil }
+    }
+
+    private static let bedtimeSpreadMinSpan = 180.0
+
+    /// Port de `bedtime()` côté Angular — axe de coucher (moyenne ± écart
+    /// type) + un point par nuit récente, en fractions 0…1 (la vue applique
+    /// la largeur réelle via `GeometryReader`, pas de pourcentages ici).
+    var bedtime: Bedtime? {
+        guard let detail = sleepDomain?.detail,
+            let axis = detail.axis,
+            let strip = detail.strip, !strip.isEmpty
+        else { return nil }
+
+        let onsets = strip.map { $0.onset }
+        let low = min(onsets.min() ?? axis.onsetMean, axis.onsetMean - axis.onsetSd)
+        let high = max(onsets.max() ?? axis.onsetMean, axis.onsetMean + axis.onsetSd)
+        let pad = max(25, (high - low) * 0.15)
+        var start = ((low - pad) / 30).rounded(.down) * 30
+        var end = ((high + pad) / 30).rounded(.up) * 30
+        if end - start < Self.bedtimeSpreadMinSpan {
+            let middle = (start + end) / 2
+            start = ((middle - Self.bedtimeSpreadMinSpan / 2) / 30).rounded(.down) * 30
+            end = start + Self.bedtimeSpreadMinSpan
+        }
+        let span = end - start
+        guard span > 0 else { return nil }
+        func at(_ minute: Double) -> Double { (minute - start) / span }
+
+        let step: Double = span <= 240 ? 60 : 120
+        var ticks: [BedtimeTick] = []
+        var minute = (start / step).rounded(.up) * step
+        while minute <= end {
+            let pos = at(minute)
+            if pos >= 0.07 && pos <= 0.93 {
+                ticks.append(BedtimeTick(at: pos, label: Self.tickHourLabel(minute)))
+            }
+            minute += step
+        }
+
+        let nights = detail.nights ?? strip.count
+        let stale = (detail.staleDays ?? 0) > 3 && detail.to != nil
+        let scope =
+            stale
+            ? "jusqu'au \(Self.shortDate(detail.to!))"
+            : "à \(Int(axis.onsetSd.rounded())) min près"
+
+        let dots = strip.map { night in
+            BedtimeDot(
+                date: night.date,
+                at: min(max(at(night.onset), 0), 1),
+                free: !night.workDay,
+                title: "\(Self.shortDate(night.date)) · coucher \(Self.clockLabel(night.onset))")
+        }
+
+        return Bedtime(
+            clock: Self.clockLabel(axis.onsetMean),
+            bandLeft: at(axis.onsetMean - axis.onsetSd),
+            bandWidth: at(axis.onsetMean + axis.onsetSd) - at(axis.onsetMean - axis.onsetSd),
+            meanAt: at(axis.onsetMean),
+            dots: dots,
+            ticks: ticks,
+            note: "\(nights) nuits · \(scope) · \(detail.hits ?? 0)/\(detail.total ?? 0) critères")
+    }
+
     // MARK: - Utilitaires de date (miroir des fonctions libres du composant Angular)
 
     static func todayKey() -> String {
@@ -469,6 +734,29 @@ final class HomeViewModel {
         let parts = iso.split(separator: "-")
         guard parts.count == 3 else { return iso }
         return "\(parts[2])/\(parts[1])"
+    }
+
+    /// Convertit une valeur en « espace axe » serveur (origine décalée de
+    /// 12 h, cf. `HomeSleepAxis`) en heure d'horloge lisible — miroir de
+    /// `clockLabel()` côté Angular.
+    static func clockLabel(_ axisMinutes: Double) -> String {
+        let wrapped =
+            (axisMinutes.truncatingRemainder(dividingBy: 1440) + 1440)
+            .truncatingRemainder(dividingBy: 1440)
+        let minuteOfDay = Int(((wrapped + 720).truncatingRemainder(dividingBy: 1440)).rounded())
+        let hours = (minuteOfDay / 60) % 24
+        return "\(hours) h \(String(format: "%02d", minuteOfDay % 60))"
+    }
+
+    /// Étiquette d'une graduation de la bande de régularité — juste l'heure,
+    /// sans les minutes (les graduations tombent toujours sur une heure
+    /// ronde, pas de perte d'info). Miroir de la ligne `label:` inline du
+    /// calcul de `ticks` côté Angular (`bedtime()`).
+    static func tickHourLabel(_ axisMinute: Double) -> String {
+        let hoursFloat = axisMinute / 60 + 12
+        var mod = hoursFloat.truncatingRemainder(dividingBy: 24)
+        if mod < 0 { mod += 24 }
+        return "\(Int(mod.rounded(.down))) h"
     }
 
     static func whenLabel(_ plannedOn: String?, today: String) -> String? {

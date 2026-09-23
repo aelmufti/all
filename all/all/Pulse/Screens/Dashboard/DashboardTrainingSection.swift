@@ -42,7 +42,7 @@ struct DashboardTrainingSection: View {
     private func figures(for training: DashboardTrainingTab) -> [DashboardFigure] {
         [
             DashboardFigure(label: "Séances", value: "\(training.count)"),
-            DashboardFigure(label: "Volume", value: dashboardFormatHM(training.totalS)),
+            DashboardFigure(label: "Volume", value: dashboardFormatHM(Int(training.totalS))),
             DashboardFigure(label: "Séances / sem.", value: String(format: "%.1f", training.perWeek)),
             DashboardFigure(label: "FC moy. effort", value: training.avgHr.map { "\($0)" } ?? "—"),
             DashboardFigure(label: "kcal actives", value: "\(training.activeKcal)"),
@@ -74,7 +74,7 @@ private struct DashboardTrainingLoadCard: View {
                             x: .value("Semaine", week.label),
                             y: .value("Charge", week.load)
                         )
-                        .foregroundStyle(week.overload ? Color.pulseDanger : Color.pulseAccent.opacity(0.85))
+                        .foregroundStyle(week.overload ? DashboardMetricColor.stress : Color.pulseAccent.opacity(0.85))
                         if let avg4 = week.avg4 {
                             LineMark(
                                 x: .value("Semaine", week.label),
@@ -94,12 +94,12 @@ private struct DashboardTrainingLoadCard: View {
 
                 DashboardLegendRow(items: [
                     (Color.pulseAccent.opacity(0.85), "charge de la semaine"),
-                    (Color.pulseDanger, "surcharge · plus de 130 % de la moyenne"),
+                    (DashboardMetricColor.stress, "surcharge · plus de 130 % de la moyenne"),
                     (DashboardMetricColor.stress, "moyenne des 4 semaines précédentes"),
                 ])
             }
 
-            Text("Charge = durée × intensité relative. Une semaine à plus de 130 % de la moyenne des quatre précédentes est marquée : c'est là que les blessures arrivent.")
+            Text("Charge = durée × intensité relative. Une semaine à plus de 130 % de la moyenne des quatre précédentes est marquée en ambre : c'est là que les blessures arrivent.")
                 .font(.footnote)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
@@ -126,7 +126,7 @@ private struct DashboardSportShareCard: View {
                                 .font(.subheadline)
                                 .foregroundStyle(Color.pulseTextPrimary)
                             Spacer()
-                            Text(dashboardFormatHM(share.durationS))
+                            Text(dashboardFormatHM(Int(share.durationS)))
                                 .font(PulseFont.metricUnit)
                                 .foregroundStyle(Color.pulseTextSecondary)
                             Text("\(share.pct) %")
@@ -153,7 +153,7 @@ private struct DashboardStreakCard: View {
                     .font(PulseFont.metricLabel)
                     .padding(.horizontal, PulseSpacing.sm)
                     .padding(.vertical, 3)
-                    .background(Color.pulseSurfaceAlt)
+                    .background(streak.current >= 4 ? Color.pulseSuccess.opacity(0.14) : Color.pulseSurfaceAlt)
                     .foregroundStyle(streak.current >= 4 ? Color.pulseSuccess : Color.pulseTextSecondary)
                     .clipShape(Capsule())
             }
@@ -178,13 +178,13 @@ private struct DashboardZonesCard: View {
     var body: some View {
         let ordered = zones.sorted { $0.zone > $1.zone }
         let maxSeconds = max(ordered.map(\.seconds).max() ?? 1, 1)
-        let totalSeconds = ordered.reduce(0) { $0 + $1.seconds }
+        let totalSeconds = ordered.reduce(0.0) { $0 + $1.seconds }
 
         return PulseCard {
             HStack {
                 SectionHeader("Temps par zone d'effort")
                 Spacer()
-                Text("\(dashboardFormatHM(totalSeconds)) cumulées")
+                Text("\(dashboardFormatHM(Int(totalSeconds))) cumulées")
                     .font(PulseFont.metricLabel)
                     .foregroundStyle(Color.pulseTextSecondary)
             }
@@ -210,7 +210,7 @@ private struct DashboardZonesCard: View {
                                     }
                             }
                             .frame(height: 12)
-                            Text(dashboardFormatHM(zone.seconds))
+                            Text(dashboardFormatHM(Int(zone.seconds)))
                                 .font(PulseFont.metricUnit)
                                 .foregroundStyle(Color.pulseTextPrimary)
                                 .frame(width: 56, alignment: .trailing)

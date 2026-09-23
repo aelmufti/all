@@ -66,12 +66,14 @@ struct HealthDayNavigator: View {
 // MARK: - Nuit
 
 private enum SleepStageColor {
+    /// Miroir des phases `--p-deep/-light/-rem/-awake` (SCSS Pulse) — chaque
+    /// phase de sommeil a sa teinte propre, jamais le bleu accent générique.
     static func of(_ stage: SleepStageKind) -> Color {
         switch stage {
-        case .deep: return Color.pulseAccent
-        case .light: return Color.pulseAccent.opacity(0.45)
-        case .rem: return Color.purple
-        case .awake: return Color.pulseDanger.opacity(0.6)
+        case .deep: return Color.pulseSleepDeep
+        case .light: return Color.pulseSleepLight
+        case .rem: return Color.pulseSleepRem
+        case .awake: return Color.pulseSleepAwake
         }
     }
 
@@ -111,7 +113,7 @@ struct SleepCard: View {
                         HStack(alignment: .firstTextBaseline, spacing: 3) {
                             Text("\(Int(score.rounded()))")
                                 .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(Color.pulseAccent)
+                                .foregroundStyle(Color.pulseSleep)
                             Text("/100")
                                 .font(PulseFont.metricUnit)
                                 .foregroundStyle(Color.pulseTextSecondary)
@@ -233,19 +235,22 @@ struct HealthMetricChartCard: View {
         }
     }
 
+    // Une couleur par métrique — miroir des `color="var(--m-*)"` passés à
+    // `app-stream-chart` dans le template Angular (`health.component.ts`),
+    // jamais `pulseAccent` bleu générique.
     @ViewBuilder
     private var chart: some View {
         switch viewModel.selectedTab {
         case .cardio:
-            SampleLineChart(samples: day.hr, color: Color.pulseAccent, yRange: nil)
+            SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil)
         case .stress:
             StressBarChart(samples: day.stress)
         case .energie:
-            SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseSuccess, yRange: 0...100)
+            SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100)
         case .spo2:
-            SampleLineChart(samples: day.spo2, color: Color.pulseAccent, yRange: nil)
+            SampleLineChart(samples: day.spo2, color: Color.pulseSpo2, yRange: nil)
         case .respiration:
-            SampleLineChart(samples: day.respiration, color: Color.pulseAccent, yRange: nil)
+            SampleLineChart(samples: day.respiration, color: Color.pulseResp, yRange: nil)
         case .calories:
             CaloriesSummary(viewModel: viewModel)
         }
@@ -264,6 +269,16 @@ struct SampleLineChart: View {
             emptyState
         } else {
             Chart(samples, id: \.ts) { sample in
+                // Aire sous la courbe teintée métrique — miroir de l'attribut
+                // `fill-opacity="0.16"` sur `<path [attr.d]="areaPath()">`
+                // dans `stream-chart.component.ts`.
+                AreaMark(
+                    x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
+                    y: .value("Valeur", sample.value)
+                )
+                .foregroundStyle(color.opacity(0.16))
+                .interpolationMethod(.monotone)
+
                 LineMark(
                     x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
                     y: .value("Valeur", sample.value)
@@ -315,12 +330,13 @@ struct StressBarChart: View {
         }
     }
 
+    /// Miroir de `stressBarColor` (Angular) — 4 zones `--s-rest/-low/-mid/-high`.
     private func zoneColor(_ value: Double) -> Color {
         switch value {
-        case ..<25: return Color.pulseSuccess
-        case ..<50: return Color.pulseAccent
-        case ..<75: return Color.orange
-        default: return Color.pulseDanger
+        case ..<25: return Color.pulseStressRest
+        case ..<50: return Color.pulseStressLow
+        case ..<75: return Color.pulseStressMid
+        default: return Color.pulseStressHigh
         }
     }
 }
@@ -334,10 +350,15 @@ struct CaloriesSummary: View {
     var viewModel: HealthViewModel
 
     var body: some View {
+        // Une seule teinte « calories » (miroir `--m-cal`/`--c-cal`), déclinée
+        // en opacité pour distinguer actif/passif — comme `calories-chart
+        // .component.ts` (barres `var(--c-cal)` pleines vs.
+        // `color-mix(var(--m-cal) 34%, transparent)` pour la base de repos) :
+        // jamais de vert/bleu accent pour une métrique calorique.
         HStack(spacing: PulseSpacing.lg) {
-            StatTile(label: "Actives", value: formatted(viewModel.activeCalories), unit: "kcal", accent: Color.pulseAccent)
-            StatTile(label: "Passives", value: formatted(viewModel.passiveCalories), unit: "kcal", accent: Color.pulseTextSecondary)
-            StatTile(label: "Total", value: formatted(viewModel.totalCalories), unit: "kcal", accent: Color.pulseSuccess)
+            StatTile(label: "Actives", value: formatted(viewModel.activeCalories), unit: "kcal", accent: Color.pulseCalories)
+            StatTile(label: "Passives", value: formatted(viewModel.passiveCalories), unit: "kcal", accent: Color.pulseCalories.opacity(0.55))
+            StatTile(label: "Total", value: formatted(viewModel.totalCalories), unit: "kcal", accent: Color.pulseCalories)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -381,6 +402,10 @@ struct IntensityCard: View {
                     }
                 }
 
+                if !intensity.bouts.isEmpty {
+                    trackBar(intensity)
+                }
+
                 if intensity.bouts.isEmpty {
                     Text(
                         "Aucun effort de \(Int(intensity.params.minBoutS / 60)) minutes d'affilée " +
@@ -396,12 +421,14 @@ struct IntensityCard: View {
                                     .font(PulseFont.metricUnit)
                                     .foregroundStyle(Color.pulseTextPrimary)
                                 if bout.vigorousMin >= 0.5 {
+                                    // Miroir de `.tag` (Angular) : teinte FC
+                                    // (`--m-hr`), pas l'accent bleu générique.
                                     Text("vigoureux")
                                         .font(.caption2.bold())
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 2)
-                                        .background(Color.pulseAccent.opacity(0.15))
-                                        .foregroundStyle(Color.pulseAccent)
+                                        .background(Color.pulseHR.opacity(0.14))
+                                        .foregroundStyle(Color.pulseHR)
                                         .clipShape(Capsule())
                                 }
                                 Spacer()
@@ -439,6 +466,61 @@ struct IntensityCard: View {
         if detail.vigorousMin >= 0.5 { parts.append("\(Int(detail.vigorousMin.rounded())) vigoureuses ×2") }
         return parts.isEmpty ? "aucune minute comptée" : parts.joined(separator: " + ")
     }
+
+    // MARK: - Piste des blocs (miroir simplifié de `.track`/`.blk` Angular)
+    //
+    // Segments proportionnels sur la journée entière (`00h → 24h`) ; le
+    // recadrage sur la plage active (`window()` côté `IntensityDayCardComponent`)
+    // n'est volontairement pas reproduit ici — divergence assumée pour
+    // contenir le portage, la teinte FC (`--m-hr`) reste la même.
+    private struct TrackSegment: Hashable {
+        let fraction: Double
+        let color: Color
+    }
+
+    private func trackBar(_ intensity: IntensityDayDetail) -> some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                ForEach(Array(trackSegments(intensity).enumerated()), id: \.offset) { _, segment in
+                    Capsule()
+                        .fill(segment.color)
+                        .frame(width: max(geometry.size.width * segment.fraction, segment.color == .clear ? 0 : 2))
+                }
+            }
+        }
+        .frame(height: 24)
+        .background(Color.pulseSurfaceAlt, in: Capsule())
+        .clipShape(Capsule())
+    }
+
+    private func dayBounds(_ dateKey: String) -> (start: Double, end: Double) {
+        guard let start = HealthViewModel.parseDate(dateKey)?.timeIntervalSince1970 else {
+            return (0, 86_400)
+        }
+        return (start, start + 86_400)
+    }
+
+    private func trackSegments(_ intensity: IntensityDayDetail) -> [TrackSegment] {
+        let bounds = dayBounds(intensity.date)
+        let span = max(bounds.end - bounds.start, 1)
+        var segments: [TrackSegment] = []
+        var cursor = bounds.start
+        for bout in intensity.bouts.sorted(by: { $0.from < $1.from }) {
+            let from = max(Double(bout.from), bounds.start)
+            let to = min(Double(bout.to), bounds.end)
+            guard to > cursor else { continue }
+            if from > cursor {
+                segments.append(TrackSegment(fraction: (from - cursor) / span, color: .clear))
+            }
+            let color: Color = bout.vigorousMin >= 0.5 ? Color.pulseHR : Color.pulseHR.opacity(0.45)
+            segments.append(TrackSegment(fraction: max((to - from) / span, 0.004), color: color))
+            cursor = to
+        }
+        if cursor < bounds.end {
+            segments.append(TrackSegment(fraction: (bounds.end - cursor) / span, color: .clear))
+        }
+        return segments
+    }
 }
 
 // MARK: - Poids
@@ -475,9 +557,15 @@ struct WeightCard: View {
                 }
                 Spacer()
                 if let delta = viewModel.weightDelta {
+                    // Miroir `.delta.down` (perte → succès) / `.delta.up`
+                    // (prise → teinte calories, `--m-cal`) — jamais neutre.
                     Text("\(delta > 0 ? "+" : "")\(String(format: "%.1f", delta)) kg")
                         .font(PulseFont.metricUnit)
-                        .foregroundStyle(delta < 0 ? Color.pulseSuccess : Color.pulseTextSecondary)
+                        .foregroundStyle(
+                            delta < 0 ? Color.pulseSuccess
+                                : delta > 0 ? Color.pulseCalories
+                                : Color.pulseTextSecondary
+                        )
                 }
             }
 
@@ -523,9 +611,14 @@ struct WeightCard: View {
             }
 
             if let note = viewModel.watchNote {
+                // Miroir `.watch.on` (Angular) : le statut « transmis » se lit
+                // sur `push.status === 'sent'`, pas sur une sous-chaîne du
+                // libellé (« non transmis » contient aussi « transmis »).
                 Text(note)
                     .font(.caption)
-                    .foregroundStyle(note.contains("transmis") ? Color.pulseAccent : Color.pulseTextSecondary)
+                    .foregroundStyle(
+                        viewModel.weight?.push.status == "sent" ? Color.pulseSteps : Color.pulseTextSecondary
+                    )
             }
         }
     }
@@ -535,12 +628,14 @@ struct WeightLineChart: View {
     let series: [WeightSeriesPoint]
 
     var body: some View {
+        // Miroir `color="var(--m-steps)"` (Angular, `health.component.ts`) —
+        // la tendance de poids reprend la teinte « pas », pas l'accent bleu.
         Chart(series, id: \.date) { point in
             LineMark(
                 x: .value("Date", HealthViewModel.parseDate(point.date) ?? Date()),
                 y: .value("Poids", point.avg)
             )
-            .foregroundStyle(Color.pulseAccent)
+            .foregroundStyle(Color.pulseSteps)
             .interpolationMethod(.monotone)
         }
     }

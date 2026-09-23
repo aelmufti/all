@@ -22,6 +22,7 @@ import Charts
 
 struct Spo2ReportView: View {
     @State private var viewModel = Spo2ReportViewModel()
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -39,6 +40,7 @@ struct Spo2ReportView: View {
             .navigationTitle("Rapport SpO2")
             .navigationBarTitleDisplayMode(.large)
             .background(Color.pulseBackground)
+            .toolbar { SheetCloseButton { dismiss() } }
         }
         .task {
             await viewModel.load()
@@ -157,20 +159,20 @@ private struct Spo2SummaryCard: View {
         PulseCard {
             SectionHeader("Synthèse — \(nightsCount) nuit\(nightsCount > 1 ? "s" : "")")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: PulseSpacing.md) {
-                StatTile(label: "Moyenne", value: String(format: "%.1f", totals.mean), unit: "%")
+                StatTile(label: "Moyenne", value: String(format: "%.1f", totals.mean), unit: "%", accent: .pulseSpo2)
                 StatTile(
                     label: "Minimum",
                     value: String(format: "%.0f", totals.min),
                     unit: "%",
-                    accent: totals.min < 88 ? .pulseDanger : .pulseAccent
+                    accent: totals.min < 88 ? .pulseDanger : .pulseSpo2
                 )
                 StatTile(
                     label: "< 90 %",
                     value: "\(totals.t90Min)",
                     unit: "min",
-                    accent: totals.t90Min > 0 ? .pulseDanger : .pulseAccent
+                    accent: totals.t90Min > 0 ? .pulseDanger : .pulseSpo2
                 )
-                StatTile(label: "Couverture", value: totals.coverageLabel)
+                StatTile(label: "Couverture", value: totals.coverageLabel, accent: .pulseSpo2)
             }
         }
     }
@@ -230,7 +232,10 @@ private struct Spo2NightCard: View {
 }
 
 /// Courbe SpO2 d'une nuit — équivalent Swift Charts du tracé SVG fait à la
-/// main côté Angular (`buildChart`), avec un seuil pointillé à 90 %.
+/// main côté Angular (`buildChart`), avec la zone sous 90 % teintée (miroir
+/// de `.band`, SCSS) et un seuil pointillé à 90 %. Couleur de la courbe :
+/// `Color.pulseSpo2` (SCSS `--m-spo2`), jamais l'accent bleu générique —
+/// même règle que `HealthSubviews.HealthMetricChartCard`.
 private struct Spo2NightChartView: View {
     let night: Spo2Night
     let domain: ClosedRange<Double>
@@ -243,13 +248,19 @@ private struct Spo2NightChartView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Chart {
+                RectangleMark(
+                    yStart: .value("Bas", domain.lowerBound),
+                    yEnd: .value("Seuil", 90)
+                )
+                .foregroundStyle(Color.pulseSurfaceAlt.opacity(0.7))
+
                 ForEach(night.samples, id: \.ts) { sample in
                     LineMark(
                         x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
                         y: .value("SpO2", sample.value)
                     )
                 }
-                .foregroundStyle(Color.pulseAccent)
+                .foregroundStyle(Color.pulseSpo2)
                 .interpolationMethod(.monotone)
 
                 RuleMark(y: .value("Seuil", 90))
