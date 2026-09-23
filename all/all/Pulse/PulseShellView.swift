@@ -57,12 +57,9 @@ struct PulseShellView: View {
                 .tabItem { Label("Nutrition", systemImage: "fork.knife") }
                 .tag(PulseTab.nutrition)
 
-            // TODO(écran Plus) : point d'entrée vers ce qui n'a pas (encore)
-            // son propre onglet — `dashboard`, `programme`, `spo2-report`
-            // (`/rapport-spo2`), `settings` (`/parametres`), `status`
-            // (`/statut`). Probablement une `NavigationStack` + `List` de
-            // liens, à construire par l'agent qui prend cet écran.
-            ComingSoonView(title: "Plus", systemImage: "ellipsis.circle.fill")
+            // Hub « Plus » (`PlusView`) : accès aux écrans sans onglet primaire
+            // — Tableau de bord, Programme, Rapport SpO2, Paramètres, Statut.
+            PlusView()
                 .tabItem { Label("Plus", systemImage: "ellipsis.circle.fill") }
                 .tag(PulseTab.plus)
 
