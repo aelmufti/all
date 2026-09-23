@@ -4,6 +4,45 @@
 > Notes courtes : état + décisions + prochaine étape. Le plan de fond vit dans
 > `CADRAGE.md` (§8 = incréments), les invariants dans `CLAUDE.md`.
 
+## 2026-09-23 — Live-1b : push FC téléphone → Pulse (code, revu Opus, tests verts)
+
+**Décisions** : transport = POST+cache (pas WebSocket) ; push seulement onglet FC ouvert
+(on-demand) ; live = jetable (fire-and-forget, pas de spool/retry) ; **émission réseau
+autorisée** par l'utilisateur (feu vert explicite pour la FC). RIEN commité, RIEN émis vers
+un vrai Pulse (dev = build + tests mockés).
+
+**Côté app (all)** — `all/all/Sync/LiveHeartRatePush.swift` : calqué sur `PulseUploader`
+(requête pure + transport injectable + seam relisant `PulseConfig`). `POST /api/live/hr`, JSON
+`LiveReading`, même token/URL Keychain que l'ingest, `measuredAt` ISO 8601 **null explicite**
+(`encode(to:)` manuel — le Codable synthétisé omettrait la clé). `URLSession(.default)`
+fire-and-forget (`.resume()`, résultat ignoré). `BLEManager` : `publishLiveHeartRate()`
+centralise les 3 sites d'assignation de `liveHeartRate` + pousse si `wantsLiveHeartRate` ;
+`stopLiveHeartRate` pousse un reading `.off`. Tests `LiveHeartRatePushTests` (8, dont l'encodage
+null explicite). **Jamais un bpm loggé.**
+
+**Côté Pulse (custom-connect)** — `server/src/sync/phone-live-hr.store.ts` (`PhoneLiveHrStore` :
+cache mémoire + TTL 10 s, horloge injectée) ; `POST /api/live/hr` dans `LiveHrController`
+(`@Public`+`IngestTokenGuard`, 403 si source≠phone, 200) ; `relay()` sert le cache quand
+source=phone (start/stop = no-op, pas de canal retour). Provider dans `app.module.ts`.
+Tests : store (6) + controller (13). **223/223 tests serveur verts, tsc clean.**
+
+**Message trompeur corrigé** : `live.controller.ts` distingue phone/legacy (fait avant Live-1b) ;
+`web/.../live-hr.service.ts` ligne 118 « arrêtée côté bridge » → « La mesure s'est arrêtée. »
+(source-neutre).
+
+**Limite d'interaction connue (client web conçu pour le pont)** : `LiveHrService.apply()`
+**abandonne la session** (disarm, stop poll) dès un sondage `reachable:false` OU `enabled:false`.
+Conséquences sous le modèle push : (a) il faut **ouvrir l'onglet FC du téléphone AVANT** de
+lancer le live dans Pulse (sinon message « en attente du téléphone » + arrêt — informatif mais
+pas d'auto-reprise) ; (b) à la fermeture de l'onglet, le push `.off` → « La mesure s'est
+arrêtée. » + arrêt. Les cas hint (diffusion coupée) et stale passent bien. **Flux principal
+OK** (mesurer dans l'app puis regarder Pulse). Path B éventuel : rendre le client web
+phone-aware (ne pas hard-disarm sur blip transitoire, auto-reprise) — non fait, à décider.
+
+**À VALIDER MATÉRIEL (avec Live-1a)** : bascule source→phone dans Pulse, onglet FC ouvert →
+bpm visible dans l'app ET dans Pulse ; diffusion coupée → hint des deux côtés ; fermeture
+onglet → Pulse repasse au silence.
+
 ## 2026-09-23 — Live-1a : FC en direct native (code, revu Opus, tests verts)
 
 Nouveau chantier « données en direct », découpé : **Live-1a** (FC native, sans réseau) →

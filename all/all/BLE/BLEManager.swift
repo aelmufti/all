@@ -146,6 +146,13 @@ final class BLEManager: NSObject, ObservableObject {
     /// 2026-09-22).
     private let pulseUploader: SpoolUploading = PulseSpoolUploader()
 
+    /// Pousseur de FC live vers Pulse (incrément Live-1b, `Sync/LiveHeartRatePush.swift`)
+    /// — même raison d'être partagée que `pulseUploader` : une seule `URLSession`
+    /// pour la durée de vie de l'app. Appelé uniquement via `publishLiveHeartRate`
+    /// (et le push « éteint » best-effort de `stopLiveHeartRate`), jamais depuis
+    /// ailleurs.
+    private let liveHrPusher: LiveHrPushing = PulseLiveHrPusher()
+
     /// Intention de maintenir le lien (modèle keeper). Mis à `false` par
     /// `forgetDevice()` pour qu'une déconnexion **volontaire** ne relance pas la
     /// reconnexion automatique. Sans ce garde-fou, `cancelPeripheralConnection`
@@ -287,7 +294,7 @@ final class BLEManager: NSObject, ObservableObject {
         let now = Date()
         wantsLiveHeartRate = true
         liveHeartRateEngine.start(now: now)
-        liveHeartRate = liveHeartRateEngine.reading(now: now)
+        publishLiveHeartRate(liveHeartRateEngine.reading(now: now))
         log.info("FC live on")
         subscribeToLiveHeartRateIfPossible()
         startLiveHeartRateRefreshTimer()
@@ -307,6 +314,14 @@ final class BLEManager: NSObject, ObservableObject {
         }
         liveHeartRateEngine.stop()
         liveHeartRate = .off
+        // Push best-effort d'un reading « éteint » : sans lui, Pulse continuerait
+        // d'afficher le dernier bpm connu jusqu'à expiration du TTL serveur (10 s,
+        // PhoneLiveHrStore) au lieu de repasser au silence immédiatement. Hors du
+        // chemin gated par `wantsLiveHeartRate` de `publishLiveHeartRate` (déjà à
+        // `false` ici, à dessein) : appel direct, best-effort comme tout ce
+        // fichier — un échec de ce push n'est pas plus grave qu'un échec de
+        // n'importe quel autre (le TTL reste le filet de sécurité).
+        liveHrPusher.push(.off)
         log.info("FC live off")
     }
 
@@ -330,7 +345,7 @@ final class BLEManager: NSObject, ObservableObject {
         liveHeartRateRefreshTimer?.invalidate()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, self.wantsLiveHeartRate else { return }
-            self.liveHeartRate = self.liveHeartRateEngine.reading(now: Date())
+            self.publishLiveHeartRate(self.liveHeartRateEngine.reading(now: Date()))
         }
         RunLoop.main.add(timer, forMode: .common)
         liveHeartRateRefreshTimer = timer
@@ -339,6 +354,25 @@ final class BLEManager: NSObject, ObservableObject {
     private func stopLiveHeartRateRefreshTimer() {
         liveHeartRateRefreshTimer?.invalidate()
         liveHeartRateRefreshTimer = nil
+    }
+
+    /// Point d'assignation unique de `liveHeartRate` (incrément Live-1b) — les
+    /// 3 sites qui calculent un nouveau `Reading` (`startLiveHeartRate`, le
+    /// timer 1 s ci-dessus, la branche 0x2A37 de `didUpdateValueFor`) passent
+    /// tous par ici plutôt que d'assigner `liveHeartRate` directement, pour que
+    /// le push Pulse ne puisse pas être oublié sur l'un des trois. `stopLiveHeartRate`
+    /// est la seule exception (cf. son propre commentaire) : il assigne `.off`
+    /// directement et pousse en dehors de ce gate, puisque `wantsLiveHeartRate`
+    /// y est déjà `false` par construction.
+    ///
+    /// Ne pousse que si une vue live est effectivement ouverte
+    /// (`wantsLiveHeartRate`) : publier `liveHeartRate` pour l'UI locale est
+    /// inconditionnel, mais émettre vers Pulse ne doit JAMAIS arriver quand
+    /// personne ne regarde l'onglet FC (règle on-demand de l'incrément).
+    private func publishLiveHeartRate(_ reading: LiveHeartRate.Reading) {
+        liveHeartRate = reading
+        guard wantsLiveHeartRate else { return }
+        liveHrPusher.push(reading)
     }
 
     private func startScan() {
@@ -746,7 +780,7 @@ extension BLEManager: CBPeripheralDelegate {
             // la ligne générique ci-dessus (octets, pas bpm) : rien de plus
             // n'est journalisé que « on »/« off » de l'abonnement.
             liveHeartRateEngine.onFrame(characteristic.value ?? Data(), now: Date())
-            liveHeartRate = liveHeartRateEngine.reading(now: Date())
+            publishLiveHeartRate(liveHeartRateEngine.reading(now: Date()))
         }
     }
 
