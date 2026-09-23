@@ -31,14 +31,9 @@ struct ContentView: View {
             BLEDiagnosticView()
                 .tabItem { Label("BLE", systemImage: "antenna.radiowaves.left.and.right") }
 
-            // Incrément Live-1a : FC en direct, profil Bluetooth standard
-            // (0x2A37), affichage natif, aucun réseau (cf. CLAUDE.md).
-            LiveHeartRateView()
-                .tabItem { Label("FC", systemImage: "heart.fill") }
-
             // Incrément Live-2 : métriques temps réel GFDI (services ML
-            // REALTIME_*) au-delà de la FC — affichage natif, aucun réseau
-            // (cf. all/docs/live2-realtime-design.md).
+            // REALTIME_*), FC en tête (remplace Live-1a/0x2A37, retiré) —
+            // affichage natif, aucun réseau (cf. all/docs/live2-realtime-design.md).
             RealtimeMetricsView()
                 .tabItem { Label("Temps réel", systemImage: "waveform.path.ecg.rectangle") }
         }

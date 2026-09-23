@@ -30,16 +30,14 @@ struct allApp: App {
             switch newPhase {
             case .active:
                 BLEManager.shared.revalidateOnForeground()
-                // Live-1b : la mesure + push de la FC est pilotée par le premier
-                // plan de l'app (et la connexion montre), et NON par la présence
-                // de l'onglet FC natif. Sinon, regarder « Maintenant » dans Pulse
-                // (donc quitter l'onglet FC) coupait le flux et Pulse ne démarrait
-                // jamais l'animation en direct. La montre diffuse 0x2A37 dès que
-                // « Diffuser la FC » est activé côté montre, indépendamment de
-                // notre abonnement : découpler de l'onglet ne coûte quasi rien.
-                BLEManager.shared.startLiveHeartRate()
+                // Temps réel toujours actif (FC GFDI + métriques connues) tant
+                // que l'app est au premier plan — plus de toggle manuel ni
+                // d'onglet dédié (remplace l'ancien Live-1b sur 0x2A37, retiré :
+                // la FC en direct passe désormais par `REALTIME_HR`, cf.
+                // `BLEManager.startRealtime`/`RealtimeSession.enableKnownMetrics`).
+                BLEManager.shared.startRealtime()
             case .background:
-                BLEManager.shared.stopLiveHeartRate()
+                BLEManager.shared.stopRealtime()
             case .inactive:
                 break // transitoire (centre de notif, app switcher) — ne pas couper
             @unknown default:

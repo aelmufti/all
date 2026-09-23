@@ -86,15 +86,19 @@ struct LiveHeartRatePushRequestTests {
     }
 
     @Test func encodesAPresentHintAsAString() throws {
+        // Contenu du hint sans importance ici (l'ancien texte fixe
+        // `LiveHeartRate.notBroadcastingHint`, spécifique à 0x2A37, a disparu
+        // avec Live-1a) — seul le passage à travers l'encodage JSON compte.
+        let hint = "Lien silencieux."
         let baseURL = URL(string: "https://pulse.example.ts.net")!
         let request = LiveHeartRatePush.makeRequest(
             baseURL: baseURL, token: "t",
-            reading: reading(hint: LiveHeartRate.notBroadcastingHint)
+            reading: reading(hint: hint)
         )
 
         let body = try decodedBody(request)
 
-        #expect(body["hint"] as? String == LiveHeartRate.notBroadcastingHint)
+        #expect(body["hint"] as? String == hint)
     }
 
     /// `Reading.off` est ce que `stopLiveHeartRate` pousse best-effort — vérifie

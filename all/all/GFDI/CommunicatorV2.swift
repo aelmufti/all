@@ -17,9 +17,12 @@
 //  SONT portés depuis cet incrément : même infrastructure REGISTER_ML_REQ/RESP
 //  que GFDI, juste un `service.rawValue` différent (cf. `enableRealtimeService`/
 //  `disableRealtimeService` plus bas) — mais JAMAIS enregistrés automatiquement
-//  (jamais dans `start()`), activation strictement à la demande, pilotée par
-//  `RealtimeSession`. Le service GFDI et sa sync automatique restent
-//  strictement inchangés par cet ajout.
+//  ICI (jamais dans `start()` de ce fichier) : l'activation reste entièrement
+//  pilotée par `RealtimeSession` (dont les métriques connues — FC, pas, SpO2,
+//  respiration, VFC — s'auto-activent au premier plan côté `BLEManager`,
+//  cf. `RealtimeSession.enableKnownMetrics` ; les services opaques restent à la
+//  demande explicite, `setCaptureEnabled`). Le service GFDI et sa sync
+//  automatique restent strictement inchangés par cet ajout.
 //
 //  MlrCommunicator (fiabilité Micro-Link : ACK/retransmission au niveau ML) N'EST
 //  PAS porté. Dans le pont, `GarminSession` enregistre le service GFDI via

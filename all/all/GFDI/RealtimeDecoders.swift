@@ -20,10 +20,15 @@
 //  les flux biométriques, et CLAUDE.md confirme qu'il ne répond jamais
 //  applicativement sur cette Venu 2 (fw 19.05).
 //
-//  CE FICHIER NE BRANCHE RIEN. `CommunicatorV2.swift` n'enregistre aucun service
-//  `REALTIME_*` (son enum `MlService` privé ne connaît que `.gfdi`) ; ces
-//  décodeurs ne sont appelés par aucun code de production, uniquement par les
-//  tests. Aucun flux n'est actif par défaut dans l'app.
+//  CE FICHIER NE BRANCHE RIEN — décodeurs PURS uniquement. C'est
+//  `RealtimeSession.swift` (via `CommunicatorV2`, conforme à
+//  `RealtimeMlCommunicating`) qui les branche : la FC en direct (service
+//  `.heartRate` = `REALTIME_HR`) et les autres métriques connues (pas, SpO2,
+//  respiration, VFC) sont désormais actives par défaut dès que l'app est au
+//  premier plan et la montre connectée (`RealtimeSession.enableKnownMetrics`,
+//  pilotée par `BLEManager.startRealtime`/`stopRealtime`) — plus de toggle
+//  manuel pour elles ; remplace l'ancien profil BLE standard Heart Rate
+//  (0x2A37, Live-1a, retiré de `BLEManager`, instable).
 //
 
 import Foundation
@@ -64,13 +69,15 @@ enum RealtimeMlService: UInt16 {
     }
 }
 
-/// Fréquence cardiaque en direct via GFDI (service ML `REALTIME_HR` = 6) — À NE
-/// PAS CONFONDRE avec Live-1a/1b, qui utilisent le profil BLE standard Heart Rate
-/// (0x2A37, cf. `LiveHeartRate.swift`) : ce chemin GFDI n'a d'intérêt que pour
-/// comparer les deux sources si Live-2 est un jour câblé, il ne remplace rien.
-/// Port de `RealtimeHeartRateCallback.onMessage` : le commentaire d'origine
-/// lui-même est incertain sur le sens du premier octet (« 0/2/3? 3 ==
-/// realtime? ») — reproduit tel quel, non résolu, non vérifié contre le matériel.
+/// Fréquence cardiaque en direct via GFDI (service ML `REALTIME_HR` = 6) —
+/// LA source de FC en direct de l'app (onglet Temps réel + push Pulse
+/// `/api/live/hr` via `BLEManager.handleRealtimeHeartRate`) : remplace
+/// l'ancien profil BLE standard Heart Rate (0x2A37, Live-1a — `LiveHeartRate
+/// .Engine`/`.decode`, retirés, cf. `LiveHeartRate.swift`), instable (la
+/// montre coupait sa diffusion FC d'elle-même). Port de
+/// `RealtimeHeartRateCallback.onMessage` : le commentaire d'origine lui-même
+/// est incertain sur le sens du premier octet (« 0/2/3? 3 == realtime? ») —
+/// reproduit tel quel, non résolu, non vérifié contre le matériel.
 struct RealtimeHeartRate: Equatable {
     /// Premier octet, sens incertain côté pont (voir doc ci-dessus).
     let rawType: UInt8

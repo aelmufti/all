@@ -79,37 +79,20 @@ final class BLEManager: NSObject, ObservableObject {
     private var peripheral: CBPeripheral?
     private var notifyingCharacteristic: CBCharacteristic?
 
-    // MARK: - FC live (incrément Live-1a)
+    // MARK: - Temps réel (FC GFDI + métriques connues), toujours actif au premier plan
     //
-    // Profil Bluetooth standard Heart Rate (service 0x180D, caractéristique
-    // Heart Rate Measurement 0x2A37) — PAS GFDI. Coexiste avec le canal ML
-    // sur le même lien ACL : abonnement indépendant de la décision
-    // GFDI/générique prise par `activateProtocolIfPossible`. Portage complet
-    // de la logique de décodage/fraîcheur dans `LiveHeartRate.swift` (libre
-    // de CoreBluetooth, testable) ; ce fichier ne fait que le pont vers
-    // `CBCharacteristic`.
+    // Remplace l'ancien profil Bluetooth standard Heart Rate (service 0x180D,
+    // caractéristique 0x2A37, Live-1a — RETIRÉ, instable : la montre coupe sa
+    // diffusion FC d'elle-même). La FC en direct passe désormais par GFDI
+    // (service ML `REALTIME_HR`, cf. `RealtimeSession`/`RealtimeDecoders.swift`),
+    // comme les autres métriques connues (pas, SpO2, respiration, VFC).
 
-    private static let heartRateCharacteristicUUID = CBUUID(string: "2A37")
-
-    private let liveHeartRateEngine = LiveHeartRate.Engine()
-
-    /// Intention de l'app (au premier plan — piloté par `allApp.swift`, plus par
-    /// l'onglet FC) — indépendante de la présence effective de la caractéristique,
-    /// pour que passer au premier plan avant que la montre soit connectée s'abonne
-    /// automatiquement dès que la découverte de services aboutit (cf.
-    /// `activateProtocolIfPossible`).
-    private var wantsLiveHeartRate = false
-
-    /// Recalcule `liveHeartRate` à intervalle régulier pendant que la vue
-    /// live est ouverte : contrairement aux autres états publiés ici, celui-
-    /// ci dépend de l'écoulement du temps autant que des trames reçues (le
-    /// passage à « périmé » doit se produire même si plus aucune trame
-    /// n'arrive jamais).
-    private var liveHeartRateRefreshTimer: Timer?
-
-    /// État FC affiché par `LiveHeartRateView`. `LiveHeartRate.Reading.off`
-    /// tant qu'aucune vue live n'a démarré d'abonnement.
-    @Published private(set) var liveHeartRate: LiveHeartRate.Reading = .off
+    /// Intention de l'app (au premier plan — piloté par `allApp.swift`) :
+    /// indépendante de l'existence effective d'une `realtimeSession`, pour que
+    /// passer au premier plan avant que la montre soit connectée active les
+    /// métriques connues dès que la session temps réel est construite sur le
+    /// nouveau lien (cf. `activateProtocolIfPossible`).
+    private var wantsRealtime = false
 
     // MARK: - Chemin GFDI V2 (Micro-Link)
     //
@@ -141,6 +124,13 @@ final class BLEManager: NSObject, ObservableObject {
     /// état publié, en lecture seule. Annulé et reconstruit à chaque nouveau lien
     /// par `resetGfdiDiscoveryState`.
     private var garminSessionStateSubscription: AnyCancellable?
+    /// Abonnement à `RealtimeSession.$heartRate` — repointage du push Pulse
+    /// (Live-1b) : chaque nouvelle valeur de FC GFDI (`REALTIME_HR`) est
+    /// relayée à `liveHrPusher` via `handleRealtimeHeartRate`. Même cycle de
+    /// vie que `garminSessionStateSubscription` (annulé/reconstruit à chaque
+    /// nouveau lien par `resetGfdiDiscoveryState`, réabonné dans
+    /// `activateProtocolIfPossible`).
+    private var realtimeHeartRateSubscription: AnyCancellable?
 
     /// Une seule instance pour la durée de vie de l'app — partagée entre les
     /// `GarminSession` successives (une par lien BLE) pour ne pas relire le
@@ -157,9 +147,9 @@ final class BLEManager: NSObject, ObservableObject {
 
     /// Pousseur de FC live vers Pulse (incrément Live-1b, `Sync/LiveHeartRatePush.swift`)
     /// — même raison d'être partagée que `pulseUploader` : une seule `URLSession`
-    /// pour la durée de vie de l'app. Appelé uniquement via `publishLiveHeartRate`
-    /// (et le push « éteint » best-effort de `stopLiveHeartRate`), jamais depuis
-    /// ailleurs.
+    /// pour la durée de vie de l'app. Alimenté depuis `handleRealtimeHeartRate`
+    /// (FC temps réel GFDI, `REALTIME_HR`) et le push « éteint » best-effort de
+    /// `stopRealtime`, jamais depuis ailleurs.
     private let liveHrPusher: LiveHrPushing = PulseLiveHrPusher()
 
     /// Intention de maintenir le lien (modèle keeper). Mis à `false` par
@@ -292,98 +282,61 @@ final class BLEManager: NSObject, ObservableObject {
         log.info("Appareil oublié")
     }
 
-    // MARK: - FC live (incrément Live-1a)
+    // MARK: - Temps réel (FC GFDI + métriques connues)
 
     /// À appeler quand l'app passe au premier plan (`allApp.swift`, scenePhase
-    /// `.active`) — PAS lié à l'onglet FC (cf. commentaire dans `allApp.swift`).
-    /// No-op si la caractéristique 0x2A37 n'est pas encore découverte (montre pas
-    /// encore connectée) — `wantsLiveHeartRate` reste vrai, et
-    /// `activateProtocolIfPossible` s'abonnera dès que la découverte de
-    /// services aboutira.
-    func startLiveHeartRate() {
-        let now = Date()
-        wantsLiveHeartRate = true
-        liveHeartRateEngine.start(now: now)
-        publishLiveHeartRate(liveHeartRateEngine.reading(now: now))
-        log.info("FC live on")
-        subscribeToLiveHeartRateIfPossible()
-        startLiveHeartRateRefreshTimer()
+    /// `.active`) — remplace l'ancien `startLiveHeartRate` (0x2A37, retiré).
+    /// Les métriques connues (FC, pas, SpO2, respiration, VFC) n'ont plus de
+    /// toggle manuel ni d'onglet dédié : elles s'activent dès que l'app est au
+    /// premier plan. No-op sur `realtimeSession` si elle n'existe pas encore
+    /// (montre pas encore connectée) — `wantsRealtime` reste vrai, et
+    /// `activateProtocolIfPossible` activera dès que la session sera
+    /// construite sur le lien à venir.
+    func startRealtime() {
+        wantsRealtime = true
+        realtimeSession?.enableKnownMetrics()
+        log.info("Temps réel on (métriques connues)")
     }
 
     /// À appeler quand l'app passe en arrière-plan (`allApp.swift`, scenePhase
-    /// `.background`). Coupe l'abonnement GATT si actif — inutile de recevoir la
-    /// FC quand l'app n'est plus à l'écran (et pousse un reading « éteint » pour
-    /// couper le live côté Pulse tout de suite, cf. plus bas).
-    func stopLiveHeartRate() {
-        guard wantsLiveHeartRate else { return }
-        wantsLiveHeartRate = false
-        stopLiveHeartRateRefreshTimer()
-        if let peripheral,
-           let characteristic = characteristicsByUUID[Self.heartRateCharacteristicUUID],
-           characteristic.isNotifying {
-            peripheral.setNotifyValue(false, for: characteristic)
-        }
-        liveHeartRateEngine.stop()
-        liveHeartRate = .off
-        // Push best-effort d'un reading « éteint » : sans lui, Pulse continuerait
-        // d'afficher le dernier bpm connu jusqu'à expiration du TTL serveur (10 s,
-        // PhoneLiveHrStore) au lieu de repasser au silence immédiatement. Hors du
-        // chemin gated par `wantsLiveHeartRate` de `publishLiveHeartRate` (déjà à
-        // `false` ici, à dessein) : appel direct, best-effort comme tout ce
-        // fichier — un échec de ce push n'est pas plus grave qu'un échec de
-        // n'importe quel autre (le TTL reste le filet de sécurité).
+    /// `.background`) — remplace l'ancien `stopLiveHeartRate`. Désactive les
+    /// métriques connues côté montre et pousse un reading « éteint » à Pulse
+    /// tout de suite : sans lui, Pulse continuerait d'afficher le dernier bpm
+    /// connu jusqu'à expiration du TTL serveur (10 s, `PhoneLiveHrStore`) au
+    /// lieu de repasser au silence immédiatement.
+    func stopRealtime() {
+        guard wantsRealtime else { return }
+        wantsRealtime = false
+        realtimeSession?.disableKnownMetrics()
         liveHrPusher.push(.off)
-        log.info("FC live off")
+        log.info("Temps réel off (métriques connues)")
     }
 
-    /// S'abonne à la caractéristique FC si elle est connue et qu'on n'y est
-    /// pas déjà — appelé au démarrage de la vue live et à chaque découverte
-    /// de services aboutie (connexion initiale, reconnexion, revalidation).
-    private func subscribeToLiveHeartRateIfPossible() {
-        guard wantsLiveHeartRate,
-              let peripheral,
-              let characteristic = characteristicsByUUID[Self.heartRateCharacteristicUUID],
-              !characteristic.isNotifying else { return }
-        peripheral.setNotifyValue(true, for: characteristic)
-    }
-
-    /// Recalcule `liveHeartRate` chaque seconde pendant que la vue live est
-    /// ouverte : c'est ce qui fait passer l'état à « périmé » même en
-    /// l'absence de toute nouvelle trame (lien mort sans déconnexion
-    /// CoreBluetooth explicite, montre qui a cessé de diffuser sans que la
-    /// caractéristique ne renvoie plus rien).
-    private func startLiveHeartRateRefreshTimer() {
-        liveHeartRateRefreshTimer?.invalidate()
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, self.wantsLiveHeartRate else { return }
-            self.publishLiveHeartRate(self.liveHeartRateEngine.reading(now: Date()))
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        liveHeartRateRefreshTimer = timer
-    }
-
-    private func stopLiveHeartRateRefreshTimer() {
-        liveHeartRateRefreshTimer?.invalidate()
-        liveHeartRateRefreshTimer = nil
-    }
-
-    /// Point d'assignation unique de `liveHeartRate` (incrément Live-1b) — les
-    /// 3 sites qui calculent un nouveau `Reading` (`startLiveHeartRate`, le
-    /// timer 1 s ci-dessus, la branche 0x2A37 de `didUpdateValueFor`) passent
-    /// tous par ici plutôt que d'assigner `liveHeartRate` directement, pour que
-    /// le push Pulse ne puisse pas être oublié sur l'un des trois. `stopLiveHeartRate`
-    /// est la seule exception (cf. son propre commentaire) : il assigne `.off`
-    /// directement et pousse en dehors de ce gate, puisque `wantsLiveHeartRate`
-    /// y est déjà `false` par construction.
+    /// Repointage du push Pulse (incrément Live-1b) : la FC en direct
+    /// n'alimente plus `liveHrPusher` depuis 0x2A37 mais depuis
+    /// `RealtimeSession.$heartRate` (GFDI, service ML `REALTIME_HR`) — même
+    /// DTO (`LiveHeartRate.Reading`), même endpoint (`/api/live/hr`), rien à
+    /// changer côté serveur. Abonné par `activateProtocolIfPossible` à chaque
+    /// nouvelle session temps réel (un lien BLE = une session), comme
+    /// `garminSessionStateSubscription` pour `GarminSession.$state`.
     ///
-    /// Ne pousse que si une vue live est effectivement ouverte
-    /// (`wantsLiveHeartRate`) : publier `liveHeartRate` pour l'UI locale est
-    /// inconditionnel, mais émettre vers Pulse ne doit JAMAIS arriver quand
-    /// personne ne regarde l'onglet FC (règle on-demand de l'incrément).
-    private func publishLiveHeartRate(_ reading: LiveHeartRate.Reading) {
-        liveHeartRate = reading
-        guard wantsLiveHeartRate else { return }
-        liveHrPusher.push(reading)
+    /// Ne pousse que si le temps réel est voulu (app au premier plan,
+    /// `wantsRealtime`) et que le bpm est valide (`RealtimeHeartRate.isValid`,
+    /// c.-à-d. `> 0` — cf. son commentaire : `heartRate == 0` signifie « pas de
+    /// valeur », pas « 0 bpm »). Pas de notion de fraîcheur/péremption ici
+    /// (contrairement à l'ancien `LiveHeartRate.Engine`) : le TTL serveur de
+    /// Pulse gère déjà les trous (10 s, `PhoneLiveHrStore`). Jamais de bpm
+    /// journalisé (règle héritée de Live-1a).
+    private func handleRealtimeHeartRate(_ heartRate: RealtimeHeartRate?) {
+        guard wantsRealtime, let heartRate, heartRate.isValid else { return }
+        liveHrPusher.push(LiveHeartRate.Reading(
+            enabled: true,
+            broadcasting: true,
+            heartRate: Int(heartRate.heartRate),
+            measuredAt: Date(),
+            stale: false,
+            hint: nil
+        ))
     }
 
     private func startScan() {
@@ -415,6 +368,8 @@ final class BLEManager: NSObject, ObservableObject {
         realtimeSession = nil
         garminSessionStateSubscription?.cancel()
         garminSessionStateSubscription = nil
+        realtimeHeartRateSubscription?.cancel()
+        realtimeHeartRateSubscription = nil
     }
 
     private static func savedPeripheralIdentifier() -> UUID? {
@@ -719,12 +674,6 @@ extension BLEManager: CBPeripheralDelegate {
     /// paire de caractéristiques ML connue ; sinon repli sur l'abonnement
     /// générique de l'incrément 1 (première caractéristique notifiable trouvée).
     private func activateProtocolIfPossible(on peripheral: CBPeripheral) {
-        // FC live : indépendant de la décision GFDI/générique ci-dessous (la
-        // caractéristique 0x2A37 coexiste avec le canal ML sur le même lien
-        // ACL) — tenté à chaque découverte de services aboutie, y compris les
-        // reconnexions/revalidations où `garminSession` est déjà décidé.
-        subscribeToLiveHeartRateIfPossible()
-
         guard garminSession == nil else { return } // déjà décidé pour ce lien
         if let communicator = CommunicatorV2(peripheral: peripheral, characteristicsByUUID: characteristicsByUUID) {
             log.info("Service GFDI ML (V2) détecté — bascule sur le chemin GFDI")
@@ -746,6 +695,20 @@ extension BLEManager: CBPeripheralDelegate {
             // `guard connectionState == .reconnecting` y renvoie tôt).
             garminSessionStateSubscription = session.$state
                 .sink { [weak self] _ in self?.checkLinkLivenessIfRevalidating() }
+            // Repointage Live-1b : republie chaque nouvelle FC GFDI vers Pulse
+            // (cf. `handleRealtimeHeartRate`). Nouvel abonnement à chaque
+            // nouvelle session temps réel, comme ci-dessus pour `GarminSession`.
+            realtimeHeartRateSubscription = realtime.$heartRate
+                .sink { [weak self] heartRate in self?.handleRealtimeHeartRate(heartRate) }
+            // Temps réel toujours actif : si l'app est déjà au premier plan au
+            // moment où ce nouveau lien aboutit (`wantsRealtime` déjà vrai —
+            // reconnexion, revalidation, ou connexion initiale après un premier
+            // plan déjà établi), active les métriques connues tout de suite
+            // plutôt que d'attendre le prochain passage au premier plan (cf.
+            // ancien `subscribeToLiveHeartRateIfPossible`, même rôle pour 0x2A37).
+            if wantsRealtime {
+                realtime.enableKnownMetrics()
+            }
             session.start()
             return
         }
@@ -790,14 +753,6 @@ extension BLEManager: CBPeripheralDelegate {
 
         if let garminCommunicator, characteristic.uuid == garminCommunicator.receiveCharacteristicUUID {
             garminCommunicator.handleIncoming(characteristic.value ?? Data())
-        }
-
-        if characteristic.uuid == Self.heartRateCharacteristicUUID {
-            // Décodage + republication seulement — pas de log ici au-delà de
-            // la ligne générique ci-dessus (octets, pas bpm) : rien de plus
-            // n'est journalisé que « on »/« off » de l'abonnement.
-            liveHeartRateEngine.onFrame(characteristic.value ?? Data(), now: Date())
-            publishLiveHeartRate(liveHeartRateEngine.reading(now: Date()))
         }
     }
 
