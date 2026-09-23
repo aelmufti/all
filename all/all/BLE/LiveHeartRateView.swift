@@ -29,8 +29,10 @@ struct LiveHeartRateView: View {
             .padding()
             .navigationTitle("FC en direct")
         }
-        .onAppear { ble.startLiveHeartRate() }
-        .onDisappear { ble.stopLiveHeartRate() }
+        // La mesure + le push ne sont plus pilotés ici (onAppear/onDisappear) mais
+        // par le cycle de vie de l'app (`allApp.swift`, scenePhase) : quitter cet
+        // onglet pour regarder « Maintenant » dans Pulse ne doit PAS couper le flux.
+        // Cette vue ne fait qu'afficher l'état publié par `BLEManager.liveHeartRate`.
     }
 
     @ViewBuilder
