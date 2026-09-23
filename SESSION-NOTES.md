@@ -4,6 +4,39 @@
 > Notes courtes : état + décisions + prochaine étape. Le plan de fond vit dans
 > `CADRAGE.md` (§8 = incréments), les invariants dans `CLAUDE.md`.
 
+## 2026-09-23 — Live-1a : FC en direct native (code, revu Opus, tests verts)
+
+Nouveau chantier « données en direct », découpé : **Live-1a** (FC native, sans réseau) →
+Live-1b (push FC→Pulse, réseau, endpoint live à créer) → Live-2 (métriques `REALTIME_*`
+GFDI, protobuf vs trames ML, sur matériel). Voir la table de découpage en fin de session.
+
+**Live-1a livré (agent Sonnet, revu Opus, BUILD+14 tests verts au simulateur, RIEN commité,
+ZÉRO réseau) :**
+- Transport = **profil Bluetooth STANDARD** Heart Rate (service `0x180D`, caractéristique
+  `0x2A37`), **pas GFDI**. Coexiste avec le canal ML sur le même lien ACL (ce que le pont a
+  prouvé sur Venu 2). Portage fidèle de `garmin-bridge/.../LiveHeartRate.java`.
+- `all/all/BLE/LiveHeartRate.swift` : logique pure (sans CoreBluetooth, testable) — décodage
+  flags/8-16 bits/contact, `Reading` (3 faits séparés : abonné/diffuse/périmé), warm-up,
+  seuil périmé 10 s, texte d'aide « activer la diffusion FC » verbatim. **Jamais un bpm loggé.**
+- `BLEManager` : abonnement `0x2A37` **à la demande** (`startLiveHeartRate`/`stopLiveHeartRate`
+  câblés sur `onAppear`/`onDisappear` de la vue → capteur optique éteint quand personne ne
+  regarde), tenté avant le `guard garminSession==nil` (indépendant du chemin GFDI, se ré-abonne
+  aux reconnexions), timer 1 s pour faire passer l'état à « périmé » sans trame, `@Published
+  liveHeartRate`. Thread-safe (tout sur la main queue).
+- `all/all/BLE/LiveHeartRateView.swift` : onglet **FC** (`heart.fill`) dans `ContentView` ;
+  bpm en grand + cœur qui pulse, sinon déconnecté / silencieux / conseil diffusion / warm-up.
+- Tests `allTests/LiveHeartRateTests.swift` (14). pbxproj : rien à éditer (Xcode 16
+  `PBXFileSystemSynchronizedRootGroup`, sync par dossier).
+
+**À VALIDER SUR MATÉRIEL** : ouvrir l'onglet FC + activer la diffusion FC sur la montre
+(Paramètres > Capteurs et accessoires > FC au poignet > Diffuser la FC) → bpm affiché et suit ;
+la coexistence `0x2A37` ↔ canal ML ne perturbe pas la sync GFDI ; états diffusion-coupée
+(conseil) et hors-portée (« lien silencieux » après 10 s).
+
+**Reste ensuite** : Live-1b (push FC→Pulse — **réseau, autorisation requise** + définir le
+transport de push live côté Pulse : WebSocket vs POST/échantillon, Pulse est *pull* aujourd'hui) ;
+Live-2 (métriques `REALTIME_*` GFDI, non-prouvé, trancher protobuf `GdiSmartProto` vs trames ML).
+
 ## 2026-09-22 (validation matériel) — ✅ FLUX BOUT-EN-BOUT VALIDÉ SUR MATÉRIEL
 
 L'utilisateur confirme : **iPhone + Venu 2 OK, ça émet vers Pulse, la synchro fonctionne.**
