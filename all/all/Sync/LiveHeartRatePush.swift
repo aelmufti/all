@@ -25,7 +25,8 @@
 //  ÉMISSION RÉSEAU ACTIVE (autorisation explicite de l'utilisateur pour la FC,
 //  donnée pour cet incrément) : `URLSessionLiveHrPushTransport` émet
 //  réellement (`.resume()`), en session `.default` (foreground, l'app pousse
-//  seulement quand son onglet FC est ouvert — cf. `BLEManager.wantsLiveHeartRate`).
+//  seulement tant qu'elle est au premier plan — cf. `BLEManager.wantsRealtime`,
+//  alimenté depuis la FC temps réel GFDI plutôt que l'ancien 0x2A37).
 //  Jamais de bpm journalisé (règle héritée de `LiveHeartRate.swift`) : au plus
 //  une ligne debug annonçant qu'un push est parti, sans valeur.
 //

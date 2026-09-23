@@ -15,9 +15,15 @@
 //  PARALLÈLE à `GarminSession`, jamais couplé à elle : une `RealtimeSession` ne
 //  touche jamais au handshake GFDI ni à la sync de fichiers — elle observe
 //  seulement `onRealtimeFrame`, qui ne se déclenche jamais pour une trame GFDI
-//  (cf. `CommunicatorV2.handleIncoming`, routage par handle). Activation
-//  strictement à la demande (toggle utilisateur explicite par métrique, jamais
-//  automatique à la connexion) — cf. `setEnabled`/`setCaptureEnabled`.
+//  (cf. `CommunicatorV2.handleIncoming`, routage par handle).
+//
+//  DEUX régimes d'activation, jamais mélangés : les métriques CONNUES (FC,
+//  pas, SpO2, respiration, VFC — cf. `enableKnownMetrics`/`disableKnownMetrics`)
+//  sont désormais **toujours actives** tant que l'app est au premier plan et
+//  la montre connectée (pilotées par `BLEManager.startRealtime`/`stopRealtime`,
+//  plus de toggle utilisateur individuel pour elles) ; les services OPAQUES
+//  (capture) restent strictement à la demande (toggle utilisateur explicite,
+//  jamais automatique) — cf. `setCaptureEnabled`.
 //
 //  MODE CAPTURE (harnais octets bruts, EXCEPTION documentée à la règle
 //  « on ne journalise jamais de donnée de santé ») : les quatre métriques
@@ -111,6 +117,37 @@ final class RealtimeSession: ObservableObject {
         applyToggle(enabled, for: service)
     }
 
+    // MARK: - Activation groupée : métriques connues « toujours actives »
+
+    /// Métriques connues qui ont un affichage naturel en direct (onglet
+    /// Temps réel) — PAS `.accelerometer` (aucun affichage naturel, cf.
+    /// commentaire historique de `RealtimeMetricsList.knownMetrics`). FC en
+    /// tête : c'est elle qui remplace désormais le chemin 0x2A37 (Live-1a,
+    /// retiré de `BLEManager`).
+    private static let alwaysOnKnownMetrics: [RealtimeMlService] = [.heartRate, .steps, .spo2, .respiration, .hrv]
+
+    /// Active toutes les métriques connues « toujours actives » (cf.
+    /// `alwaysOnKnownMetrics`) — appelé par `BLEManager` quand l'app est au
+    /// premier plan et qu'un lien GFDI est établi (`startRealtime()`, ou dès
+    /// la (re)construction d'une session sur un nouveau lien si l'intention
+    /// premier-plan était déjà là). Remplace le toggle manuel individuel pour
+    /// ces cinq services : plus d'activation à la demande pour elles (celle-ci
+    /// reste la règle pour les services opaques, cf. `setCaptureEnabled`).
+    /// Réutilise `setEnabled` (idempotent), donc idempotent elle-même.
+    func enableKnownMetrics() {
+        for service in Self.alwaysOnKnownMetrics {
+            setEnabled(true, for: service)
+        }
+    }
+
+    /// Désactive toutes les métriques connues « toujours actives » — appelé
+    /// par `BLEManager.stopRealtime()` (passage en arrière-plan). Idempotent.
+    func disableKnownMetrics() {
+        for service in Self.alwaysOnKnownMetrics {
+            setEnabled(false, for: service)
+        }
+    }
+
     // MARK: - Toggles : mode capture (services opaques, octets bruts)
 
     /// Active/désactive la CAPTURE d'un service OPAQUE (cf.
@@ -152,8 +189,9 @@ final class RealtimeSession: ObservableObject {
     }
 
     /// Efface la dernière valeur affichée (et l'état stateful associé) quand une
-    /// métrique connue est désactivée — comme `LiveHeartRate.Engine.stop()` :
-    /// une valeur figée après désactivation induirait en erreur (elle a l'air
+    /// métrique connue est désactivée — comme le faisait l'ancien
+    /// `LiveHeartRate.Engine.stop()` (0x2A37, retiré) : une valeur figée après
+    /// désactivation induirait en erreur (elle a l'air
     /// « en direct » alors que l'abonnement est coupé). No-op pour un service
     /// opaque (rien à effacer : jamais de valeur décodée pour eux).
     private func resetDecodedValue(for service: RealtimeMlService) {

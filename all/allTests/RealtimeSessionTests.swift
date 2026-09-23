@@ -149,6 +149,69 @@ struct RealtimeSessionToggleTests {
     }
 }
 
+// MARK: - 1bis) Activation groupée des métriques connues (toujours actives)
+
+/// Couvre `enableKnownMetrics`/`disableKnownMetrics` (refonte FC temps réel —
+/// la FC en direct passe par GFDI, `REALTIME_HR`, et les cinq métriques
+/// connues sont désormais activées ensemble par `BLEManager` au premier plan,
+/// plus de toggle manuel individuel) — pilotées ici via le même communicator
+/// factice que le reste du fichier.
+struct RealtimeSessionKnownMetricsActivationTests {
+    private static let expectedKnownMetrics: Set<RealtimeMlService> = [.heartRate, .steps, .spo2, .respiration, .hrv]
+
+    @Test func enableKnownMetricsRegistersExactlyTheFiveKnownServices() throws {
+        let fake = FakeMlCommunicator()
+        let session = RealtimeSession(communicator: fake)
+
+        session.enableKnownMetrics()
+
+        #expect(Set(fake.enabledServiceCalls) == Self.expectedKnownMetrics)
+        #expect(session.enabledServices == Self.expectedKnownMetrics)
+        // L'accéléromètre a un décodeur connu mais aucun affichage naturel —
+        // volontairement absent de l'activation groupée.
+        #expect(!session.enabledServices.contains(.accelerometer))
+        // Les services opaques (sans décodeur) ne sont jamais activés par
+        // cette voie — seule setCaptureEnabled peut les enregistrer.
+        #expect(!session.enabledServices.contains(.stress))
+    }
+
+    @Test func enableKnownMetricsIsIdempotent() throws {
+        let fake = FakeMlCommunicator()
+        let session = RealtimeSession(communicator: fake)
+
+        session.enableKnownMetrics()
+        session.enableKnownMetrics()
+
+        // Un second appel ne réémet pas de REGISTER_ML_REQ pour un service déjà actif.
+        #expect(fake.enabledServiceCalls.count == Self.expectedKnownMetrics.count)
+    }
+
+    @Test func disableKnownMetricsClosesTheFiveKnownServicesAndClearsTheirValues() throws {
+        let fake = FakeMlCommunicator()
+        let session = RealtimeSession(communicator: fake)
+        session.enableKnownMetrics()
+        fake.deliverRealtime(.heartRate, Data([0x03, 0x4A, 0x3C])) // type=3, hr=74, resting=60
+        #expect(session.heartRate?.heartRate == 74)
+
+        session.disableKnownMetrics()
+
+        #expect(Set(fake.disabledServiceCalls) == Self.expectedKnownMetrics)
+        #expect(session.enabledServices.isEmpty)
+        #expect(session.heartRate == nil, "la dernière FC ne doit pas rester affichée comme si elle était encore en direct")
+    }
+
+    @Test func disableKnownMetricsIsIdempotent() throws {
+        let fake = FakeMlCommunicator()
+        let session = RealtimeSession(communicator: fake)
+        session.enableKnownMetrics()
+
+        session.disableKnownMetrics()
+        session.disableKnownMetrics()
+
+        #expect(fake.disabledServiceCalls.count == Self.expectedKnownMetrics.count)
+    }
+}
+
 // MARK: - 2) Routage handle→service, coexistence GFDI + REALTIME_*
 
 struct RealtimeSessionRoutingTests {
