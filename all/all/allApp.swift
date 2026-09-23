@@ -27,8 +27,24 @@ struct allApp: App {
         // par la même revalidation que pour un périphérique restauré plutôt que
         // de faire confiance à l'affichage figé.
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else { return }
-            BLEManager.shared.revalidateOnForeground()
+            switch newPhase {
+            case .active:
+                BLEManager.shared.revalidateOnForeground()
+                // Live-1b : la mesure + push de la FC est pilotée par le premier
+                // plan de l'app (et la connexion montre), et NON par la présence
+                // de l'onglet FC natif. Sinon, regarder « Maintenant » dans Pulse
+                // (donc quitter l'onglet FC) coupait le flux et Pulse ne démarrait
+                // jamais l'animation en direct. La montre diffuse 0x2A37 dès que
+                // « Diffuser la FC » est activé côté montre, indépendamment de
+                // notre abonnement : découpler de l'onglet ne coûte quasi rien.
+                BLEManager.shared.startLiveHeartRate()
+            case .background:
+                BLEManager.shared.stopLiveHeartRate()
+            case .inactive:
+                break // transitoire (centre de notif, app switcher) — ne pas couper
+            @unknown default:
+                break
+            }
         }
     }
 }

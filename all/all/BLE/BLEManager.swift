@@ -93,10 +93,11 @@ final class BLEManager: NSObject, ObservableObject {
 
     private let liveHeartRateEngine = LiveHeartRate.Engine()
 
-    /// Intention de l'app (vue live à l'écran) — indépendante de la présence
-    /// effective de la caractéristique, pour qu'ouvrir la vue avant que la
-    /// montre soit connectée s'abonne automatiquement dès que la découverte
-    /// de services aboutit (cf. `activateProtocolIfPossible`).
+    /// Intention de l'app (au premier plan — piloté par `allApp.swift`, plus par
+    /// l'onglet FC) — indépendante de la présence effective de la caractéristique,
+    /// pour que passer au premier plan avant que la montre soit connectée s'abonne
+    /// automatiquement dès que la découverte de services aboutit (cf.
+    /// `activateProtocolIfPossible`).
     private var wantsLiveHeartRate = false
 
     /// Recalcule `liveHeartRate` à intervalle régulier pendant que la vue
@@ -285,9 +286,10 @@ final class BLEManager: NSObject, ObservableObject {
 
     // MARK: - FC live (incrément Live-1a)
 
-    /// À appeler à l'apparition de la vue live (`onAppear`). No-op si la
-    /// caractéristique 0x2A37 n'est pas encore découverte (montre pas encore
-    /// connectée) — `wantsLiveHeartRate` reste vrai, et
+    /// À appeler quand l'app passe au premier plan (`allApp.swift`, scenePhase
+    /// `.active`) — PAS lié à l'onglet FC (cf. commentaire dans `allApp.swift`).
+    /// No-op si la caractéristique 0x2A37 n'est pas encore découverte (montre pas
+    /// encore connectée) — `wantsLiveHeartRate` reste vrai, et
     /// `activateProtocolIfPossible` s'abonnera dès que la découverte de
     /// services aboutira.
     func startLiveHeartRate() {
@@ -300,9 +302,10 @@ final class BLEManager: NSObject, ObservableObject {
         startLiveHeartRateRefreshTimer()
     }
 
-    /// À appeler à la disparition de la vue live (`onDisappear`). Coupe
-    /// l'abonnement GATT si actif — le capteur optique de la montre ne doit
-    /// pas tourner quand personne ne regarde.
+    /// À appeler quand l'app passe en arrière-plan (`allApp.swift`, scenePhase
+    /// `.background`). Coupe l'abonnement GATT si actif — inutile de recevoir la
+    /// FC quand l'app n'est plus à l'écran (et pousse un reading « éteint » pour
+    /// couper le live côté Pulse tout de suite, cf. plus bas).
     func stopLiveHeartRate() {
         guard wantsLiveHeartRate else { return }
         wantsLiveHeartRate = false
