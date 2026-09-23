@@ -163,7 +163,7 @@ final class URLSessionPulseUploadTransport: PulseUploadTransport {
 
     func send(_ request: URLRequest, fileURL: URL, completion: @escaping (Result<Int, Error>) -> Void) {
         log.info("Upload démarré pour \(fileURL.lastPathComponent, privacy: .public)")
-        let task = session.uploadTask(with: request, fromFile: fileURL) { _, response, error in
+        let task = session.uploadTask(with: request, fromFile: fileURL) { [log] data, response, error in
             if let error {
                 completion(.failure(error))
                 return
@@ -171,6 +171,14 @@ final class URLSessionPulseUploadTransport: PulseUploadTransport {
             guard let http = response as? HTTPURLResponse else {
                 completion(.failure(PulseUploadError.noHTTPResponse))
                 return
+            }
+            // Diagnostic sur rejet (non-2xx) : journalise le code EXACT + le corps
+            // de réponse (message d'erreur Nest, pas de donnée de santé) — sans ça
+            // on ne voit que « 400/413/415/422 » groupés, insuffisant pour trancher
+            // un rejet d'ingestion. Local uniquement (Console.app).
+            if !(200...299).contains(http.statusCode) {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "(vide)"
+                log.error("Upload Pulse rejeté \(http.statusCode, privacy: .public) pour \(fileURL.lastPathComponent, privacy: .public) : \(body, privacy: .public)")
             }
             completion(.success(http.statusCode))
         }
