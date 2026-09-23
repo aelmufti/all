@@ -271,13 +271,13 @@ struct HomeViewModelFormattingTests {
     }
 
     @Test func sessionMetaJoinsWeekProgressAndMisses() {
-        let detail = HomeProgrammeDetail(focus: nil, sessions: nil, done: 5, total: 9, missed: 2)
+        let detail = HomeProgrammeDetail(focus: nil, sessions: nil, done: 5, missed: 2, total: 9)
         let meta = HomeViewModel.sessionMeta(week: 3, weeks: 8, detail: detail)
         #expect(meta == "semaine 3 sur 8 · 5 séances sur 9 · 2 en retard")
     }
 
     @Test func sessionMetaWithoutWeeksOrMisses() {
-        let detail = HomeProgrammeDetail(focus: nil, sessions: nil, done: 1, total: 0, missed: 0)
+        let detail = HomeProgrammeDetail(focus: nil, sessions: nil, done: 1, missed: 0, total: 0)
         let meta = HomeViewModel.sessionMeta(week: 1, weeks: 0, detail: detail)
         #expect(meta == "semaine 1")
     }
