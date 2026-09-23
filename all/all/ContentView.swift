@@ -35,6 +35,12 @@ struct ContentView: View {
             // (0x2A37), affichage natif, aucun réseau (cf. CLAUDE.md).
             LiveHeartRateView()
                 .tabItem { Label("FC", systemImage: "heart.fill") }
+
+            // Incrément Live-2 : métriques temps réel GFDI (services ML
+            // REALTIME_*) au-delà de la FC — affichage natif, aucun réseau
+            // (cf. all/docs/live2-realtime-design.md).
+            RealtimeMetricsView()
+                .tabItem { Label("Temps réel", systemImage: "waveform.path.ecg.rectangle") }
         }
     }
 

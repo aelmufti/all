@@ -7,12 +7,19 @@
 //  (service/devices/garmin/communicator/v2/CommunicatorV2.java) : découverte de la
 //  paire de caractéristiques ML (0x2810..0x2814 / +0x10), fermeture de tous les
 //  services au rattachement (`closeAllServices`), enregistrement du service GFDI
-//  par handle. Les services FILE_TRANSFER_*/REALTIME_* du pont ne sont PAS
-//  portés : rien dans ce projet ne les utilise (musique/mesures en direct, hors
-//  périmètre) — le téléchargement du manifeste directory passe par des messages
-//  GFDI ordinaires sur le service GFDI lui-même (`DOWNLOAD_REQUEST` sur l'index 0,
-//  cf. garmin-bridge/docs/roadmap.md, section « Ce que le protocole permet
-//  vraiment »), pas par un service ML dédié.
+//  par handle. Les services FILE_TRANSFER_* du pont ne sont PAS portés : rien
+//  dans ce projet ne les utilise — le téléchargement du manifeste directory passe
+//  par des messages GFDI ordinaires sur le service GFDI lui-même
+//  (`DOWNLOAD_REQUEST` sur l'index 0, cf. garmin-bridge/docs/roadmap.md, section
+//  « Ce que le protocole permet vraiment »), pas par un service ML dédié.
+//
+//  Les services `REALTIME_*` (Live-2, cf. `all/docs/live2-realtime-design.md`)
+//  SONT portés depuis cet incrément : même infrastructure REGISTER_ML_REQ/RESP
+//  que GFDI, juste un `service.rawValue` différent (cf. `enableRealtimeService`/
+//  `disableRealtimeService` plus bas) — mais JAMAIS enregistrés automatiquement
+//  (jamais dans `start()`), activation strictement à la demande, pilotée par
+//  `RealtimeSession`. Le service GFDI et sa sync automatique restent
+//  strictement inchangés par cet ajout.
 //
 //  MlrCommunicator (fiabilité Micro-Link : ACK/retransmission au niveau ML) N'EST
 //  PAS porté. Dans le pont, `GarminSession` enregistre le service GFDI via
@@ -85,11 +92,29 @@ protocol GfdiCommunicating: AnyObject {
     func sendGfdiMessage(_ frame: Data, taskName: String)
 }
 
+/// Les points d'entrée qu'une `RealtimeSession` utilise d'un communicator ML —
+/// même famille de seam que `GfdiCommunicating` ci-dessus (extrait de
+/// `CommunicatorV2` UNIQUEMENT pour permettre un communicator factice en test) :
+/// jamais de vrai CoreBluetooth/BLE en test, `CommunicatorV2` reste l'unique
+/// conformance de production (elle conforme aux deux protocoles à la fois — un
+/// seul transport, deux familles de service qui partagent le même canal de
+/// contrôle).
+protocol RealtimeMlCommunicating: AnyObject {
+    /// Rappelé pour chaque trame reçue sur un handle `REALTIME_*` — jamais pour
+    /// GFDI, qui reste sur `GfdiCommunicating.onGfdiFrame`.
+    var onRealtimeFrame: ((RealtimeMlService, Data) -> Void)? { get set }
+    /// Enregistre un service `REALTIME_*` par handle — gardé, jamais appelé
+    /// automatiquement (cf. commentaire d'en-tête de `CommunicatorV2.swift`).
+    func enableRealtimeService(_ service: RealtimeMlService)
+    /// Ferme le handle d'un service `REALTIME_*` déjà enregistré ; no-op sinon.
+    func disableRealtimeService(_ service: RealtimeMlService)
+}
+
 /// Transport GFDI V2 (Micro-Link) : enregistrement du service GFDI par handle
 /// puis relais des fragments vers/depuis `GfdiTransport`. Une instance par lien
 /// BLE ; pilotée par `BLEManager` (délégué CoreBluetooth), qui lui relaie les
 /// notifications et écritures.
-final class CommunicatorV2: GfdiCommunicating {
+final class CommunicatorV2: GfdiCommunicating, RealtimeMlCommunicating {
     private let log = Logger(subsystem: "CleanYourRoom.all", category: "gfdi")
 
     /// Identifiant client ML, valeur du pont (`GADGETBRIDGE_CLIENT_ID`) gardée à
@@ -110,10 +135,34 @@ final class CommunicatorV2: GfdiCommunicating {
         case unkResp = 8
     }
 
-    /// Seul le service GFDI est porté (cf. en-tête de fichier) ; son code ML
-    /// (1) vient de l'enum `Service` côté pont.
-    private enum MlService: UInt16 {
-        case gfdi = 1
+    /// Union des deux familles de service ML portées (cf. en-tête de fichier) :
+    /// GFDI (code 1, unique conformance historique) et `REALTIME_*` (Live-2,
+    /// codes définis par `RealtimeMlService`, `RealtimeDecoders.swift`) — même
+    /// enum `Service` côté pont, ici juste séparé en deux cas pour que le
+    /// `switch` de `handleIncoming` reste exhaustif et lisible. `Hashable` par
+    /// synthèse (aucune valeur associée qui ne le soit pas déjà :
+    /// `RealtimeMlService` est un enum à valeur brute, automatiquement
+    /// `Hashable`).
+    private enum MlService: Hashable {
+        case gfdi
+        case realtime(RealtimeMlService)
+
+        var rawValue: UInt16 {
+            switch self {
+            case .gfdi: return 1
+            case .realtime(let service): return service.rawValue
+            }
+        }
+
+        init?(rawValue: UInt16) {
+            if rawValue == 1 {
+                self = .gfdi
+            } else if let realtime = RealtimeMlService(rawValue: rawValue) {
+                self = .realtime(realtime)
+            } else {
+                return nil
+            }
+        }
     }
 
     private let peripheral: CBPeripheral
@@ -134,6 +183,13 @@ final class CommunicatorV2: GfdiCommunicating {
     /// Rappelé une fois le service GFDI (ré)enregistré et prêt à émettre —
     /// équivalent du moment où `GfdiCallback` est branché côté pont.
     var onGfdiChannelReady: (() -> Void)?
+    /// Rappelé pour chaque trame reçue sur un handle `REALTIME_*` (Live-2) —
+    /// payload direct, un seul message par notification. Contrairement à GFDI,
+    /// ces services ne fragmentent pas leurs charges utiles côté montre (pas de
+    /// COBS/réassemblage ici) : `RealtimeHeartRateCallback.onMessage` et les
+    /// autres callbacks du pont reçoivent directement `value` sans passer par
+    /// `CobsCoDec`, cf. `all/docs/live2-realtime-design.md` §3.
+    var onRealtimeFrame: ((RealtimeMlService, Data) -> Void)?
 
     /// UUID de la caractéristique de réception ML, pour que `BLEManager` (seul
     /// délégué CoreBluetooth) sache lui relayer les notifications qui la
@@ -181,6 +237,8 @@ final class CommunicatorV2: GfdiCommunicating {
         switch service {
         case .gfdi:
             handleGfdiFragment(value.dropFirst())
+        case .realtime(let realtimeService):
+            handleRealtimeFragment(realtimeService, value.dropFirst())
         }
     }
 
@@ -194,6 +252,14 @@ final class CommunicatorV2: GfdiCommunicating {
         case .failure(let error):
             log.error("Trame GFDI invalide, abandonnée : \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// Trame `REALTIME_*` reçue (Live-2) : payload direct, aucun réassemblage
+    /// (cf. commentaire de `onRealtimeFrame`) — juste relayée telle quelle à
+    /// `RealtimeSession` via le callback.
+    private func handleRealtimeFragment(_ service: RealtimeMlService, _ payload: Data) {
+        log.debug("Trame temps réel reçue : service=\(String(describing: service), privacy: .public) \(payload.count, privacy: .public) o")
+        onRealtimeFrame?(service, payload)
     }
 
     /// Envoie une trame GFDI déjà construite (`GfdiFrame.build`) : encodage COBS
@@ -210,6 +276,35 @@ final class CommunicatorV2: GfdiCommunicating {
             write(fragment)
         }
         log.debug("GFDI envoyé (\(taskName, privacy: .public)) : \(frame.count, privacy: .public) o -> \(fragments.count, privacy: .public) fragment(s)")
+    }
+
+    // MARK: - Services ML `REALTIME_*` (Live-2) — enregistrement à la demande
+    //
+    // Même infrastructure REGISTER_ML_REQ/RESP/CLOSE_HANDLE que GFDI (cf.
+    // en-tête de fichier et `all/docs/live2-realtime-design.md` §3) : juste un
+    // `service.rawValue` différent. JAMAIS appelées automatiquement (ni dans
+    // `start()`, ni ailleurs) — activation strictement à la demande, pilotée
+    // par `RealtimeSession` (toggle utilisateur explicite par métrique).
+
+    /// Enregistre un service `REALTIME_*` par handle. Pas de vérification que
+    /// le canal GFDI est déjà ouvert : le canal de contrôle (handle 0) est
+    /// indépendant du service GFDI lui-même — HYPOTHÈSE non vérifiée contre le
+    /// matériel (à confronter lors d'une capture réelle, cf. doc §2.2).
+    func enableRealtimeService(_ service: RealtimeMlService) {
+        log.info("Activation service temps réel \(String(describing: service), privacy: .public) (code=\(service.rawValue, privacy: .public))")
+        writeHandleManagement(registerServicePayload(.realtime(service), reliable: false))
+    }
+
+    /// Ferme le handle d'un service `REALTIME_*` s'il est enregistré — no-op
+    /// silencieux sinon (toggle coupé deux fois, ou jamais confirmé faute de
+    /// REGISTER_ML_RESP reçu).
+    func disableRealtimeService(_ service: RealtimeMlService) {
+        guard let handle = handleByService[.realtime(service)] else {
+            log.debug("disableRealtimeService(\(String(describing: service), privacy: .public)) ignoré : pas enregistré")
+            return
+        }
+        log.info("Désactivation service temps réel \(String(describing: service), privacy: .public) (handle=\(handle, privacy: .public))")
+        writeHandleManagement(closeHandlePayload(service: .realtime(service), handle: handle))
     }
 
     /// HYPOTHÈSE : `peripheral.maximumWriteValueLength(for:)` reflète la MTU
@@ -317,6 +412,22 @@ final class CommunicatorV2: GfdiCommunicating {
         writer.writeUInt64LE(Self.clientID)
         writer.writeUInt16LE(service.rawValue)
         writer.writeUInt8(reliable ? 2 : 0)
+        return writer.data
+    }
+
+    /// Même disposition que `registerServicePayload` — porté de
+    /// `CommunicatorV2.closeService` côté pont (AGPL-3.0) : ferme un service ML
+    /// déjà enregistré, en nommant son propre handle (le dernier octet, pas le
+    /// handle de contrôle 0 en tête). Utilisé par `disableRealtimeService` ; le
+    /// service GFDI ne s'auto-ferme jamais depuis ce fichier (seule la montre
+    /// peut le fermer, cf. `.closeHandleResp` dans `processHandleManagement`).
+    private func closeHandlePayload(service: MlService, handle: UInt8) -> Data {
+        var writer = GarminByteWriter()
+        writer.writeUInt8(0) // handle de contrôle
+        writer.writeUInt8(RequestType.closeHandleReq.rawValue)
+        writer.writeUInt64LE(Self.clientID)
+        writer.writeUInt16LE(service.rawValue)
+        writer.writeUInt8(handle)
         return writer.data
     }
 }
