@@ -4,6 +4,34 @@
 > Notes courtes : état + décisions + prochaine étape. Le plan de fond vit dans
 > `CADRAGE.md` (§8 = incréments), les invariants dans `CLAUDE.md`.
 
+## 2026-09-23 — Live-2 core (natif + capture) branché, revu Opus, installé device
+
+Décisions utilisateur : inclure le harnais de capture des opaques ; afficher natif **+**
+push Pulse — mais **séquencé** : cette étape = **core natif + capture, ZÉRO réseau** ; le push
+Pulse est **Live-2b** (après la capture matérielle, quand on saura quoi pousser).
+
+**Livré (agent Sonnet, revu Opus, build+tests verts, commité `7800646`, installé device) :**
+- `CommunicatorV2` : enregistrement des services `REALTIME_*` (même canal `REGISTER_ML` que
+  GFDI, `enable/disableRealtimeService` **gardés**, jamais dans `start()`), routage des trames
+  vers `onRealtimeFrame`, `closeHandlePayload` porté du pont. Seam `RealtimeMlCommunicating`.
+  **GFDI/sync strictement inchangés.**
+- `RealtimeSession` : toggles par métrique ; décode les connues (pas, SpO2, respiration, VFC) ;
+  delta pas stateful ; **mode capture gardé** (log octets bruts, `os.Logger` catégorie
+  `gfdi-realtime`) réservé aux opaques, jamais aux connues, jamais par défaut, jamais réseau.
+- Onglet **« Temps réel »** : valeurs en direct + section Capture (stress, body battery,
+  calories, intensité) avec compteur de trames.
+
+**Hypothèses à confirmer matériel** : (a) les trames `REALTIME_*` ne sont pas fragmentées
+(payload direct, pas de COBS) ; (b) enregistrer un service `REALTIME_*` ne requiert pas le canal
+GFDI ouvert ; (c) la Venu 2 sert bien les 4 services opaques.
+
+**SESSION DE CAPTURE À FAIRE (utilisateur, matériel)** : connecter la montre, onglet « Temps
+réel », activer une métrique connue → vérifier la valeur ; activer la **capture** d'un service
+opaque → lire les octets bruts dans Console.app (subsystem `CleanYourRoom.all`, catégorie
+`gfdi-realtime`, lignes « CAPTURE [service] trame #… »). Commande log dans la recette matériel
+plus bas (`sudo log collect … --device-udid …`). Les octets capturés → **Live-2b** (écrire les
+décodeurs opaques + push Pulse).
+
 ## 2026-09-23 — 3 agents Sonnet (Live-2 prépa / Path B web / robustesse), revus Opus, intégrés
 
 Lancés en parallèle (1 & 3 en worktree isolé sur `all`, 2 sur custom-connect), revus Opus,
