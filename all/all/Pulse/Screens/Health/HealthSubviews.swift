@@ -531,17 +531,54 @@ struct CaloriesSummary: View {
     var viewModel: HealthViewModel
 
     var body: some View {
-        // Une seule teinte « calories » (miroir `--m-cal`/`--c-cal`), déclinée
-        // en opacité pour distinguer actif/passif — comme `calories-chart
-        // .component.ts` (barres `var(--c-cal)` pleines vs.
-        // `color-mix(var(--m-cal) 34%, transparent)` pour la base de repos) :
-        // jamais de vert/bleu accent pour une métrique calorique.
-        HStack(spacing: PulseSpacing.lg) {
-            StatTile(label: "Actives", value: formatted(viewModel.activeCalories), unit: "kcal", accent: Color.pulseCalories)
-            StatTile(label: "Passives", value: formatted(viewModel.passiveCalories), unit: "kcal", accent: Color.pulseCalories.opacity(0.55))
-            StatTile(label: "Total", value: formatted(viewModel.totalCalories), unit: "kcal", accent: Color.pulseCalories)
+        // Histogramme 24 h empilé — base (BMR réparti, teinte calorie
+        // translucide) + actif (plein) — miroir de `app-calories-chart`
+        // (barres `var(--c-cal)` sur base `color-mix(var(--m-cal) 34%)`),
+        // à la place des 3 tuiles (l'ancienne simplification native).
+        let base = viewModel.hourlyBaseCalories
+        let active = viewModel.hourlyActiveCalories
+        return VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+            Chart {
+                ForEach(0..<24, id: \.self) { h in
+                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", base[h]), width: .ratio(0.62))
+                        .foregroundStyle(Color.pulseCalories.opacity(0.34))
+                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", active[h]), width: .ratio(0.62))
+                        .foregroundStyle(Color.pulseCalories)
+                }
+            }
+            .chartXScale(domain: -0.5...23.5)
+            .chartXAxis {
+                AxisMarks(values: [0.0, 6.0, 12.0, 18.0]) { value in
+                    AxisValueLabel {
+                        if let h = value.as(Double.self) {
+                            Text("\(Int(h))h")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 2)) {
+                    AxisGridLine().foregroundStyle(Color.pulseBorder.opacity(0.6))
+                }
+            }
+
+            HStack(spacing: PulseSpacing.md) {
+                caloriesLegend(color: Color.pulseCalories, label: "Actives \(formatted(viewModel.activeCalories))")
+                caloriesLegend(color: Color.pulseCalories.opacity(0.34), label: "Passives \(formatted(viewModel.passiveCalories))")
+                Spacer()
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func caloriesLegend(color: Color, label: String) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 9, height: 9)
+            Text(label)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
     }
 
     private func formatted(_ value: Double?) -> String {

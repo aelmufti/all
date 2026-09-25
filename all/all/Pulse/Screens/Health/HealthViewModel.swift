@@ -272,6 +272,67 @@ final class HealthViewModel {
         return (activeCalories ?? 0) + (passiveCalories ?? 0)
     }
 
+    // MARK: Calories horaires (miroir `hourlyBase`/`hourlySport`/`hourlyActive`)
+    //
+    // Le graphe calories du web est un histogramme 24 h empilé : base (BMR
+    // réparti, teinte calorie translucide) + actif (sport réparti par
+    // recouvrement d'activité, plus les calories actives non-sport pondérées
+    // par la FC au-dessus du repos, teinte calorie pleine).
+
+    /// BMR réparti heure par heure, borné à la fraction de journée écoulée.
+    var hourlyBaseCalories: [Double] {
+        guard let bmr = day?.summary.bmrKcal else { return Array(repeating: 0, count: 24) }
+        let perHour = bmr / 24
+        let elapsed = dayFraction * 24
+        return (0..<24).map { h in
+            let hd = Double(h)
+            if hd + 1 <= elapsed { return perHour }
+            if hd < elapsed { return perHour * (elapsed - hd) }
+            return 0
+        }
+    }
+
+    /// Calories de sport réparties par recouvrement de chaque activité sur les
+    /// tranches horaires (miroir de `hourlySport`).
+    private var hourlySportCalories: [Double] {
+        guard let day else { return Array(repeating: 0, count: 24) }
+        // 00 h du jour affiché dans le même repère « fake-UTC » que les ts
+        // (déjà décalés au fuseau d'affichage côté serveur), comme `dayStart`.
+        let dayStart = Self.parseDate(day.date)?.timeIntervalSince1970 ?? 0
+        var out = Array(repeating: 0.0, count: 24)
+        for activity in day.activities {
+            guard let cal = activity.calories, let dur = activity.durationS, dur > 0 else { continue }
+            let aStart = Double(activity.startTs)
+            let aEnd = Double(activity.startTs) + dur
+            for h in 0..<24 {
+                let hs = dayStart + Double(h) * 3600
+                let overlap = min(aEnd, hs + 3600) - max(aStart, hs)
+                if overlap > 0 { out[h] += cal * (overlap / dur) }
+            }
+        }
+        return out
+    }
+
+    /// Sport + non-sport réparti par le poids FC (au-dessus du repos) de chaque
+    /// heure (miroir de `hourlyActive`).
+    var hourlyActiveCalories: [Double] {
+        guard let day else { return hourlySportCalories }
+        let sport = hourlySportCalories
+        let active = activeCalories ?? 0
+        let nonSport = max(active - (day.summary.sportCalories ?? 0), 0)
+        if nonSport <= 0 { return sport }
+        let resting = day.summary.restingHr ?? 50
+        var weights = Array(repeating: 0.0, count: 24)
+        for sample in day.hr {
+            let h = Self.utcCalendar.component(.hour, from: Date(timeIntervalSince1970: sample.ts))
+            if h >= 0, h < 24 { weights[h] += max(sample.value - resting, 0) }
+        }
+        let wSum = weights.reduce(0, +)
+        return sport.enumerated().map { index, sp in
+            sp + (wSum > 0 ? nonSport * (weights[index] / wSum) : nonSport / 24)
+        }
+    }
+
     /// Fraction de la journée écoulée (1 pour un jour passé) — sert de base
     /// au calcul du BMR partiel, comme `dayFraction` côté Angular.
     private var dayFraction: Double {
