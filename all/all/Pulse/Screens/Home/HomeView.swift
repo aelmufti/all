@@ -29,6 +29,9 @@ struct HomeView: View {
     /// Menu système (Paramètres, Statut, Rapport SpO2, Montre) — hors barre
     /// d'onglets, accessible par la roue crantée (cf. `PulseShellView`).
     @State private var showSystemMenu = false
+    /// Observé pour que l'icône du bouton cycle reflète le thème courant,
+    /// y compris s'il est changé depuis les Paramètres.
+    @State private var theme = ThemeStore.shared
 
     var body: some View {
         NavigationStack {
@@ -36,6 +39,15 @@ struct HomeView: View {
                 .navigationTitle("Accueil")
                 .background(Color.pulseBackground)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            ThemeStore.shared.cycle()
+                        } label: {
+                            Image(systemName: themeIcon)
+                        }
+                        .tint(Color.pulseTextPrimary)
+                        .accessibilityLabel(themeAccessibilityLabel)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showSystemMenu = true
@@ -59,6 +71,23 @@ struct HomeView: View {
                 if Task.isCancelled { break }
                 await viewModel.refreshLive()
             }
+        }
+    }
+
+    /// Icône du bouton cycle selon le thème courant (auto/clair/sombre).
+    private var themeIcon: String {
+        switch theme.theme {
+        case .auto: return "circle.lefthalf.filled"
+        case .light: return "sun.max.fill"
+        case .dark: return "moon.fill"
+        }
+    }
+
+    private var themeAccessibilityLabel: String {
+        switch theme.theme {
+        case .auto: return "Thème : automatique"
+        case .light: return "Thème : clair"
+        case .dark: return "Thème : sombre"
         }
     }
 

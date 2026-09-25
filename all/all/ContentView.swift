@@ -19,6 +19,10 @@ import SwiftUI
 
 struct ContentView: View {
     private let auth = AuthStore.shared
+    /// Observé pour re-rendre au changement de thème (cycle déclenché depuis
+    /// l'en-tête Accueil, cf. `HomeView.swift`) — `ThemeStore` est un
+    /// singleton partagé, pas un état propre à cette vue.
+    @State private var theme = ThemeStore.shared
 
     var body: some View {
         Group {
@@ -33,6 +37,11 @@ struct ContentView: View {
                 LoginView()
             }
         }
+        // `nil` (auto) laisse le système décider ; `.light`/`.dark` force le
+        // thème — propage à l'`UITraitCollection` de la fenêtre, donc les
+        // `Color(light:dark:)` dynamiques de `DesignSystem.swift` se
+        // résolvent correctement, cf. commentaire d'en-tête de `ThemeStore`.
+        .preferredColorScheme(theme.colorScheme)
         .task {
             _ = await auth.check()
         }

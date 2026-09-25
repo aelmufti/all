@@ -35,6 +35,8 @@ struct NutritionAddFoodSheet: View {
                 switch viewModel.sheetView {
                 case .menu:
                     NutritionAddMenu(viewModel: viewModel)
+                case .scan:
+                    NutritionScanView(viewModel: viewModel)
                 case .frequent:
                     NutritionAddFrequentList(viewModel: viewModel)
                 case .manual:
@@ -64,13 +66,13 @@ struct NutritionAddFoodSheet: View {
         }
     }
 
-    /// Miroir de `SHEET_TITLES`/`sheetTitle()` (Angular) — restreint aux
-    /// trois destinations reprises ici (pas de « Scanner un code-barres »,
-    /// et toujours « Ajouter au journal » sur `.manual` puisque l'édition
-    /// d'une entrée existante n'est pas reprise).
+    /// Miroir de `SHEET_TITLES`/`sheetTitle()` (Angular) — toujours « Ajouter
+    /// au journal » sur `.manual` puisque l'édition d'une entrée existante
+    /// n'est pas reprise.
     private var title: String {
         switch viewModel.sheetView {
         case .menu: return "Ajouter un aliment"
+        case .scan: return "Scanner un code-barres"
         case .frequent: return "Aliments fréquents"
         case .manual: return "Ajouter au journal"
         }
@@ -149,6 +151,25 @@ private struct NutritionAddMenu: View {
                 }
 
                 PulseCard {
+                    Button {
+                        viewModel.openScan()
+                    } label: {
+                        HStack(spacing: PulseSpacing.md) {
+                            Image(systemName: "barcode.viewfinder")
+                                .foregroundStyle(Color.pulseTextSecondary)
+                            Text("Scanner un code-barres")
+                                .foregroundStyle(Color.pulseTextPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                        .padding(.vertical, PulseSpacing.xs)
+                    }
+                    .buttonStyle(.plain)
+
+                    Divider()
+
                     Button {
                         viewModel.openFrequentList()
                     } label: {
@@ -358,34 +379,49 @@ private struct NutritionAddManualForm: View {
                     Toggle("Enregistrer dans ma bibliothèque", isOn: $viewModel.saveToLib)
                         .font(.footnote)
                 }
-
-                HStack(spacing: PulseSpacing.sm) {
-                    Button {
-                        Task { await viewModel.addPending() }
-                    } label: {
-                        Group {
-                            if viewModel.isMutating {
-                                ProgressView()
-                            } else {
-                                Text("Ajouter")
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.pulseAccent)
-                    .disabled(isAddDisabled)
-
-                    Button {
-                        viewModel.dismissPending()
-                    } label: {
-                        Text("Annuler")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
             }
             .padding(PulseSpacing.lg)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .bottom) {
+            // Ancrée hors du `ScrollView` : `safeAreaInset` remonte
+            // automatiquement au-dessus du clavier, contrairement au dernier
+            // élément d'un `ScrollView` (masqué / hors d'atteinte tant que le
+            // clavier est affiché).
+            HStack(spacing: PulseSpacing.sm) {
+                Button {
+                    Task { await viewModel.addPending() }
+                } label: {
+                    Group {
+                        if viewModel.isMutating {
+                            ProgressView()
+                        } else {
+                            Text("Ajouter")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.pulseAccent)
+                .disabled(isAddDisabled)
+
+                Button {
+                    viewModel.dismissPending()
+                } label: {
+                    Text("Annuler")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(PulseSpacing.lg)
+            .background(
+                Color.pulseSurface
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.pulseBorder)
+                            .frame(height: 0.5)
+                    }
+            )
         }
     }
 
