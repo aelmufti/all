@@ -138,7 +138,10 @@ final class HealthViewModel {
 
     private func loadWeight() async {
         do {
-            let data: WeightData = try await client.get("api/weight", query: ["days": "90"])
+            // Fenêtre max serveur : la série/l'historique/la courbe démarrent à
+            // la toute première pesée saisie (et non 90 jours en arrière avec du
+            // vide avant la 1ʳᵉ saisie).
+            let data: WeightData = try await client.get("api/weight", query: ["days": "3660"])
             weight = data
             weightInputText = Self.formatKg(shownWeight)
         } catch {

@@ -138,6 +138,7 @@ private struct NutritionDayHeader: View {
     var viewModel: NutritionViewModel
 
     var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
         HStack(alignment: .center, spacing: PulseSpacing.md) {
             Text("Nutrition")
                 .font(.system(size: 24, weight: .semibold))
@@ -174,6 +175,10 @@ private struct NutritionDayHeader: View {
                 .buttonStyle(NutritionDayPillStyle())
                 .disabled(viewModel.isToday)
             }
+        }
+        Text(viewModel.dateLabel)
+            .font(.footnote)
+            .foregroundStyle(Color.pulseTextSecondary)
         }
     }
 }
