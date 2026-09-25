@@ -17,49 +17,67 @@ import Charts
 struct HealthDayNavigator: View {
     var viewModel: HealthViewModel
 
-    private var selectedDate: Binding<Date> {
-        Binding(
-            get: { HealthViewModel.parseDate(viewModel.date) ?? Date() },
-            set: { newDate in
-                Task { await viewModel.selectDate(HealthViewModel.formatDate(newDate)) }
-            }
-        )
+    /// Libellé court dans la pastille centrale : « aujourd'hui » sinon « d MMM ».
+    private var shortLabel: String {
+        viewModel.date == HealthViewModel.todayKey()
+            ? "aujourd'hui"
+            : HealthViewModel.shortDateLabel(viewModel.date)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            HStack(spacing: PulseSpacing.sm) {
+            HStack(spacing: 6) {
                 Button {
                     Task { await viewModel.shiftDay(by: -1) }
                 } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 44, height: 44)
+                    Text("‹").font(.system(size: 14, design: .monospaced))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(HealthDayPillStyle())
 
-                DatePicker(
-                    "Jour",
-                    selection: selectedDate,
-                    in: ...(HealthViewModel.parseDate(viewModel.maxDate) ?? Date()),
-                    displayedComponents: .date
-                )
-                .labelsHidden()
-                .datePickerStyle(.compact)
-                .frame(maxWidth: .infinity)
+                Text(shortLabel)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(Color.pulseSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
                 Button {
                     Task { await viewModel.shiftDay(by: 1) }
                 } label: {
-                    Image(systemName: "chevron.right")
-                        .frame(width: 44, height: 44)
+                    Text("›").font(.system(size: 14, design: .monospaced))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(HealthDayPillStyle())
                 .disabled(viewModel.isLastDay)
             }
             Text(viewModel.dateLabel)
                 .font(.footnote)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
+    }
+}
+
+/// Pastille de navigation de jour — miroir de `NutritionDayPillStyle`
+/// (40×40, rayon 11, `pulseSurface`/`pulseBorder`, pâlie quand désactivée).
+private struct HealthDayPillStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 40, height: 40)
+            .foregroundStyle(isEnabled ? Color.pulseTextSecondary : Color.pulseAbsent)
+            .background(isEnabled ? Color.pulseSurface : Color.pulseSurfaceAlt)
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(Color.pulseBorder.opacity(isEnabled ? 1 : 0.6), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 
@@ -352,7 +370,7 @@ struct HealthMetricChartCard: View {
         case .cardio:
             SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil, xDomain: dayDomain)
         case .stress:
-            StressBarChart(samples: day.stress, xDomain: dayDomain)
+            StressBarChart(samples: healthStressBuckets(day.stress), xDomain: dayDomain)
         case .energie:
             SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100, xDomain: dayDomain)
         case .spo2:
@@ -446,6 +464,25 @@ struct SampleLineChart: View {
             .font(.footnote)
             .foregroundStyle(Color.pulseTextSecondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Bucketise le stress en fenêtres de 5 min (moyenne par fenêtre) — miroir de
+/// `stressBuckets()` (Angular, `barSeconds:300`). Sans ça, les centaines
+/// d'échantillons bruts tracent une forêt de barres fines illisible (le
+/// « raté » signalé). Le point retourné est centré sur sa fenêtre.
+private func healthStressBuckets(_ samples: [WellnessSample]) -> [WellnessSample] {
+    guard !samples.isEmpty else { return [] }
+    let bucket = 300.0
+    var sums: [Double: (sum: Double, count: Int)] = [:]
+    for s in samples {
+        let key = (s.ts / bucket).rounded(.down) * bucket
+        let cur = sums[key] ?? (0, 0)
+        sums[key] = (cur.sum + s.value, cur.count + 1)
+    }
+    return sums.keys.sorted().map { key in
+        let agg = sums[key]!
+        return WellnessSample(ts: key + bucket / 2, value: agg.sum / Double(agg.count))
     }
 }
 
