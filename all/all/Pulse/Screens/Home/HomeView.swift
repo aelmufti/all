@@ -62,12 +62,9 @@ import SwiftUI
 
 struct HomeView: View {
     @State private var viewModel = HomeViewModel()
-    /// Menu système (Paramètres, Statut, Rapport SpO2, Montre) — hors barre
-    /// d'onglets, accessible par la roue crantée (cf. `PulseShellView`).
+    /// Paramètres (roue crantée) — hors barre d'onglets, regroupe le
+    /// secondaire iPhone (Apparence, Synchro, Profil, Statut, Montre, Compte).
     @State private var showSystemMenu = false
-    /// Observé pour que l'icône du bouton cycle reflète le thème courant,
-    /// y compris s'il est changé depuis les Paramètres.
-    @State private var theme = ThemeStore.shared
 
     var body: some View {
         NavigationStack {
@@ -78,7 +75,7 @@ struct HomeView: View {
                 // pour un cadrage uniforme (fini le grand titre et son vide).
                 .toolbar(.hidden, for: .navigationBar)
                 .sheet(isPresented: $showSystemMenu) {
-                    SystemMenuView()
+                    SettingsView()
                 }
         }
         .task { await viewModel.load() }
@@ -96,25 +93,7 @@ struct HomeView: View {
         .refreshesAtDayChange { await viewModel.load() }
     }
 
-    /// Icône du bouton cycle selon le thème courant (auto/clair/sombre).
-    private var themeIcon: String {
-        switch theme.theme {
-        case .auto: return "circle.lefthalf.filled"
-        case .light: return "sun.max.fill"
-        case .dark: return "moon.fill"
-        }
-    }
-
-    private var themeAccessibilityLabel: String {
-        switch theme.theme {
-        case .auto: return "Thème : automatique"
-        case .light: return "Thème : clair"
-        case .dark: return "Thème : sombre"
-        }
-    }
-
-    /// En-tête en contenu : titre « Accueil » 24pt + bouton thème (cycle) +
-    /// roue crantée (menu système) — même patron que les autres écrans.
+    /// En-tête en contenu : titre « Accueil » 24pt + roue crantée (Paramètres).
     private var homeHeader: some View {
         HStack(spacing: PulseSpacing.lg) {
             Text("Accueil")
@@ -123,19 +102,12 @@ struct HomeView: View {
                 .foregroundStyle(Color.pulseTextPrimary)
             Spacer()
             Button {
-                ThemeStore.shared.cycle()
-            } label: {
-                Image(systemName: themeIcon)
-            }
-            .tint(Color.pulseTextPrimary)
-            .accessibilityLabel(themeAccessibilityLabel)
-            Button {
                 showSystemMenu = true
             } label: {
                 Image(systemName: "gearshape")
             }
             .tint(Color.pulseTextPrimary)
-            .accessibilityLabel("Système")
+            .accessibilityLabel("Paramètres")
         }
         .padding(.horizontal, PulseSpacing.lg)
         .padding(.top, PulseSpacing.lg)
