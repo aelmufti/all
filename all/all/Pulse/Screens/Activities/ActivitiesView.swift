@@ -191,9 +191,11 @@ private struct ActivityRow: View {
 
     var body: some View {
         HStack(spacing: PulseSpacing.md) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(sportTint)
-                .frame(width: 3, height: 30)
+            Text(ActivitySport.emoji(sport: activity.sport))
+                .font(.system(size: 22))
+                .frame(width: 30, height: 30)
+                .background(sportTint.opacity(0.14))
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(ActivitySport.label(sport: activity.sport, subSport: activity.subSport))

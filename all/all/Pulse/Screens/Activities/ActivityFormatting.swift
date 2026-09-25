@@ -111,6 +111,25 @@ enum ActivitySport {
         icons[sport ?? ""] ?? "figure.mixed.cardio"
     }
 
+    private static let emojis: [String: String] = [
+        "running": "🏃",
+        "training": "🏋️",
+        "walking": "🚶",
+        "rockClimbing": "🧗",
+        "floorClimbing": "🧗",
+        "swimming": "🏊",
+        "cycling": "🚴",
+        "rowing": "🚣",
+        "racket": "🎾",
+        "trail": "⛰️",
+        "hiking": "🥾",
+    ]
+
+    /// Emoji du sport — pictogramme en tête de la ligne d'activité.
+    static func emoji(sport: String?) -> String {
+        emojis[sport ?? ""] ?? "🏅"
+    }
+
     /// Couleur par sport — équivalent `sportColor`/`SPORT_COLORS` (Angular,
     /// `core/sports.ts`) : chaque sport reprend la teinte d'une métrique
     /// (course/marche → vert « pas », vélo → rose « FC », escalade → orange

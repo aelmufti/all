@@ -155,6 +155,8 @@ private struct NutritionDayHeader: View {
                 Text(nutritionShortDateLabel(isToday: viewModel.isToday, date: viewModel.date))
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Color.pulseTextPrimary)
+                    .lineLimit(1)
+                    .fixedSize()
                     .padding(.horizontal, PulseSpacing.md)
                     .frame(height: 40)
                     .background(Color.pulseSurface)
