@@ -52,12 +52,43 @@ struct SettingsView: View {
             }
         case .loaded:
             Form {
+                SettingsAppearanceSection()
                 SettingsSyncSourceSection(viewModel: viewModel)
                 SettingsStatusSection(viewModel: viewModel)
                 SettingsProfileSection(viewModel: viewModel)
                 SettingsApplicationSection(viewModel: viewModel, username: auth.username)
             }
         }
+    }
+}
+
+// MARK: - Apparence (thème)
+//
+// Miroir de la feuille « Thème » Angular (`settings.component.ts`,
+// `ThemeService` `auto|light|dark`). Le réglage est partagé avec le bouton
+// cycle de l'en-tête Accueil via `ThemeStore.shared` (persisté `pulse-theme`,
+// appliqué au root par `.preferredColorScheme`).
+
+private struct SettingsAppearanceSection: View {
+    @State private var theme = ThemeStore.shared
+
+    var body: some View {
+        Section {
+            Picker("Thème", selection: themeBinding) {
+                Text("Automatique").tag(ThemeStore.Theme.auto)
+                Text("Clair").tag(ThemeStore.Theme.light)
+                Text("Sombre").tag(ThemeStore.Theme.dark)
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Apparence")
+        } footer: {
+            Text("« Automatique » suit le réglage clair/sombre de l'iPhone.")
+        }
+    }
+
+    private var themeBinding: Binding<ThemeStore.Theme> {
+        Binding(get: { theme.theme }, set: { theme.theme = $0 })
     }
 }
 

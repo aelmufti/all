@@ -294,7 +294,8 @@ private struct ProgrammeSessionRow: View {
                     }
                 }
                 .font(.title3)
-                .frame(width: 32, height: 32)
+                // Web `.tick { width:38px; height:38px }` (programme.component.ts).
+                .frame(width: 38, height: 38)
 
                 Button(action: onToggleExpand) {
                     VStack(alignment: .leading, spacing: 2) {

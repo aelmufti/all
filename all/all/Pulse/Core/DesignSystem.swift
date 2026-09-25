@@ -142,7 +142,11 @@ struct PulseCard<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+        // SCSS `--gap-card: 12px` (`PulseSpacing.md`) — interligne entre les
+        // éléments directs d'une carte non instrumentée (les cartes qui
+        // gèrent déjà leur propre espacement interne, via un `VStack` imbriqué
+        // avec son propre `spacing`, ne sont pas affectées).
+        VStack(alignment: .leading, spacing: PulseSpacing.md) {
             content
         }
         .padding(PulseSpacing.lg)

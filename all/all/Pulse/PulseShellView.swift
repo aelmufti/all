@@ -66,6 +66,9 @@ struct PulseShellView: View {
     /// Onglets déjà visités — instanciés une fois puis conservés (état + scroll
     /// préservés, pas de rechargement réseau à chaque bascule).
     @State private var visited: Set<PulseTab> = [.accueil]
+    /// Incrémenté à chaque appui sur le FAB « + » (onglet Nutrition) — poussé à
+    /// `NutritionView` qui ouvre alors sa feuille d'ajout.
+    @State private var nutritionAddTrigger = 0
 
     var body: some View {
         ZStack {
@@ -76,6 +79,17 @@ struct PulseShellView: View {
                         .allowsHitTesting(candidate == tab)
                         .zIndex(candidate == tab ? 1 : 0)
                 }
+            }
+        }
+        // FAB « + » de la Nutrition : posé AVANT le `safeAreaInset` de la barre
+        // pour être inséré dans la zone AU-DESSUS d'elle (il flotte, comme le
+        // `.fab` web en `position:fixed; z-index:90`). En overlay du
+        // `ScrollView` de l'écran il passait derrière la barre — intouchable.
+        .overlay(alignment: .bottomTrailing) {
+            if tab == .nutrition {
+                NutritionFab { nutritionAddTrigger &+= 1 }
+                    .padding(.trailing, 18) // web `.fab { right:18px }`
+                    .padding(.bottom, PulseSpacing.lg)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -92,10 +106,31 @@ struct PulseShellView: View {
         case .accueil: HomeView()
         case .activites: ActivitiesView()
         case .sante: HealthView()
-        case .nutrition: NutritionView()
+        case .nutrition: NutritionView(addTrigger: nutritionAddTrigger)
         case .programme: ProgrammeView()
         case .statistiques: DashboardView()
         }
+    }
+}
+
+/// Bouton flottant « + » qui ouvre l'ajout d'aliment — miroir de `.fab`
+/// (web, `position:fixed; right:18px; bottom:calc(80px + var(--sab)); z-index:90`).
+/// Vit dans la coquille (et non dans `NutritionView`) pour flotter au-dessus
+/// de la barre d'onglets, cf. l'overlay ci-dessus.
+private struct NutritionFab: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.pulseSurface)
+                .frame(width: 56, height: 56)
+                .background(Color.pulseTextPrimary)
+                .clipShape(Circle())
+                .shadow(color: .black.opacity(0.25), radius: 10, x: 0, y: 4)
+        }
+        .accessibilityLabel("Ajouter un aliment")
     }
 }
 

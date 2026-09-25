@@ -239,6 +239,7 @@ final class NutritionViewModel {
 
     enum AddSheetView: Equatable {
         case menu
+        case scan
         case frequent
         case manual
     }
@@ -254,6 +255,10 @@ final class NutritionViewModel {
     private(set) var searchSource: String = "local"
     private(set) var onlineDone = false
     private var searchTask: Task<Void, Never>?
+
+    // Scan de code-barres (vue caméra `.scan`) — état du lookup Pulse.
+    private(set) var lookupMsg: String?
+    private(set) var isLookingUp = false
 
     // Formulaire (saisie manuelle / aliment repéré) — miroir des champs
     // `pName`/`pKcal`/…/`amount`/`pTime`/`saveToLib` (Angular).
@@ -277,6 +282,7 @@ final class NutritionViewModel {
     func openAddSheet() {
         clearSearch()
         cancelPending()
+        lookupMsg = nil
         sheetView = .menu
         sheetBack = .menu
         addSheetOpen = true
@@ -299,6 +305,45 @@ final class NutritionViewModel {
     func openFrequentList() {
         sheetBack = .menu
         sheetView = .frequent
+    }
+
+    /// Ligne « Scanner un code-barres » du menu — ouvre la vue caméra. Miroir
+    /// de `openSheet('scan')` (Angular).
+    func openScan() {
+        lookupMsg = nil
+        sheetBack = .menu
+        sheetView = .scan
+    }
+
+    /// Code-barres lu par la caméra : résout le produit via Pulse
+    /// (`GET api/nutrition/barcode/{code}`), pré-remplit le formulaire manuel
+    /// si trouvé (avec `sheetBack = .scan` pour revenir au scanner), sinon
+    /// affiche un message. Miroir de `onBarcode()` (Angular). Réseau autorisé
+    /// explicitement (même serveur Pulse que la recherche en ligne).
+    func lookupBarcode(_ code: String) async {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Le serveur n'accepte qu'un EAN/UPC de 6 à 14 chiffres — filtrage
+        // client pour ignorer une lecture parasite sans provoquer un 400.
+        guard trimmed.range(of: "^[0-9]{6,14}$", options: .regularExpression) != nil else { return }
+        // Anti-rebond : la caméra rappelle en rafale le même code.
+        guard !isLookingUp, sheetView == .scan else { return }
+        isLookingUp = true
+        lookupMsg = "Recherche du code-barres…"
+        defer { isLookingUp = false }
+        do {
+            let result: NutritionBarcodeResult = try await client.get("api/nutrition/barcode/\(trimmed)")
+            guard sheetView == .scan else { return } // l'utilisateur a quitté entre-temps
+            if result.found, let food = result.food {
+                setPending(food)
+                sheetBack = .scan
+                sheetView = .manual
+                lookupMsg = nil
+            } else {
+                lookupMsg = "Code-barres inconnu — saisis l'aliment à la main."
+            }
+        } catch {
+            lookupMsg = "Erreur de recherche du code-barres."
+        }
     }
 
     /// Ligne « Saisie manuelle » du menu — formulaire vierge. Miroir de
