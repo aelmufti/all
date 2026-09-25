@@ -144,7 +144,7 @@ private struct ActivitiesHeader: View {
         HStack(alignment: .firstTextBaseline) {
             Text("Activités")
                 .font(.system(size: 24, weight: .semibold))
-                .tracking(-0.24)
+                .tracking(-0.2)
                 .foregroundStyle(Color.pulseTextPrimary)
             Spacer()
             Text(countLabel)
