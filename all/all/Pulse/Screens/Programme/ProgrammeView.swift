@@ -29,8 +29,10 @@ struct ProgrammeView: View {
         NavigationStack {
             content
                 .background(Color.pulseBackground)
-                .navigationTitle("Programme")
-                .navigationBarTitleDisplayMode(.inline)
+                // Titre porté en contenu (`header`, 24pt) : le titre système
+                // en plus affichait « Programme » deux fois (barre + contenu),
+                // l'un au-dessus de l'autre. Barre masquée, comme les autres écrans.
+                .toolbar(.hidden, for: .navigationBar)
         }
         .task {
             await viewModel.load()
@@ -93,7 +95,10 @@ struct ProgrammeView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Programme").font(.largeTitle.bold())
+            Text("Programme")
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.2)
+                .foregroundStyle(Color.pulseTextPrimary)
             Spacer()
             Text(programmeActiveNote(viewModel.domains))
                 .font(.system(size: 11, design: .monospaced))
