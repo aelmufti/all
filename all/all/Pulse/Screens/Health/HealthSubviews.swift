@@ -510,8 +510,7 @@ struct StressBarChart: View {
             Chart(samples, id: \.ts) { sample in
                 BarMark(
                     x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
-                    y: .value("Stress", sample.value),
-                    width: .ratio(1)
+                    y: .value("Stress", sample.value)
                 )
                 .foregroundStyle(zoneColor(sample.value))
             }
@@ -549,20 +548,19 @@ struct CaloriesSummary: View {
         let active = viewModel.hourlyActiveCalories
         let hasData = zip(base, active).contains { $0 > 0 || $1 > 0 }
         if hasData {
-            Chart {
-                ForEach(0..<24, id: \.self) { h in
-                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", base[h]), width: .ratio(0.7))
-                        .foregroundStyle(Color.pulseCalories.opacity(0.34))
-                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", active[h]), width: .ratio(0.7))
-                        .foregroundStyle(Color.pulseCalories)
-                }
+            // Patron `Chart(data:id:)` (comme les autres graphes) plutôt que
+            // `Chart { ForEach }`, qui ne produisait aucune barre visible.
+            Chart(Array(0..<24), id: \.self) { h in
+                BarMark(x: .value("Heure", h), y: .value("kcal", base[h]), width: .ratio(0.7))
+                    .foregroundStyle(Color.pulseCalories.opacity(0.34))
+                BarMark(x: .value("Heure", h), y: .value("kcal", active[h]), width: .ratio(0.7))
+                    .foregroundStyle(Color.pulseCalories)
             }
-            .chartXScale(domain: -0.5...23.5)
             .chartXAxis {
-                AxisMarks(values: [0.0, 6.0, 12.0, 18.0]) { value in
+                AxisMarks(values: [0, 6, 12, 18]) { value in
                     AxisValueLabel {
-                        if let h = value.as(Double.self) {
-                            Text("\(Int(h))h")
+                        if let h = value.as(Int.self) {
+                            Text("\(h)h")
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
