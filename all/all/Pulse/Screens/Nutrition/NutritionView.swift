@@ -96,9 +96,12 @@ struct NutritionView: View {
                 }
 
                 if let day = viewModel.day {
-                    NutritionJournalCard(day: day, isMutating: viewModel.isMutating) { id in
-                        Task { await viewModel.deleteEntry(id) }
-                    }
+                    NutritionJournalCard(
+                        day: day,
+                        isMutating: viewModel.isMutating,
+                        onEdit: { entry in viewModel.editEntry(entry) },
+                        onDelete: { id in Task { await viewModel.deleteEntry(id) } }
+                    )
                 }
 
                 if let day = viewModel.day {
@@ -601,6 +604,7 @@ private struct NutritionPill: View {
 private struct NutritionJournalCard: View {
     let day: NutritionDay
     let isMutating: Bool
+    let onEdit: (NutritionEntry) -> Void
     let onDelete: (Int) -> Void
 
     var body: some View {
@@ -622,22 +626,35 @@ private struct NutritionJournalCard: View {
                             NutritionHairline()
                         }
                         HStack(alignment: .top, spacing: PulseSpacing.md) {
-                            Text(entry.ts.map(nutritionClock) ?? "—:—")
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(Color.pulseTextSecondary)
-                                .frame(width: 38, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(entry.name) · \(nutritionPortion(grams: entry.grams, units: entry.unitQty, label: entry.unitLabel))")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(Color.pulseTextPrimary)
-                                Text("\(nutritionValueText(entry.protein)) P · \(nutritionValueText(entry.carbs)) G · \(nutritionValueText(entry.fiber)) F")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(Color.pulseTextSecondary)
+                            // Toucher la ligne édite l'entrée (formulaire
+                            // pré-rempli → PUT log/:id) — miroir de `editEntry`.
+                            Button {
+                                onEdit(entry)
+                            } label: {
+                                HStack(alignment: .top, spacing: PulseSpacing.md) {
+                                    Text(entry.ts.map(nutritionClock) ?? "—:—")
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(Color.pulseTextSecondary)
+                                        .frame(width: 38, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("\(entry.name) · \(nutritionPortion(grams: entry.grams, units: entry.unitQty, label: entry.unitLabel))")
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundStyle(Color.pulseTextPrimary)
+                                            .multilineTextAlignment(.leading)
+                                        Text("\(nutritionValueText(entry.protein)) P · \(nutritionValueText(entry.carbs)) G · \(nutritionValueText(entry.fiber)) F")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(Color.pulseTextSecondary)
+                                    }
+                                    Spacer(minLength: PulseSpacing.sm)
+                                    Text(nutritionValueText(entry.kcal))
+                                        .font(.system(size: 14, design: .monospaced))
+                                        .foregroundStyle(Color.pulseTextPrimary)
+                                }
+                                .contentShape(Rectangle())
                             }
-                            Spacer(minLength: PulseSpacing.sm)
-                            Text(nutritionValueText(entry.kcal))
-                                .font(.system(size: 14, design: .monospaced))
-                                .foregroundStyle(Color.pulseTextPrimary)
+                            .buttonStyle(.plain)
+                            .disabled(isMutating)
+
                             Button {
                                 onDelete(entry.id)
                             } label: {

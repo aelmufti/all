@@ -264,6 +264,10 @@ final class NutritionViewModel {
     // `pName`/`pKcal`/…/`amount`/`pTime`/`saveToLib` (Angular).
     private var pId: Int?
     private var pBarcode: String?
+    /// Id de l'entrée du journal en cours d'édition (`nil` = ajout). Miroir de
+    /// `editingId` (Angular) : bascule `addPending` de `POST log` vers
+    /// `PUT log/:id`, et adapte titre/bouton/retour de la feuille.
+    private(set) var editingEntryId: Int?
     var pName = ""
     var pKcal: Double?
     var pProtein: Double?
@@ -356,6 +360,41 @@ final class NutritionViewModel {
         ))
         sheetBack = .menu
         sheetView = .manual
+    }
+
+    /// Ouvre le formulaire pré-rempli sur une entrée déjà journalisée pour la
+    /// modifier (`PUT log/:id` à l'enregistrement). Miroir de `editEntry()`
+    /// (Angular) : les macros stockées sont absolues (valeurs de la portion) ;
+    /// on les reconvertit en /100 g pour le formulaire (valeur / grammes × 100).
+    func editEntry(_ entry: NutritionEntry) {
+        func per100(_ value: Double?) -> Double? {
+            guard let value, entry.grams > 0 else { return value }
+            return (value / entry.grams * 100 * 10).rounded() / 10
+        }
+        pId = nil
+        pBarcode = nil
+        pName = entry.name
+        pKcal = per100(entry.kcal)
+        pProtein = per100(entry.protein)
+        pCarbs = per100(entry.carbs)
+        pFiber = per100(entry.fiber)
+        pFat = per100(entry.fat)
+        pUnitLabel = entry.unitLabel ?? ""
+        if let units = entry.unitQty, units > 0, entry.unitLabel?.isEmpty == false {
+            pUnitGrams = (entry.grams / units * 10).rounded() / 10
+            unitMode = true
+            amount = units
+        } else {
+            pUnitGrams = nil
+            unitMode = false
+            amount = entry.grams
+        }
+        pTime = Self.hm(from: entry.ts)
+        saveToLib = false
+        editingEntryId = entry.id
+        sheetBack = .menu
+        sheetView = .manual
+        addSheetOpen = true
     }
 
     // MARK: Recherche
@@ -470,6 +509,7 @@ final class NutritionViewModel {
     // MARK: Formulaire (saisie manuelle)
 
     private func setPending(_ food: NutritionFoodLite) {
+        editingEntryId = nil
         pId = food.id
         pBarcode = food.barcode
         pName = food.name
@@ -529,6 +569,7 @@ final class NutritionViewModel {
     }
 
     func cancelPending() {
+        editingEntryId = nil
         pId = nil
         pBarcode = nil
         pName = ""
@@ -565,7 +606,9 @@ final class NutritionViewModel {
 
         let unitLabelForRequest = pUnitGrams != nil ? Self.unitName(pUnitLabel) : nil
         do {
-            if saveToLib {
+            // En édition d'une entrée du journal, on ne (re)crée pas d'aliment
+            // en bibliothèque : on met seulement à jour la ligne journalisée.
+            if saveToLib, editingEntryId == nil {
                 let foodBody = NutritionFoodCreateRequest(
                     name: pName, barcode: pBarcode,
                     kcal: pKcal, protein: pProtein, carbs: pCarbs, fiber: pFiber, fat: pFat,
@@ -592,7 +635,11 @@ final class NutritionViewModel {
             } else {
                 logBody.grams = amount
             }
-            let _: NutritionLogResponse = try await client.post("api/nutrition/log", body: logBody)
+            if let editId = editingEntryId {
+                let _: NutritionOkResponse = try await client.put("api/nutrition/log/\(editId)", body: logBody)
+            } else {
+                let _: NutritionLogResponse = try await client.post("api/nutrition/log", body: logBody)
+            }
 
             cancelPending()
             clearSearch()
@@ -630,6 +677,16 @@ final class NutritionViewModel {
         return formatter.string(from: Date())
     }
 
+    /// « HH:mm » local d'un epoch (heure d'une entrée éditée) — `nowHM()` si nil.
+    private static func hm(from ts: Int?) -> String {
+        guard let ts else { return nowHM() }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
+    }
+
     private static func unitName(_ label: String) -> String {
         let trimmed = label.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? "unité" : trimmed
@@ -650,4 +707,9 @@ final class NutritionViewModel {
         formatter.maximumFractionDigits = 0
         return formatter.string(from: NSNumber(value: value.rounded())) ?? String(Int(value.rounded()))
     }
+}
+
+/// Réponse minimale `{ ok }` de `PUT api/nutrition/log/:id`.
+struct NutritionOkResponse: Decodable {
+    let ok: Bool?
 }
