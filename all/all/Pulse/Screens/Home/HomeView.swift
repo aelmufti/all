@@ -72,28 +72,11 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Accueil")
                 .background(Color.pulseBackground)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            ThemeStore.shared.cycle()
-                        } label: {
-                            Image(systemName: themeIcon)
-                        }
-                        .tint(Color.pulseTextPrimary)
-                        .accessibilityLabel(themeAccessibilityLabel)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showSystemMenu = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .tint(Color.pulseTextPrimary)
-                        .accessibilityLabel("Système")
-                    }
-                }
+                // En-tête porté en contenu (titre 24pt + thème + roue, cf.
+                // `homeHeader`) comme les autres écrans : barre système masquée
+                // pour un cadrage uniforme (fini le grand titre et son vide).
+                .toolbar(.hidden, for: .navigationBar)
                 .sheet(isPresented: $showSystemMenu) {
                     SystemMenuView()
                 }
@@ -130,6 +113,35 @@ struct HomeView: View {
         }
     }
 
+    /// En-tête en contenu : titre « Accueil » 24pt + bouton thème (cycle) +
+    /// roue crantée (menu système) — même patron que les autres écrans.
+    private var homeHeader: some View {
+        HStack(spacing: PulseSpacing.lg) {
+            Text("Accueil")
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.2)
+                .foregroundStyle(Color.pulseTextPrimary)
+            Spacer()
+            Button {
+                ThemeStore.shared.cycle()
+            } label: {
+                Image(systemName: themeIcon)
+            }
+            .tint(Color.pulseTextPrimary)
+            .accessibilityLabel(themeAccessibilityLabel)
+            Button {
+                showSystemMenu = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .tint(Color.pulseTextPrimary)
+            .accessibilityLabel("Système")
+        }
+        .padding(.horizontal, PulseSpacing.lg)
+        .padding(.top, PulseSpacing.lg)
+        .padding(.bottom, PulseSpacing.md)
+    }
+
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
@@ -142,6 +154,7 @@ struct HomeView: View {
         case .loaded:
             ScrollView {
                 VStack(spacing: 0) {
+                    homeHeader
                     NowSection(viewModel: viewModel)
                     WeekTrainingSection(viewModel: viewModel)
                     if let session = viewModel.session {

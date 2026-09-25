@@ -118,7 +118,7 @@ struct NutritionView: View {
                 }
             }
             .padding(.horizontal, PulseSpacing.lg)
-            .padding(.top, PulseSpacing.sm)
+            .padding(.top, PulseSpacing.lg)
             // Espace pour ne pas laisser le FAB recouvrir la dernière carte.
             .padding(.bottom, PulseSpacing.xxl)
         }
