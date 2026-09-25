@@ -28,6 +28,8 @@ struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
     private let auth = AuthStore.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var showStatus = false
+    @State private var showWatch = false
 
     var body: some View {
         NavigationStack {
@@ -39,6 +41,8 @@ struct SettingsView: View {
         .task {
             await viewModel.load()
         }
+        .sheet(isPresented: $showStatus) { StatusView() }
+        .sheet(isPresented: $showWatch) { WatchSectionView() }
     }
 
     @ViewBuilder
@@ -55,6 +59,7 @@ struct SettingsView: View {
                 SettingsAppearanceSection()
                 SettingsSyncSourceSection(viewModel: viewModel)
                 SettingsStatusSection(viewModel: viewModel)
+                SettingsSystemSection(onStatus: { showStatus = true }, onWatch: { showWatch = true })
                 SettingsProfileSection(viewModel: viewModel)
                 SettingsApplicationSection(viewModel: viewModel, username: auth.username)
             }
@@ -341,6 +346,64 @@ private struct SettingsProfileSection: View {
         } footer: {
             Text("Sert au métabolisme de base, à l'âge physiologique et à l'objectif calorique dynamique. Le poids se saisit jour par jour sur la page Santé.")
         }
+    }
+}
+
+// MARK: - Système (Statut + Montre)
+//
+// Regroupe le secondaire iPhone dans Paramètres : accès à l'écran Statut
+// (`/statut`) et à la section Montre (collecteur BLE). L'ancien menu système
+// séparé et l'entrée « Rapport SpO2 » (toujours accessible depuis Santé) ont
+// été retirés.
+
+private struct SettingsSystemSection: View {
+    let onStatus: () -> Void
+    let onWatch: () -> Void
+
+    var body: some View {
+        Section("Système") {
+            Button(action: onStatus) {
+                SettingsSystemRow(
+                    icon: "dot.radiowaves.up.forward",
+                    title: "Statut",
+                    subtitle: "Lien BLE, synchronisation automatique"
+                )
+            }
+            Button(action: onWatch) {
+                SettingsSystemRow(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "Montre",
+                    subtitle: "Collecteur : diagnostic BLE, temps réel"
+                )
+            }
+        }
+    }
+}
+
+private struct SettingsSystemRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: PulseSpacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 17))
+                .foregroundStyle(Color.pulseAccent)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
+        .contentShape(Rectangle())
     }
 }
 
