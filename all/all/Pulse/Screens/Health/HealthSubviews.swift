@@ -378,10 +378,9 @@ struct HealthMetricChartCard: View {
         case .cardio:
             SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil, xDomain: dayDomain)
         case .stress:
-            // Courbe teintée stress (0–100) plutôt que des barres 5 min tassées
-            // qui, en Swift Charts, rendaient mal / se vidaient. Réutilise le
-            // même graphe fiable que FC/SpO2 (aire + ligne).
-            SampleLineChart(samples: day.stress, color: Color.pulseStress, yRange: 0...100, xDomain: dayDomain)
+            // Barres colorées par zone (repos/bas/moyen/élevé), dessinées à la
+            // main comme les calories : Swift Charts rendait les barres vides.
+            StressZoneChart(samples: day.stress, dayStart: dayDomain.lowerBound.timeIntervalSince1970)
         case .energie:
             SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100, xDomain: dayDomain)
         case .spo2:
@@ -523,6 +522,60 @@ struct StressBarChart: View {
     }
 
     /// Miroir de `stressBarColor` (Angular) — 4 zones `--s-rest/-low/-mid/-high`.
+    private func zoneColor(_ value: Double) -> Color {
+        switch value {
+        case ..<25: return Color.pulseStressRest
+        case ..<50: return Color.pulseStressLow
+        case ..<75: return Color.pulseStressMid
+        default: return Color.pulseStressHigh
+        }
+    }
+}
+
+/// Barres de stress par zone, dessinées à la main (Canvas) sur la journée
+/// (00h→24h) — miroir de `stressBarColor`/`barSeconds:300` (web). Chaque
+/// fenêtre de 5 min : une barre colorée par zone (repos/bas/moyen/élevé),
+/// hauteur = valeur/100. Dessin manuel car Swift Charts rendait les barres
+/// vides (comme pour les calories).
+private struct StressZoneChart: View {
+    let samples: [WellnessSample]
+    let dayStart: TimeInterval
+
+    private let span: Double = 86_400
+
+    var body: some View {
+        let buckets = healthStressBuckets(samples)
+        if buckets.isEmpty {
+            Text("Aucune donnée pour ce jour.")
+                .font(.footnote)
+                .foregroundStyle(Color.pulseTextSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 6) {
+                Canvas { context, size in
+                    let slotW = max(size.width * 300 / span, 1)
+                    for bucket in buckets {
+                        let fx = (bucket.ts - dayStart) / span
+                        guard fx >= 0, fx <= 1 else { continue }
+                        let barH = min(max(bucket.value / 100, 0), 1) * size.height
+                        let rect = CGRect(
+                            x: fx * size.width - slotW / 2,
+                            y: size.height - barH,
+                            width: slotW,
+                            height: barH
+                        )
+                        context.fill(Path(rect), with: .color(zoneColor(bucket.value)))
+                    }
+                }
+                HStack {
+                    Text("0h"); Spacer(); Text("6h"); Spacer(); Text("12h"); Spacer(); Text("18h"); Spacer(); Text("24h")
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Color.pulseTextSecondary)
+            }
+        }
+    }
+
     private func zoneColor(_ value: Double) -> Color {
         switch value {
         case ..<25: return Color.pulseStressRest
