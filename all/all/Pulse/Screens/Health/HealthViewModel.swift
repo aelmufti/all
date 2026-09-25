@@ -336,8 +336,19 @@ final class HealthViewModel {
 
     // MARK: - Formatage / dates (calendaire UTC, comme le serveur — jamais `Date` dans les modèles)
 
+    /// « Aujourd'hui » en calendrier **local** (pas UTC) — cale sur la bascule
+    /// de jour du serveur (jour local du process Nest, même fuseau que le
+    /// téléphone). L'UTC retardait d'1-2 h → le jour ne changeait pas à minuit.
     static func todayKey() -> String {
-        formatDate(Date())
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// Déclenché au changement de jour local (`refreshesAtDayChange`) : si
+    /// l'utilisateur est sur le dernier jour connu, recharge — `load()` re-cale
+    /// la date sur le jour le plus récent (le nouveau, dès qu'il a des données).
+    func reloadForNewDay() async {
+        if isLastDay { await load() }
     }
 
     private static var utcCalendar: Calendar = {

@@ -48,6 +48,9 @@ struct NutritionView: View {
         .task {
             await viewModel.load()
         }
+        // Bascule de jour à minuit local + retour premier plan (avance au
+        // nouveau jour si l'utilisateur était sur aujourd'hui).
+        .refreshesAtDayChange { await viewModel.reloadForNewDay() }
         .onChange(of: addTrigger) { _, _ in
             viewModel.openAddSheet()
         }

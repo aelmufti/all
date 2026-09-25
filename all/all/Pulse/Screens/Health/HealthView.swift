@@ -40,6 +40,9 @@ struct HealthView: View {
         .task {
             await viewModel.load()
         }
+        // Bascule de jour : à minuit local et au retour premier plan, avance au
+        // nouveau jour si l'utilisateur est sur le dernier jour connu.
+        .refreshesAtDayChange { await viewModel.reloadForNewDay() }
     }
 
     private func loaded(day: WellnessDayDetail) -> some View {

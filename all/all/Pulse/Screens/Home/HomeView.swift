@@ -108,6 +108,9 @@ struct HomeView: View {
                 await viewModel.refreshLive()
             }
         }
+        // Bascule de jour : à minuit local et au retour premier plan, recharge
+        // « aujourd'hui » (l'Accueil est toujours sur le jour courant).
+        .refreshesAtDayChange { await viewModel.load() }
     }
 
     /// Icône du bouton cycle selon le thème courant (auto/clair/sombre).

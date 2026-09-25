@@ -54,8 +54,14 @@ final class NutritionViewModel {
         return formatter
     }()
 
+    /// « Aujourd'hui » en calendrier **local** (pas UTC) — cale sur la bascule
+    /// de jour du serveur (`todayKey()` côté Nest = jour local du process, même
+    /// fuseau que le téléphone) : sans ça, l'UTC retarde d'1-2 h et le jour ne
+    /// change pas à minuit. La chaîne reste tz-agnostique (les formateurs
+    /// d'affichage la round-trippent sans décalage).
     static func today() -> String {
-        dayFormatter.string(from: Date())
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     /// `date` par défaut `nil` plutôt que `= Self.today()` : une valeur par
@@ -70,6 +76,25 @@ final class NutritionViewModel {
     }
 
     var isToday: Bool { date == Self.today() }
+
+    /// Dernier « aujourd'hui » connu — pour n'avancer d'un jour à minuit que si
+    /// l'utilisateur était sur le jour courant (pas s'il consulte le passé).
+    private var todayKeyCache = NutritionViewModel.today()
+
+    /// Déclenché au changement de jour local (`refreshesAtDayChange`) : avance
+    /// au nouveau jour si l'utilisateur était sur aujourd'hui, sinon rafraîchit
+    /// s'il y est déjà — ne touche pas à une consultation de jour passé.
+    func reloadForNewDay() async {
+        let newToday = Self.today()
+        let wasOnToday = date == todayKeyCache
+        todayKeyCache = newToday
+        if wasOnToday && date != newToday {
+            date = newToday
+            await load()
+        } else if date == newToday {
+            await load()
+        }
+    }
 
     /// Libellé long façon `dateLabel()` Angular (`"lundi 23 septembre 2026"`),
     /// en interprétant la chaîne calendaire à midi UTC pour ne jamais glisser
