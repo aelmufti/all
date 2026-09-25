@@ -378,7 +378,10 @@ struct HealthMetricChartCard: View {
         case .cardio:
             SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil, xDomain: dayDomain)
         case .stress:
-            StressBarChart(samples: healthStressBuckets(day.stress), xDomain: dayDomain)
+            // Courbe teintée stress (0–100) plutôt que des barres 5 min tassées
+            // qui, en Swift Charts, rendaient mal / se vidaient. Réutilise le
+            // même graphe fiable que FC/SpO2 (aire + ligne).
+            SampleLineChart(samples: day.stress, color: Color.pulseStress, yRange: 0...100, xDomain: dayDomain)
         case .energie:
             SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100, xDomain: dayDomain)
         case .spo2:
@@ -539,38 +542,41 @@ struct CaloriesSummary: View {
     var viewModel: HealthViewModel
 
     var body: some View {
-        // Histogramme 24 h empilé — base (BMR réparti, teinte calorie
-        // translucide) + actif (plein) — miroir de `app-calories-chart`.
-        // Un seul Chart qui remplit le cadre (comme les autres graphes) : la
-        // version précédente empilait chart + légende dans un VStack, et le
-        // Chart s'écrasait à 0 dans le cadre fixe de 180 (→ rien affiché).
+        // Histogramme 24 h empilé — base (BMR réparti, translucide) + actif
+        // (plein) — miroir de `app-calories-chart`. Dessiné à la main
+        // (GeometryReader + rectangles) plutôt qu'en Swift Charts, qui rendait
+        // le graphe vide de façon répétée. Chaque colonne : actif au-dessus de
+        // la base, aligné en bas.
         let base = viewModel.hourlyBaseCalories
         let active = viewModel.hourlyActiveCalories
-        let hasData = zip(base, active).contains { $0 > 0 || $1 > 0 }
-        if hasData {
-            // Patron `Chart(data:id:)` (comme les autres graphes) plutôt que
-            // `Chart { ForEach }`, qui ne produisait aucune barre visible.
-            Chart(Array(0..<24), id: \.self) { h in
-                BarMark(x: .value("Heure", h), y: .value("kcal", base[h]), width: .ratio(0.7))
-                    .foregroundStyle(Color.pulseCalories.opacity(0.34))
-                BarMark(x: .value("Heure", h), y: .value("kcal", active[h]), width: .ratio(0.7))
-                    .foregroundStyle(Color.pulseCalories)
-            }
-            .chartXAxis {
-                AxisMarks(values: [0, 6, 12, 18]) { value in
-                    AxisValueLabel {
-                        if let h = value.as(Int.self) {
-                            Text("\(h)h")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(Color.pulseTextSecondary)
+        let totals = (0..<24).map { base[$0] + active[$0] }
+        let maxVal = max(totals.max() ?? 0, 1)
+        if totals.contains(where: { $0 > 0 }) {
+            VStack(spacing: 6) {
+                GeometryReader { geo in
+                    let h = max(geo.size.height, 1)
+                    HStack(alignment: .bottom, spacing: 2) {
+                        ForEach(0..<24, id: \.self) { i in
+                            VStack(spacing: 0) {
+                                Spacer(minLength: 0)
+                                Rectangle()
+                                    .fill(Color.pulseCalories)
+                                    .frame(height: CGFloat(active[i] / maxVal) * h)
+                                Rectangle()
+                                    .fill(Color.pulseCalories.opacity(0.34))
+                                    .frame(height: CGFloat(base[i] / maxVal) * h)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
                         }
                     }
+                    .frame(width: geo.size.width, height: h, alignment: .bottom)
                 }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading, values: .automatic(desiredCount: 2)) {
-                    AxisGridLine().foregroundStyle(Color.pulseBorder.opacity(0.6))
+                HStack {
+                    Text("0h"); Spacer(); Text("6h"); Spacer(); Text("12h"); Spacer(); Text("18h"); Spacer(); Text("24h")
                 }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Color.pulseTextSecondary)
             }
         } else {
             Text("Aucune donnée pour ce jour.")
