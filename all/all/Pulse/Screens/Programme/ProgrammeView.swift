@@ -133,18 +133,27 @@ private struct ProgrammeLibraryCard: View {
 
     var body: some View {
         PulseCard {
+            // Web `.lab { font-family:mono; font-size:11px; letter-spacing:.12em;
+            // text-transform:uppercase; color:var(--text-dim) }` — pas
+            // `PulseFont.sectionTitle` (17px, réservé aux titres génériques),
+            // ce libellé est délibérément discret côté web.
             HStack {
-                Text("Bibliothèque").font(PulseFont.sectionTitle)
+                Text("Bibliothèque")
+                    .font(.system(size: 11, design: .monospaced))
+                    .tracking(1.3)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.pulseTextSecondary)
                 Spacer()
                 Text("\(domains.reduce(0) { $0 + $1.choices.count }) programmes")
-                    .font(.caption2)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(domains.enumerated()), id: \.element.id) { index, domain in
-                    if index > 0 {
-                        Divider()
-                    }
+                // Web `.lrow { padding:12px 0 0; border-top:1px solid var(--line) }`
+                // — TOUTES les lignes reçoivent le liseré du dessus, pas
+                // seulement à partir de la deuxième.
+                ForEach(domains) { domain in
+                    Divider()
                     Button {
                         onOpen(domain.kind)
                     } label: {
@@ -156,10 +165,13 @@ private struct ProgrammeLibraryCard: View {
                                     .foregroundStyle(Color.pulseTextSecondary)
                             }
                             Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(Color.pulseTextSecondary)
+                            // Web `.chev { color:var(--absent); font-size:17px }`.
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 17))
+                                .foregroundStyle(Color.pulseAbsent)
                         }
                         .foregroundStyle(Color.pulseTextPrimary)
-                        .padding(.vertical, PulseSpacing.sm)
+                        .padding(.top, PulseSpacing.md)
                     }
                     .buttonStyle(.plain)
                 }

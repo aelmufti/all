@@ -91,6 +91,12 @@ struct SleepCard: View {
     var viewModel: HealthViewModel
     let sleep: WellnessDaySleep
 
+    /// Présentation du rapport SpO2 — miroir du `routerLink="/rapport-spo2"`
+    /// (Angular) sur la ligne « SpO2 nocturne ». `Spo2ReportView` gère déjà sa
+    /// propre `NavigationStack`/chargement ; on la présente en feuille, comme
+    /// depuis le hub Système (`SystemMenuView`), sans dépendance croisée.
+    @State private var showingSpo2Report = false
+
     var body: some View {
         if let main = sleep.main {
             PulseCard {
@@ -105,8 +111,11 @@ struct SleepCard: View {
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 HStack(alignment: .lastTextBaseline) {
+                    // Maquette « Santé » : classe `.n44` (44px) — un jeton dédié,
+                    // plus grand que `PulseFont.metricValue` (36, générique
+                    // StatTile), sans toucher à `DesignSystem.swift`.
                     Text(HealthViewModel.sleepShort(main.durationS))
-                        .font(PulseFont.metricValue)
+                        .font(.system(size: 44, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.pulseTextPrimary)
                     Spacer()
                     if let score = sleep.score {
@@ -122,20 +131,35 @@ struct SleepCard: View {
                 }
                 if !sleep.stages.isEmpty {
                     stageBar
+                    hypnogramAxis
                     stageLegend
                 }
                 if let spo2 = viewModel.nightSpo2 {
                     Divider()
-                    HStack {
-                        Text("SpO2 nocturne")
-                            .font(.footnote)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                        Spacer()
-                        Text("\(spo2.mean) % · \(spo2.min) – \(spo2.max)")
-                            .font(PulseFont.metricUnit)
-                            .foregroundStyle(Color.pulseTextPrimary)
+                    // Miroir de `<a class="spo2-row" routerLink="/rapport-spo2">`
+                    // (Angular) — toute la ligne est cliquable, chevron `--absent`.
+                    Button {
+                        showingSpo2Report = true
+                    } label: {
+                        HStack {
+                            Text("SpO2 nocturne")
+                                .font(.footnote)
+                                .foregroundStyle(Color.pulseTextSecondary)
+                            Spacer()
+                            Text("\(spo2.mean) % · \(spo2.min) – \(spo2.max)")
+                                .font(PulseFont.metricUnit)
+                                .foregroundStyle(Color.pulseTextPrimary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.pulseAbsent)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
+            }
+            .sheet(isPresented: $showingSpo2Report) {
+                Spo2ReportView()
             }
         }
     }
@@ -160,18 +184,66 @@ struct SleepCard: View {
         .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
     }
 
+    /// Repères horaires sous l'hypnogramme — miroir de `hyp.ticks` (Angular) :
+    /// un repère à chaque heure pleine traversée par la nuit, simplement
+    /// répartis via `justify-content:space-between`, jamais positionnés au
+    /// pixel près sur la piste (`t.pos` ne sert qu'au `track` du `@for`).
+    private var hypnogramTicks: [String] {
+        guard let start = sleep.stages.first?.from,
+              let end = sleep.stages.last?.to,
+              end > start
+        else { return [] }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        var labels: [String] = []
+        var t = ((start + 3_599) / 3_600) * 3_600 // Math.ceil(start / 3600) * 3600
+        while t <= end {
+            let hour = calendar.component(.hour, from: Date(timeIntervalSince1970: TimeInterval(t)))
+            labels.append("\(hour)h") // miroir `hourFormat` (Angular) — pas d'espace
+            t += 3_600
+        }
+        return labels
+    }
+
+    @ViewBuilder
+    private var hypnogramAxis: some View {
+        let ticks = hypnogramTicks
+        if !ticks.isEmpty {
+            HStack(spacing: 0) {
+                ForEach(Array(ticks.enumerated()), id: \.offset) { index, label in
+                    Text(label)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.pulseTextSecondary)
+                    if index < ticks.count - 1 {
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+    }
+
     private var stageLegend: some View {
         let breakdown = viewModel.stageBreakdown
-        return HStack(spacing: PulseSpacing.md) {
+        // Miroir `.legend1{grid-template-columns:1fr 1fr}` (Angular) — une
+        // grille 2×2, pas une rangée unique (déborde sur les écrans étroits).
+        return LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: PulseSpacing.sm), GridItem(.flexible())],
+            spacing: PulseSpacing.sm
+        ) {
             ForEach([SleepStageKind.deep, .light, .rem, .awake], id: \.self) { stage in
-                HStack(spacing: 5) {
-                    Circle().fill(SleepStageColor.of(stage)).frame(width: 8, height: 8)
+                HStack(spacing: 7) {
+                    // Miroir `.lg i{width:10px;height:10px;border-radius:3px}` —
+                    // un carré arrondi, pas un rond plein.
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(SleepStageColor.of(stage))
+                        .frame(width: 10, height: 10)
                     Text(SleepStageColor.label(stage))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundStyle(Color.pulseTextSecondary)
+                    Spacer(minLength: 0)
                     if let breakdown {
                         Text("\(breakdown.percent(part(of: stage, in: breakdown)))%")
-                            .font(.caption.bold())
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Color.pulseTextPrimary)
                     }
                 }
@@ -191,16 +263,39 @@ struct SleepCard: View {
 
 // MARK: - Sélecteur de métrique
 
+/// Miroir de `app-seg` (Angular, `seg.component.ts`, variante `tabs` par
+/// défaut) : rangée de pilules à largeur égale, celle active en plein
+/// (`background:var(--text); color:var(--surface)`) — jamais le `Picker`
+/// segmenté système (chrome bleu générique, forme différente de la maquette).
 struct MetricTabPicker: View {
-    @Bindable var viewModel: HealthViewModel
+    var viewModel: HealthViewModel
 
     var body: some View {
-        Picker("Métrique", selection: $viewModel.selectedTab) {
+        HStack(spacing: 6) {
             ForEach(HealthViewModel.MetricTab.allCases) { tab in
-                Text(tab.label).tag(tab)
+                let isSelected = tab == viewModel.selectedTab
+                Button {
+                    viewModel.selectedTab = tab
+                } label: {
+                    Text(tab.label)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .foregroundStyle(isSelected ? Color.pulseSurface : Color.pulseTextSecondary)
+                        .background(isSelected ? Color.pulseTextPrimary : Color.pulseSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(isSelected ? Color.clear : Color.pulseBorder, lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
-        .pickerStyle(.segmented)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -215,8 +310,10 @@ struct HealthMetricChartCard: View {
             let headline = viewModel.metricHeadline
             HStack(alignment: .lastTextBaseline) {
                 HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
+                    // Maquette « Santé » : classe `.hero-n` = 32px (pas
+                    // `PulseFont.metricValue`, 36 — jeton générique StatTile).
                     Text(headline.value)
-                        .font(PulseFont.metricValue)
+                        .font(.system(size: 32, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
                     Text(headline.unit)
@@ -235,6 +332,17 @@ struct HealthMetricChartCard: View {
         }
     }
 
+    /// Bornes du jour affiché (00h → 24h) — miroir `dayStart`/`dayEnd`
+    /// (Angular) : axe X fixe sur la journée entière, pas une auto-échelle
+    /// sur la seule plage des échantillons présents.
+    private var dayDomain: ClosedRange<Date> {
+        guard let start = HealthViewModel.parseDate(day.date) else {
+            let now = Date()
+            return now...now.addingTimeInterval(86_400)
+        }
+        return start...start.addingTimeInterval(86_400)
+    }
+
     // Une couleur par métrique — miroir des `color="var(--m-*)"` passés à
     // `app-stream-chart` dans le template Angular (`health.component.ts`),
     // jamais `pulseAccent` bleu générique.
@@ -242,18 +350,50 @@ struct HealthMetricChartCard: View {
     private var chart: some View {
         switch viewModel.selectedTab {
         case .cardio:
-            SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil)
+            SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil, xDomain: dayDomain)
         case .stress:
-            StressBarChart(samples: day.stress)
+            StressBarChart(samples: day.stress, xDomain: dayDomain)
         case .energie:
-            SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100)
+            SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100, xDomain: dayDomain)
         case .spo2:
-            SampleLineChart(samples: day.spo2, color: Color.pulseSpo2, yRange: nil)
+            SampleLineChart(samples: day.spo2, color: Color.pulseSpo2, yRange: nil, xDomain: dayDomain)
         case .respiration:
-            SampleLineChart(samples: day.respiration, color: Color.pulseResp, yRange: nil)
+            SampleLineChart(samples: day.respiration, color: Color.pulseResp, yRange: nil, xDomain: dayDomain)
         case .calories:
             CaloriesSummary(viewModel: viewModel)
         }
+    }
+}
+
+// MARK: - Axes des graphiques (Santé)
+
+private extension View {
+    /// Habillage d'axes commun aux graphiques temporels de l'écran Santé —
+    /// miroir de `hourFormat` (Angular, `health.component.ts`) : cinq repères
+    /// 0h/6h/12h/18h/24h en bas, deux lignes de référence horizontales
+    /// discrètes, aucun axe Y chiffré (même lecture que le SVG de la
+    /// maquette « Santé » — pas de grille complète, pas de bordure de zone).
+    func healthChartAxes(domain: ClosedRange<Date>) -> some View {
+        chartXScale(domain: domain)
+            .chartXAxis {
+                AxisMarks(values: stride(from: 0, through: 24, by: 6).map {
+                    domain.lowerBound.addingTimeInterval(TimeInterval($0) * 3_600)
+                }) { value in
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            let hour = Int(date.timeIntervalSince(domain.lowerBound) / 3_600)
+                            Text("\(hour)h")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 2)) {
+                    AxisGridLine().foregroundStyle(Color.pulseBorder.opacity(0.6))
+                }
+            }
     }
 }
 
@@ -263,6 +403,7 @@ struct SampleLineChart: View {
     let samples: [WellnessSample]
     let color: Color
     let yRange: ClosedRange<Double>?
+    let xDomain: ClosedRange<Date>
 
     var body: some View {
         if samples.isEmpty {
@@ -287,6 +428,7 @@ struct SampleLineChart: View {
                 .interpolationMethod(.monotone)
             }
             .chartYScale(domain: yRange ?? autoRange)
+            .healthChartAxes(domain: xDomain)
         }
     }
 
@@ -311,6 +453,7 @@ struct SampleLineChart: View {
 /// (Angular) : repos / bas / moyen / élevé.
 struct StressBarChart: View {
     let samples: [WellnessSample]
+    let xDomain: ClosedRange<Date>
 
     var body: some View {
         if samples.isEmpty {
@@ -327,6 +470,7 @@ struct StressBarChart: View {
                 .foregroundStyle(zoneColor(sample.value))
             }
             .chartYScale(domain: 0...100)
+            .healthChartAxes(domain: xDomain)
         }
     }
 
@@ -541,10 +685,12 @@ struct WeightCard: View {
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             HStack(alignment: .lastTextBaseline) {
+                // Maquette / SCSS Pulse : classe `.weigh .n44` (44px), même
+                // jeton que la durée de sommeil — pas `PulseFont.metricValue`.
                 if let shown = viewModel.shownWeight {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         Text(String(format: "%.1f", shown))
-                            .font(PulseFont.metricValue)
+                            .font(.system(size: 44, weight: .semibold, design: .monospaced))
                             .foregroundStyle(
                                 viewModel.dayWeight == nil ? Color.pulseTextSecondary : Color.pulseTextPrimary
                             )
@@ -553,7 +699,9 @@ struct WeightCard: View {
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                 } else {
-                    Text("—").font(PulseFont.metricValue).foregroundStyle(Color.pulseTextPrimary)
+                    Text("—")
+                        .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.pulseTextPrimary)
                 }
                 Spacer()
                 if let delta = viewModel.weightDelta {

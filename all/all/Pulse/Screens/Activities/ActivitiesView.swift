@@ -7,8 +7,25 @@
 //  `/activities`) : liste `GET api/activities` regroupée par jour civil
 //  local, la même coupure que `ActivitiesComponent.groups`. Le split desktop
 //  (liste + détail côte à côte) n'a pas d'équivalent mobile : chaque ligne
-//  pousse `ActivityDetailView` dans la pile de navigation. Import `.fit` et
-//  filtre par sport (sidebar Angular) sont hors périmètre de cet écran.
+//  pousse `ActivityDetailView` dans la pile de navigation.
+//
+//  Détail visuel 1-1 avec la maquette (`Pulse Refonte.dc.html`, lignes
+//  1033-1109, variante sombre 1855-1910) : en-tête maison (barre système
+//  masquée, comme `NutritionView`) — titre + compteur de séances — puis
+//  cartes plates par jour (filet coloré par sport, PAS l'icône ronde du
+//  DOM Angular) avec une seule valeur à droite (distance si connue, sinon
+//  durée). Écarts assumés vs le DOM Angular (`activities.component.ts`),
+//  tranchés en faveur de la maquette puisque explicitement citée :
+//  - Ligne : la maquette n'affiche qu'UNE valeur à droite (distance ou
+//    durée), pas le résumé multi-métriques `summaryOf()` (durée · distance ·
+//    allure · FC/kcal) — le détail de l'activité reste la source pour ces
+//    métriques.
+//  - En-têtes de jour : pas de compteur de séances par jour (`.u11` Angular)
+//    dans la maquette mobile — supprimé ici aussi.
+//  - Import `.fit` et filtre par sport (sidebar desktop Angular) restent hors
+//    périmètre (pas de méthode d'upload sur `ActivitiesViewModel`) : le
+//    bouton d'import de la maquette (icône seule, 36×36) n'est pas repris
+//    pour ne pas poser un bouton mort.
 //
 
 import SwiftUI
@@ -19,8 +36,9 @@ struct ActivitiesView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Activités")
                 .background(Color.pulseBackground)
+                .navigationTitle("Activités")
+                .toolbar(.hidden, for: .navigationBar)
                 .task { await vm.load() }
                 .navigationDestination(for: Int.self) { id in
                     ActivityDetailView(activityId: id)
@@ -38,12 +56,28 @@ struct ActivitiesView: View {
                 Task { await vm.load() }
             }
         case .loaded(let activities):
-            if activities.isEmpty {
-                emptyState
-            } else {
-                list(of: activities)
-            }
+            loaded(activities)
         }
+    }
+
+    private func loaded(_ activities: [Activity]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: PulseSpacing.lg) {
+                ActivitiesHeader(count: activities.count)
+
+                if activities.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(groups(of: activities), id: \.key) { group in
+                        ActivitiesDayGroup(label: group.label, activities: group.activities)
+                    }
+                }
+            }
+            .padding(.horizontal, PulseSpacing.lg)
+            .padding(.top, PulseSpacing.sm)
+            .padding(.bottom, PulseSpacing.lg)
+        }
+        .refreshable { await vm.load() }
     }
 
     private var emptyState: some View {
@@ -52,37 +86,15 @@ struct ActivitiesView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(Color.pulseTextSecondary)
             Text("Aucune activité.")
-                .font(PulseFont.body)
+                .font(.system(size: 15))
                 .foregroundStyle(Color.pulseTextSecondary)
             Text("Importe des fichiers .FIT depuis Pulse, ou dépose-les dans data/inbox.")
                 .font(.footnote)
                 .foregroundStyle(Color.pulseTextSecondary)
                 .multilineTextAlignment(.center)
         }
-        .padding(PulseSpacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.pulseBackground)
-    }
-
-    private func list(of activities: [Activity]) -> some View {
-        List {
-            ForEach(groups(of: activities), id: \.key) { group in
-                Section {
-                    ForEach(group.activities) { activity in
-                        NavigationLink(value: activity.id) {
-                            ActivityRow(activity: activity)
-                        }
-                        .listRowBackground(Color.pulseSurface)
-                    }
-                } header: {
-                    Text(group.label)
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Color.pulseBackground)
-        .refreshable { await vm.load() }
+        .frame(maxWidth: .infinity)
+        .padding(.top, PulseSpacing.xxl)
     }
 
     private struct DayGroup {
@@ -116,56 +128,119 @@ struct ActivitiesView: View {
     }
 }
 
-/// Ligne de liste — icône de sport, libellé, heure, résumé (durée · distance
-/// · allure/FC), même esprit que `.row.act` (Angular, `summaryOf`).
+// MARK: - En-tête
+
+/// Titre + compteur — équivalent maison de `.head`/`.head-id` (maquette,
+/// lignes 1039-1041) : titre 24pt semibold tracking -0.24 à gauche, note
+/// mono 11pt discrète à droite. La maquette affiche un total hebdomadaire
+/// (« cette semaine 4 h 12 »), absent du DOM Angular réel (`ActivitiesComponent`
+/// n'agrège pas de durée) — remplacé par le compteur `head-count`/`countNote()`
+/// réellement présent côté Angular (« N séances »), rendu avec le même style
+/// visuel que la maquette.
+private struct ActivitiesHeader: View {
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Activités")
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.24)
+                .foregroundStyle(Color.pulseTextPrimary)
+            Spacer()
+            Text(countLabel)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
+    }
+
+    private var countLabel: String {
+        "\(count) séance\(count > 1 ? "s" : "")"
+    }
+}
+
+// MARK: - Groupe de jour
+
+/// Étiquette de jour (mono 10pt, tracking .1em, majuscules) + cartes —
+/// équivalent `.list-head`/`.lab` + `.row.act` (maquette, lignes 1045-1071).
+private struct ActivitiesDayGroup: View {
+    let label: String
+    let activities: [Activity]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(Color.pulseTextSecondary)
+
+            ForEach(activities) { activity in
+                NavigationLink(value: activity.id) {
+                    ActivityRow(activity: activity)
+                }
+                .buttonStyle(ActivityRowButtonStyle())
+            }
+        }
+    }
+}
+
+/// Ligne de liste — filet coloré par sport (PAS l'icône ronde du DOM
+/// Angular), libellé + heure, valeur unique à droite (distance si connue,
+/// sinon durée) — 1-1 avec la maquette, lignes 1047-1054.
 private struct ActivityRow: View {
     let activity: Activity
 
     var body: some View {
         HStack(spacing: PulseSpacing.md) {
-            Image(systemName: ActivitySport.icon(sport: activity.sport))
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(sportTint)
-                .frame(width: 38, height: 38)
-                .background(sportTint.opacity(0.15))
-                .clipShape(Circle())
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(sportTint)
+                .frame(width: 3, height: 30)
 
-            VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-                HStack {
-                    Text(ActivitySport.label(sport: activity.sport, subSport: activity.subSport))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.pulseTextPrimary)
-                    Spacer()
-                    Text(ActivityDateFormatting.clock(ActivityDateFormatting.date(from: activity.startTime)))
-                        .font(PulseFont.metricLabel)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
-                Text(summary)
-                    .font(.footnote)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ActivitySport.label(sport: activity.sport, subSport: activity.subSport))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Text(ActivityDateFormatting.clock(ActivityDateFormatting.date(from: activity.startTime)))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(trailingValue)
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundStyle(Color.pulseTextPrimary)
         }
-        .padding(.vertical, PulseSpacing.xs)
+        .padding(EdgeInsets(top: 14, leading: 12, bottom: 14, trailing: 14))
+        .background(Color.pulseSurface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// Couleur d'icône par sport — équivalent `<app-sport-icon>` (Angular) :
-    /// jamais l'accent bleu générique, cf. `ActivitySport.color`.
+    /// Couleur par sport — équivalent `<app-sport-icon>` (Angular) : jamais
+    /// l'accent bleu générique, cf. `ActivitySport.color`.
     private var sportTint: Color {
         ActivitySport.color(sport: activity.sport)
     }
 
-    private var summary: String {
-        var parts = [ActivityFormat.shortDuration(activity.durationS)]
-        if let distanceM = activity.distanceM, distanceM > 0 {
-            if let km = ActivityFormat.distanceKm(distanceM) { parts.append(km) }
-            parts.append(ActivityFormat.pace(durationS: activity.durationS, distanceM: distanceM))
+    /// Distance si connue, sinon durée — même priorité que les 5 exemples de
+    /// la maquette (Marche → distance ; Musculation/Escalade, sans distance →
+    /// durée), plus simple que le résumé multi-métriques `summaryOf()`.
+    private var trailingValue: String {
+        if let distanceM = activity.distanceM, distanceM > 0, let km = ActivityFormat.distanceKm(distanceM) {
+            return km
         }
-        if let avgHr = activity.avgHr, avgHr > 0 {
-            parts.append("\(Int(avgHr.rounded())) bpm")
-        } else if (activity.distanceM ?? 0) <= 0, let calories = activity.calories, calories > 0 {
-            parts.append("\(Int(calories.rounded())) kcal")
-        }
-        return parts.joined(separator: " · ")
+        return ActivityFormat.shortDuration(activity.durationS)
+    }
+}
+
+/// Pression discrète — pas de highlight système (chevron/fond) puisque la
+/// ligne est déjà une carte à elle seule.
+private struct ActivityRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

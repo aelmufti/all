@@ -46,7 +46,7 @@ private struct DashboardSleepTrendCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("Sommeil · \(viewModel.sleepNightsCount) nuits")
+                DashboardCardHeader("Sommeil · \(viewModel.sleepNightsCount) nuits")
                 Spacer()
                 Text(rangeLabel)
                     .font(PulseFont.metricLabel)
@@ -90,7 +90,7 @@ private struct DashboardSleepDebtCard: View {
             if sleepDebt.nights > 0 {
                 PulseCard {
                     HStack {
-                        SectionHeader("Dette de sommeil")
+                        DashboardCardHeader("Dette de sommeil")
                         Spacer()
                         Text(viewModel.debtLevel)
                             .font(PulseFont.metricLabel)
@@ -122,7 +122,7 @@ private struct DashboardSleepDebtCard: View {
                 }
             } else {
                 PulseCard {
-                    SectionHeader("Dette de sommeil")
+                    DashboardCardHeader("Dette de sommeil")
                     Text("Aucune nuit mesurée sur la période.")
                         .font(PulseFont.body)
                         .foregroundStyle(Color.pulseTextSecondary)
@@ -174,7 +174,7 @@ private struct DashboardNightsDetailCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Détail des \(sleepDebt.nights) nuits")
+            DashboardCardHeader("Détail des \(sleepDebt.nights) nuits")
 
             VStack(spacing: 0) {
                 ForEach(viewModel.debtDetail) { night in
@@ -337,7 +337,7 @@ private struct DashboardSleepRegularityCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Régularité")
+            DashboardCardHeader("Régularité")
             if let score = regularity.score {
                 HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                     Text("\(score)")

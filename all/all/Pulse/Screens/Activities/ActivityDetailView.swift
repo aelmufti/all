@@ -3,12 +3,57 @@
 //  all (bridge-connect)
 //
 //  Détail d'une activité (poussée depuis `ActivitiesView`) — portage de
-//  `ActivityDetailComponent` (Angular, page `/activity/:id`) : hero (icône +
-//  libellé + plage horaire + stats), parcours (carte), courbe (cardio/
-//  allure/altitude), zones de FC, voies d'escalade, séries de muscu, tours.
-//  Chaque section est masquée quand la donnée sous-jacente est absente, comme
-//  les `@if` Angular. Suppression et carte Leaflet interactive plein écran
-//  sont hors périmètre de cet écran (lecture seule).
+//  `ActivityDetailComponent` (Angular, page `/activity/:id`, gabarit
+//  **standalone** — `:host(:not(.embedded))`, le seul pertinent ici, l'app
+//  n'a pas de vue côte-à-côte desktop) : en-tête (icône-retour + libellé +
+//  plage horaire), stats, parcours (carte), courbe (cardio/allure/altitude),
+//  zones de FC, voies d'escalade, séries de muscu, tours. Chaque section est
+//  masquée quand la donnée sous-jacente est absente, comme les `@if` Angular
+//  — même ordre DOM que `activity-detail.component.ts` (en-tête+stats, PUIS
+//  carte, PUIS courbe…), qui diffère de l'ordre visuel de la maquette (carte
+//  avant stats) : l'ordre Angular fait foi ici (règle du prompt).
+//
+//  Détail visuel 1-1 avec la maquette (`Pulse Refonte.dc.html`, lignes
+//  1113-1192, variante sombre non fournie pour cet écran — couleurs
+//  `Color.pulse*` déjà dynamiques light/dark) :
+//  - En-tête maison (barre système masquée une fois chargé, comme
+//    `ActivitiesView`/`NutritionView`) : pastille retour 40×40 (même style
+//    que `NutritionDayPillStyle`) + titre 20pt/plage horaire mono 12pt,
+//    SANS carte (transparent) — la carte est réservée aux stats, cf. CSS
+//    Angular `:host(:not(.embedded)) .hero { background:none }` /
+//    `.stats { background:var(--surface)… }`, qui confirme la maquette.
+//    Pendant le chargement/l'erreur, la barre système reste visible (retour
+//    natif) — seul l'état chargé bascule sur l'en-tête maison.
+//  - Stats : tuile locale 19pt/10pt (`ActivityStatTile`), PAS la `StatTile`
+//    partagée de `DesignSystem.swift` (36pt, conçue pour l'Accueil) — trop
+//    grande pour `.st`/`.sv`/`.sl` (maquette + CSS Angular, 19px/10px).
+//  - Courbe : onglets maison façon `<app-seg>` (pastille pleine `--text` au
+//    lieu du `Picker` segmenté système, qui n'a pas cette apparence), aire
+//    sous la courbe (10 % d'opacité, valeur de la maquette — le composant
+//    partagé Angular utilise 16 % par défaut, mais la maquette citée prime
+//    ici), 2 lignes de repère horizontales, et l'axe temporel (« 0 min » /
+//    milieu / fin) que la version précédente n'avait pas.
+//  - Carte : plus de `SectionHeader("Parcours")` ni de fond `PulseCard`
+//    (absents de la maquette) — bordure+rayon directs, légende « départ »/
+//    « arrivée » en incrustation (comme `.map-foot`/`.lg`), SANS le chip
+//    « © OpenStreetMap » (fond de carte réel = tuiles Apple via MapKit, pas
+//    OSM — l'attribution du web serait inexacte ici) ni les boutons
+//    zoom/plein écran (MapKit gère déjà le pincer-zoomer nativement).
+//  - Tours : plus de `Grid` partagé — colonnes maison (largeurs fixes 26/52pt
+//    façon `.lap`), et la colonne **Distance est retirée** : le CSS Angular
+//    la masque explicitement en mobile (`.lap .dist{display:none}`), et la
+//    maquette (mobile) ne montre que # / Temps / Allure / bpm — cohérent
+//    avec le gabarit unique de cet écran (jamais desktop). La colonne
+//    « Temps » reprend `ActivityFormat.clock` (format « 13:49 », déjà
+//    utilisé ailleurs sur cet écran pour les zones/voies) plutôt que
+//    `ActivityFormat.duration` (« 13min49 ») : c'est le format que montre la
+//    maquette pour cette colonne précise.
+//  - Zones/Voies/Séries : non citées dans la maquette, laissées telles
+//    quelles (déjà `PulseCard`/`SectionHeader`, aucune contradiction à
+//    corriger).
+//
+//  Suppression et carte interactive plein écran restent hors périmètre
+//  (lecture seule).
 //
 
 import SwiftUI
@@ -27,7 +72,18 @@ struct ActivityDetailView: View {
             .background(Color.pulseBackground)
             .navigationTitle("Activité")
             .navigationBarTitleDisplayMode(.inline)
+            // La barre système ne s'efface qu'une fois les données chargées
+            // (l'en-tête maison, qui la remplace visuellement, a besoin du
+            // libellé/de l'heure de l'activité) — pendant le chargement/
+            // l'erreur, le chevron de retour natif reste le seul moyen de
+            // sortir.
+            .toolbar(isLoaded ? .hidden : .visible, for: .navigationBar)
             .task { await vm.load() }
+    }
+
+    private var isLoaded: Bool {
+        if case .loaded = vm.state { return true }
+        return false
     }
 
     @ViewBuilder
@@ -41,26 +97,33 @@ struct ActivityDetailView: View {
             }
         case .loaded(let detail):
             ScrollView {
-                VStack(spacing: PulseSpacing.lg) {
-                    ActivityHeroCard(detail: detail)
+                VStack(alignment: .leading, spacing: 0) {
+                    ActivityHeaderRow(detail: detail)
+                        .padding(.horizontal, PulseSpacing.lg)
+                        .padding(.bottom, PulseSpacing.md)
 
-                    if detail.track.count > 1 {
-                        ActivityMapCard(coordinates: coordinates(from: detail.track), sport: detail.sport)
+                    VStack(alignment: .leading, spacing: PulseSpacing.md) {
+                        ActivityStatsCard(detail: detail)
+
+                        if detail.track.count > 1 {
+                            ActivityMapCard(coordinates: coordinates(from: detail.track), sport: detail.sport)
+                        }
+
+                        if let streams = detail.streams {
+                            ActivityMetricChartCard(detail: detail, streams: streams)
+                        }
+
+                        if !detail.hrZones.isEmpty {
+                            ActivityZonesCard(zones: detail.hrZones)
+                        }
+
+                        ActivityClimbsCard(splits: detail.splits)
+                        ActivityExercisesCard(sets: detail.sets)
+                        ActivityLapsCard(laps: detail.laps)
                     }
-
-                    if let streams = detail.streams {
-                        ActivityMetricChartCard(detail: detail, streams: streams)
-                    }
-
-                    if !detail.hrZones.isEmpty {
-                        ActivityZonesCard(zones: detail.hrZones)
-                    }
-
-                    ActivityClimbsCard(splits: detail.splits)
-                    ActivityExercisesCard(sets: detail.sets)
-                    ActivityLapsCard(laps: detail.laps)
+                    .padding(.horizontal, PulseSpacing.lg)
+                    .padding(.bottom, PulseSpacing.lg)
                 }
-                .padding(PulseSpacing.lg)
             }
         }
     }
@@ -73,86 +136,124 @@ struct ActivityDetailView: View {
     }
 }
 
-// MARK: - Hero
+// MARK: - En-tête
 
-/// En-tête : icône + libellé sport + plage horaire, grille de stats
-/// (durée toujours, distance/allure/FC moy/FC max/kcal si présents) — même
-/// esprit que `.hero`/`.stats` (Angular), sans le bouton retour (la pile de
-/// navigation iOS a déjà son propre chevron).
-private struct ActivityHeroCard: View {
+/// Pastille retour + libellé sport/plage horaire, transparent (pas de
+/// carte) — maquette lignes 1119-1125.
+private struct ActivityHeaderRow: View {
+    let detail: ActivityDetail
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        HStack(alignment: .center, spacing: PulseSpacing.md) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .frame(width: 40, height: 40)
+                    .background(Color.pulseSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            }
+            .accessibilityLabel("Retour")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ActivitySport.label(sport: detail.sport, subSport: detail.subSport))
+                    .font(.system(size: 20, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Text(ActivityDateFormatting.rangeLabel(ActivityDateFormatting.date(from: detail.startTime)))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+        }
+    }
+}
+
+// MARK: - Stats
+
+/// Carte de stats — équivalent `.stats`/`.st`/`.sv`/`.sl` (maquette, lignes
+/// 1151-1155) : grille 3 colonnes, tuiles locales 19pt/10pt (pas la
+/// `StatTile` partagée, trop grande ici). Durée toujours, distance/allure/FC
+/// moy/FC max/kcal si présents — même garde que `ActivityDetailComponent`.
+private struct ActivityStatsCard: View {
     let detail: ActivityDetail
 
     var body: some View {
-        PulseCard {
-            HStack(spacing: PulseSpacing.md) {
-                Image(systemName: ActivitySport.icon(sport: detail.sport))
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(sportTint)
-                    .frame(width: 44, height: 44)
-                    .background(sportTint.opacity(0.15))
-                    .clipShape(Circle())
-                VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-                    Text(ActivitySport.label(sport: detail.sport, subSport: detail.subSport))
-                        .font(PulseFont.sectionTitle)
-                        .foregroundStyle(Color.pulseTextPrimary)
-                    Text(ActivityDateFormatting.rangeLabel(ActivityDateFormatting.date(from: detail.startTime)))
-                        .font(PulseFont.metricUnit)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
+        LazyVGrid(
+            columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+            spacing: 14
+        ) {
+            ActivityStatTile(label: "Durée", value: ActivityFormat.duration(detail.durationS))
+            if let distanceM = detail.distanceM, distanceM > 0 {
+                ActivityStatTile(label: "Distance", value: ActivityFormat.distanceKm(distanceM) ?? "—")
+                ActivityStatTile(
+                    label: "Allure /km",
+                    value: ActivityFormat.pace(durationS: detail.durationS, distanceM: distanceM)
+                )
             }
-
-            LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: PulseSpacing.lg
-            ) {
-                StatTile(label: "Durée", value: ActivityFormat.duration(detail.durationS), accent: .pulseTextPrimary)
-                if let distanceM = detail.distanceM, distanceM > 0 {
-                    StatTile(
-                        label: "Distance",
-                        value: ActivityFormat.distanceKm(distanceM) ?? "—",
-                        accent: .pulseTextPrimary
-                    )
-                    StatTile(
-                        label: "Allure /km",
-                        value: ActivityFormat.pace(durationS: detail.durationS, distanceM: distanceM),
-                        accent: .pulseTextPrimary
-                    )
-                }
-                if let avgHr = detail.avgHr, avgHr > 0 {
-                    StatTile(label: "FC moy", value: "\(Int(avgHr.rounded()))", accent: .pulseHR)
-                }
-                if let maxHr = detail.maxHr, maxHr > 0 {
-                    StatTile(label: "FC max", value: "\(Int(maxHr.rounded()))", accent: .pulseHR)
-                }
-                if let calories = detail.calories, calories > 0 {
-                    StatTile(label: "kcal", value: "\(Int(calories.rounded()))", accent: .pulseCalories)
-                }
+            if let avgHr = detail.avgHr, avgHr > 0 {
+                ActivityStatTile(label: "FC moy", value: "\(Int(avgHr.rounded()))", accent: .pulseHR)
             }
-            .padding(.top, PulseSpacing.xs)
+            if let maxHr = detail.maxHr, maxHr > 0 {
+                ActivityStatTile(label: "FC max", value: "\(Int(maxHr.rounded()))", accent: .pulseHR)
+            }
+            if let calories = detail.calories, calories > 0 {
+                ActivityStatTile(label: "kcal", value: "\(Int(calories.rounded()))", accent: .pulseCalories)
+            }
         }
+        .padding(14)
+        .background(Color.pulseSurface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
+}
 
-    /// Couleur d'icône par sport — équivalent `<app-sport-icon>` (Angular) :
-    /// jamais l'accent bleu générique, cf. `ActivitySport.color`.
-    private var sportTint: Color {
-        ActivitySport.color(sport: detail.sport)
+private struct ActivityStatTile: View {
+    let label: String
+    let value: String
+    var accent: Color = .pulseTextPrimary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                .foregroundStyle(accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 // MARK: - Carte
 
-/// Parcours GPS — équivalent `.map-card` (Leaflet). Cadrage automatique sur
-/// la trace, marqueurs départ/arrivée. Tracé et marqueur de départ reprennent
+/// Parcours GPS — équivalent `.map-card` (maquette, lignes 1129-1149) sans
+/// les boutons zoom/plein écran (MapKit gère le pincer-zoomer nativement) ni
+/// le chip d'attribution (tuiles Apple via MapKit, pas OpenStreetMap — le
+/// texte du web serait inexact ici). Tracé et marqueur de départ reprennent
 /// la couleur du sport (`sportColor`, Angular `renderMap`/`resolveColor`),
-/// jamais l'accent bleu générique ; l'arrivée reste neutre (`--text`), comme
-/// le front.
+/// jamais l'accent bleu générique ; l'arrivée reste neutre (`pulseTextPrimary`,
+/// dynamique clair/sombre — le web fixe `#1c2124` même en thème sombre, pas
+/// repris ici).
 private struct ActivityMapCard: View {
     let coordinates: [CLLocationCoordinate2D]
     let sport: String?
 
     var body: some View {
-        PulseCard {
-            SectionHeader("Parcours")
+        ZStack(alignment: .bottomLeading) {
             Map(initialPosition: cameraPosition) {
                 MapPolyline(coordinates: coordinates)
                     .stroke(routeColor, lineWidth: 4)
@@ -165,9 +266,47 @@ private struct ActivityMapCard: View {
                         .tint(Color.pulseTextPrimary)
                 }
             }
-            .frame(height: 220)
-            .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+
+            legend
+                .padding(10)
         }
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
+    }
+
+    /// Légende « départ »/« arrivée » — équivalent `.map-foot`/`.lg`.
+    private var legend: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Circle()
+                    .strokeBorder(routeColor, lineWidth: 2)
+                    .background(Circle().fill(Color.pulseSurface))
+                    .frame(width: 8, height: 8)
+                Text("départ")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.pulseTextPrimary)
+                    .frame(width: 8, height: 8)
+                Text("arrivée")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color.pulseSurface.opacity(0.9))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var routeColor: Color {
@@ -200,25 +339,27 @@ private struct ActivityMapCard: View {
 
 // MARK: - Courbe
 
-/// Onglets Cardio/Allure/Altitude — équivalent `chartTabs`/`@switch` (Angular).
-/// Un onglet n'apparaît que si son flux a au moins une valeur exploitable,
+/// Onglets Cardio/Allure/Altitude — équivalent `<app-seg>` (maquette, lignes
+/// 1158-1160) : pastille pleine `pulseTextPrimary` active, contour clair
+/// inactive — PAS le `Picker` segmenté système (apparence différente). Un
+/// onglet n'apparaît que si son flux a au moins une valeur exploitable,
 /// même condition que le front.
+private enum ActivityChartTab: String, CaseIterable, Identifiable, Equatable {
+    case cardio, allure, altitude
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .cardio: return "Cardio"
+        case .allure: return "Allure"
+        case .altitude: return "Altitude"
+        }
+    }
+}
+
 private struct ActivityMetricChartCard: View {
     let detail: ActivityDetail
     let streams: ActivityStreams
-    @State private var tab: ChartTab
-
-    enum ChartTab: String, CaseIterable, Identifiable {
-        case cardio, allure, altitude
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .cardio: return "Cardio"
-            case .allure: return "Allure"
-            case .altitude: return "Altitude"
-            }
-        }
-    }
+    @State private var tab: ActivityChartTab
 
     init(detail: ActivityDetail, streams: ActivityStreams) {
         self.detail = detail
@@ -227,8 +368,8 @@ private struct ActivityMetricChartCard: View {
         _tab = State(initialValue: available.first ?? .cardio)
     }
 
-    static func availableTabs(detail: ActivityDetail, streams: ActivityStreams) -> [ChartTab] {
-        var tabs: [ChartTab] = []
+    static func availableTabs(detail: ActivityDetail, streams: ActivityStreams) -> [ActivityChartTab] {
+        var tabs: [ActivityChartTab] = []
         if streams.hr.contains(where: { $0 != nil }) { tabs.append(.cardio) }
         if let distanceM = detail.distanceM, distanceM > 100, streams.speed.contains(where: { $0 != nil }) {
             tabs.append(.allure)
@@ -242,34 +383,42 @@ private struct ActivityMetricChartCard: View {
     var body: some View {
         let tabs = Self.availableTabs(detail: detail, streams: streams)
         if !tabs.isEmpty {
-            PulseCard {
+            VStack(alignment: .leading, spacing: 10) {
                 if tabs.count > 1 {
-                    Picker("Courbe", selection: $tab) {
-                        ForEach(tabs) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
+                    ActivityChartTabsRow(tabs: tabs, selection: $tab)
                 }
 
-                let head = chartHead(for: tab)
-                HStack(alignment: .lastTextBaseline) {
-                    HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
-                        Text(head.value)
-                            .font(PulseFont.metricValue)
-                            .foregroundStyle(Color.pulseTextPrimary)
-                        Text(head.unit)
-                            .font(PulseFont.metricUnit)
-                            .foregroundStyle(Color.pulseTextSecondary)
+                VStack(alignment: .leading, spacing: PulseSpacing.md) {
+                    let head = chartHead(for: tab)
+                    HStack(alignment: .lastTextBaseline) {
+                        HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
+                            Text(head.value)
+                                .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(Color.pulseTextPrimary)
+                            Text(head.unit)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                        Spacer()
+                        if !head.range.isEmpty {
+                            Text(head.range)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
                     }
-                    Spacer()
-                    if !head.range.isEmpty {
-                        Text(head.range)
-                            .font(PulseFont.metricUnit)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                }
 
-                chart(for: tab)
-                    .frame(height: 140)
+                    chart(for: tab)
+                        .frame(height: 100)
+
+                    axisLabels(for: tab)
+                }
+                .padding(16)
+                .background(Color.pulseSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .onChange(of: tabs) { _, newTabs in
                 if !newTabs.contains(tab) { tab = newTabs.first ?? .cardio }
@@ -287,29 +436,76 @@ private struct ActivityMetricChartCard: View {
         return out
     }
 
-    @ViewBuilder
-    private func chart(for tab: ChartTab) -> some View {
+    private func seriesAndColor(for tab: ActivityChartTab) -> ([(time: Double, value: Double)], Color) {
         switch tab {
         case .cardio:
-            lineChart(points(streams.hr), color: .pulseHR)
+            return (points(streams.hr), .pulseHR)
         case .allure:
             let series = points(streams.speed).map { entry in
                 (time: entry.time, value: entry.value > 0.5 ? 1000 / entry.value : 0)
             }
-            lineChart(series, color: .pulseAccent)
+            return (series, .pulseAccent)
         case .altitude:
-            lineChart(points(streams.altitude), color: .pulseSteps)
+            return (points(streams.altitude), .pulseSteps)
         }
     }
 
-    private func lineChart(_ series: [(time: Double, value: Double)], color: Color) -> some View {
-        Chart(series.indices, id: \.self) { i in
-            LineMark(x: .value("Temps", series[i].time), y: .value("Valeur", series[i].value))
-                .foregroundStyle(color)
-                .interpolationMethod(.monotone)
+    /// Aire (10 % d'opacité, valeur de la maquette) + ligne, plus 2 repères
+    /// horizontaux (à ~1/3 et ~2/3 de la hauteur, comme les `<line>` du SVG
+    /// de la maquette) — la courbe SwiftUI Charts n'a pas d'axes visibles
+    /// (`.chartXAxis(.hidden)`/`.chartYAxis(.hidden)`), l'échelle Y réelle
+    /// n'a pas besoin de correspondre aux repères, purement décoratifs comme
+    /// dans la maquette.
+    @ViewBuilder
+    private func chart(for tab: ActivityChartTab) -> some View {
+        let (series, color) = seriesAndColor(for: tab)
+        ZStack {
+            GeometryReader { geo in
+                Path { path in
+                    let y1 = geo.size.height * 0.32
+                    let y2 = geo.size.height * 0.68
+                    path.move(to: CGPoint(x: 0, y: y1))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: y1))
+                    path.move(to: CGPoint(x: 0, y: y2))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: y2))
+                }
+                .stroke(Color.pulseSurfaceAlt, lineWidth: 1)
+            }
+
+            Chart(series.indices, id: \.self) { i in
+                AreaMark(x: .value("Temps", series[i].time), y: .value("Valeur", series[i].value))
+                    .foregroundStyle(color.opacity(0.10))
+                LineMark(x: .value("Temps", series[i].time), y: .value("Valeur", series[i].value))
+                    .foregroundStyle(color)
+                    .interpolationMethod(.monotone)
+            }
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
         }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
+    }
+
+    /// « 0 min » / milieu / fin — équivalent `.xaxis`/`elapsedFormat`
+    /// (maquette, ligne 1175).
+    private func axisLabels(for tab: ActivityChartTab) -> some View {
+        let maxTime = streams.time.compactMap { $0 }.last ?? detail.durationS ?? 0
+        return HStack {
+            Text(elapsedLabel(0))
+            Spacer()
+            Text(elapsedLabel(maxTime / 2))
+            Spacer()
+            Text(elapsedLabel(maxTime))
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .foregroundStyle(Color.pulseTextSecondary)
+    }
+
+    /// "0 min" / "24 min" (< 1h) ou "1h05" (≥ 1h) — équivalent
+    /// `elapsedFormat` (Angular).
+    private func elapsedLabel(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        return h > 0 ? "\(h)h\(String(format: "%02d", m))" : "\(m) min"
     }
 
     private struct ChartHead {
@@ -318,7 +514,7 @@ private struct ActivityMetricChartCard: View {
         let range: String
     }
 
-    private func chartHead(for tab: ChartTab) -> ChartHead {
+    private func chartHead(for tab: ActivityChartTab) -> ChartHead {
         switch tab {
         case .cardio:
             let values = streams.hr.compactMap { $0 }
@@ -357,10 +553,40 @@ private struct ActivityMetricChartCard: View {
     }
 }
 
+private struct ActivityChartTabsRow: View {
+    let tabs: [ActivityChartTab]
+    @Binding var selection: ActivityChartTab
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(tabs) { tab in
+                let isOn = tab == selection
+                Button {
+                    selection = tab
+                } label: {
+                    Text(tab.label)
+                        .font(.system(size: 13, weight: isOn ? .semibold : .regular))
+                        .foregroundStyle(isOn ? Color.pulseSurface : Color.pulseTextPrimary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .background(isOn ? Color.pulseTextPrimary : Color.pulseSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(isOn ? Color.pulseTextPrimary : Color.pulseBorder, lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
 // MARK: - Zones de FC
 
 /// Barres de zones — équivalent `.zlist`/`.zrow` (Angular), du plus haut au
-/// plus bas comme `zones` (`.reverse()`).
+/// plus bas comme `zones` (`.reverse()`). Non citée dans la maquette,
+/// laissée telle quelle (`PulseCard`/`SectionHeader`).
 private struct ActivityZonesCard: View {
     let zones: [HrZone]
 
@@ -416,6 +642,7 @@ private struct ActivityZonesCard: View {
 // MARK: - Voies (escalade)
 
 /// Segments `climbActive` — équivalent `climbs`/`climbSummary` (Angular).
+/// Non citée dans la maquette, laissée telle quelle.
 private struct ActivityClimbsCard: View {
     let splits: [ActivitySplit]
 
@@ -467,7 +694,7 @@ private struct ActivityClimbsCard: View {
 // MARK: - Séries (muscu)
 
 /// Séries `setMesgs` groupées par catégorie — équivalent `exercises`/
-/// `setsSummary` (Angular).
+/// `setsSummary` (Angular). Non citée dans la maquette, laissée telle quelle.
 private struct ActivityExercisesCard: View {
     let sets: [ActivitySet]
 
@@ -546,43 +773,72 @@ private struct ActivityExercisesCard: View {
 
 // MARK: - Tours
 
-/// Table de tours — équivalent `.lap`/`.lap-head` (Angular), affichée
-/// seulement s'il y a plus d'un tour (comme `a.laps.length > 1`).
+/// Table de tours — équivalent `.lap`/`.lap-head` (maquette, lignes
+/// 1180-1184), affichée seulement s'il y a plus d'un tour (comme
+/// `a.laps.length > 1`). Colonnes # / Temps / Allure / bpm (largeurs fixes
+/// 26/flex/flex/52pt) — la colonne Distance est retirée : masquée en mobile
+/// côté Angular (`.lap .dist{display:none}`) et absente de la maquette.
+/// Colonne « Temps » en `ActivityFormat.clock` (« 13:49 »), pas
+/// `ActivityFormat.duration` (« 13min49 ») — le format que montre la
+/// maquette pour cette colonne précise.
 private struct ActivityLapsCard: View {
     let laps: [ActivityLap]
 
     var body: some View {
         if laps.count > 1 {
-            PulseCard {
-                SectionHeader("Tours") {
-                    Text("\(laps.count) tours")
-                        .font(PulseFont.metricLabel)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
-                Grid(alignment: .leading, horizontalSpacing: PulseSpacing.sm, verticalSpacing: PulseSpacing.sm) {
-                    GridRow {
-                        Text("#")
-                        Text("Temps")
-                        Text("Distance")
-                        Text("Allure")
-                        Text("bpm")
-                    }
-                    .font(PulseFont.metricLabel)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Tours".uppercased())
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .tracking(1.32)
                     .foregroundStyle(Color.pulseTextSecondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 10)
 
-                    ForEach(laps) { lap in
-                        GridRow {
-                            Text("\(lap.index)")
-                            Text(ActivityFormat.duration(lap.durationS))
-                            Text(ActivityFormat.distanceKm(lap.distanceM) ?? "—")
-                            Text(ActivityFormat.pace(durationS: lap.durationS, distanceM: lap.distanceM))
-                            Text(lap.avgHr != nil ? "\(Int(lap.avgHr!.rounded()))" : "—")
-                        }
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(Color.pulseTextPrimary)
+                HStack(spacing: 10) {
+                    Text("#")
+                        .frame(width: 26, alignment: .leading)
+                    Text("Temps")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Allure")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("bpm")
+                        .frame(width: 52, alignment: .trailing)
+                }
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(0.8)
+                .foregroundStyle(Color.pulseTextSecondary)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
+                ForEach(laps) { lap in
+                    HStack(spacing: 10) {
+                        Text("\(lap.index)")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(Color.pulseTextSecondary)
+                            .frame(width: 26, alignment: .leading)
+                        Text(ActivityFormat.clock(lap.durationS ?? 0))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(ActivityFormat.pace(durationS: lap.durationS, distanceM: lap.distanceM))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(lap.avgHr != nil ? "\(Int(lap.avgHr!.rounded()))" : "—")
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.pulseSurfaceAlt).frame(height: 1)
                     }
                 }
             }
+            .background(Color.pulseSurface)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.pulseBorder, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 }

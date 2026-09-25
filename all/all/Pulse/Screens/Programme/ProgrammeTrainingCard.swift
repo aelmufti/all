@@ -26,6 +26,7 @@ struct ProgrammeTrainingSection: View {
             trainingCard
             nextRow
             pushCard
+            notesCard
         }
     }
 
@@ -66,7 +67,8 @@ struct ProgrammeTrainingSection: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(domain.active?.name ?? domain.label)
-                    .font(.subheadline.weight(.semibold))
+                    // Web `.prog-name { font-size:17px; font-weight:600 }`.
+                    .font(.system(size: 17, weight: .semibold))
                 Text(domain.active?.source ?? "")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
@@ -81,10 +83,14 @@ struct ProgrammeTrainingSection: View {
     private var hero: some View {
         HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
             HStack(alignment: .lastTextBaseline, spacing: 2) {
+                // Web `.hero-n { font-size:44px; font-weight:600 }` — plus
+                // grand que `PulseFont.metricValue` (36), gardé ici tel quel.
                 Text("\(weekSessions.filter(\.done).count)")
-                    .font(PulseFont.metricValue)
+                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                // `.hero-of` hérite la famille mono + le poids 600 de `.hero-n`
+                // (pas de reset dans le SCSS), seule la taille (22px) change.
                 Text("/\(weekSessions.count)")
-                    .font(.title2)
+                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Text(heroLabel)
@@ -148,10 +154,12 @@ struct ProgrammeTrainingSection: View {
 
     private var dayGrid: some View {
         let cells = programmeWeekDays(domain: domain, detail: detail, shownWeek: viewModel.shownWeek)
-        return HStack(spacing: PulseSpacing.xs) {
+        // Web `.days { gap:6px }`, `.dcell { gap:5px }`.
+        return HStack(spacing: 6) {
             ForEach(cells) { cell in
-                VStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 6)
+                VStack(spacing: 5) {
+                    // Web `.dbox { height:26px; border-radius:7px }`.
+                    RoundedRectangle(cornerRadius: 7)
                         .fill(programmeDayColor(cell.state))
                         .frame(height: 26)
                         .overlay(
@@ -176,39 +184,55 @@ struct ProgrammeTrainingSection: View {
         switch state {
         case "done": return .pulseTextPrimary
         case "planned": return .pulseTextSecondary.opacity(0.34)
+        // Web `.dbox.missed { background:none; border:1px solid … }` — pas de
+        // remplissage, seul le liseré (posé par l'overlay ci-dessus) marque
+        // l'état.
+        case "missed": return .clear
         default: return .pulseSurfaceAlt
         }
     }
 
+    // Web `.dlegend { gap:6px 14px }`, `.dlg { font-size:11px }` — 4 puces
+    // (prévue/faite/en retard/aujourd'hui), la dernière manquait ici.
     private var dayLegend: some View {
-        HStack(spacing: PulseSpacing.md) {
+        HStack(spacing: 14) {
             ProgrammeLegendDot(color: .pulseTextSecondary.opacity(0.34), label: "prévue")
             ProgrammeLegendDot(color: .pulseTextPrimary, label: "faite")
-            ProgrammeLegendDot(color: .pulseDanger.opacity(0.55), label: "en retard")
+            ProgrammeLegendDot(color: .pulseDanger.opacity(0.55), label: "en retard", outlined: true)
+            ProgrammeLegendDot(color: .pulseTextSecondary, label: "aujourd’hui", dashed: true)
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(.system(size: 11, design: .monospaced))
     }
 
+    /// `<app-seg variant="track">` — piste `--surface-2` (pas de défilement :
+    /// les segments se répartissent à parts égales, `flex:1` côté web), pilule
+    /// sélectionnée `--surface` + liseré + texte plein, non sélectionnée sans
+    /// fond ni liseré. Web `.seg.track { gap:3px; padding:3px; border-radius:11px }`,
+    /// `.seg.track .item { height:34px; border-radius:8px; font-size:12px }`.
     private func weekPicker(weeks: Int) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: PulseSpacing.xs) {
-                ForEach(1...weeks, id: \.self) { index in
-                    let selected = index == viewModel.shownWeek
-                    Button {
-                        viewModel.shownWeek = index
-                    } label: {
-                        Text("S\(index)")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .padding(.horizontal, PulseSpacing.sm)
-                            .padding(.vertical, 6)
-                            .background(selected ? Color.pulseTextPrimary : Color.pulseSurfaceAlt)
-                            .foregroundStyle(selected ? Color.pulseSurface : Color.pulseTextSecondary)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
+        HStack(spacing: 3) {
+            ForEach(1...weeks, id: \.self) { index in
+                let selected = index == viewModel.shownWeek
+                Button {
+                    viewModel.shownWeek = index
+                } label: {
+                    Text("S\(index)")
+                        .font(.system(size: 12, weight: selected ? .semibold : .regular, design: .monospaced))
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .background(selected ? Color.pulseSurface : Color.clear)
+                        .foregroundStyle(selected ? Color.pulseTextPrimary : Color.pulseTextSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(selected ? Color.pulseBorder : Color.clear, lineWidth: 1)
+                        )
                 }
+                .buttonStyle(.plain)
             }
         }
+        .padding(3)
+        .background(Color.pulseSurfaceAlt)
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
     private func restartRow(active: ProgrammeActive) -> some View {
@@ -228,15 +252,19 @@ struct ProgrammeTrainingSection: View {
     // MARK: - Ligne « Prochaine » + carte d'envoi
 
     private var nextRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: PulseSpacing.sm) {
+        // Web `.lab { letter-spacing:.12em; text-transform:uppercase }`,
+        // `.next { gap:10px; padding:0 2px }`.
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("Prochaine")
                 .font(.system(size: 11, design: .monospaced))
+                .tracking(1.3)
+                .textCase(.uppercase)
                 .foregroundStyle(Color.pulseTextSecondary)
             Text(programmeNextLabel(detail: detail, shownWeek: viewModel.shownWeek))
                 .font(.footnote)
                 .foregroundStyle(Color.pulseTextPrimary)
         }
-        .padding(.horizontal, PulseSpacing.xs)
+        .padding(.horizontal, 2)
     }
 
     private var pushCard: some View {
@@ -261,6 +289,28 @@ struct ProgrammeTrainingSection: View {
             Text(programmePushHint(status: viewModel.pushStatus))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.pulseTextSecondary)
+        }
+    }
+
+    /// « À retenir » — équivalent `@if (training(d)) { <app-panel title="À
+    /// retenir" [summary]="d.active.goal"> … </app-panel> }`, simplifié en
+    /// carte toujours dépliée (même parti pris que `app-panel` ailleurs dans
+    /// cet écran, cf. `ProgrammeNutritionCard`/`notesCard` sommeil).
+    private var notesCard: some View {
+        PulseCard {
+            HStack(alignment: .firstTextBaseline) {
+                Text("À retenir")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Text(domain.active?.goal ?? "")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            ForEach(domain.active?.notes ?? [], id: \.self) { note in
+                Text(note).font(.system(size: 14))
+            }
         }
     }
 }
@@ -310,30 +360,34 @@ private struct ProgrammeSessionRow: View {
                 }
                 .buttonStyle(.plain)
 
+                // Web `.chev { color:var(--absent); font-size:17px }`,
+                // `.chev.on { color:var(--accent) }`.
                 Image(systemName: "chevron.right")
-                    .font(.footnote)
+                    .font(.system(size: 17))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .foregroundStyle(isExpanded ? Color.pulseAccent : Color.pulseTextSecondary)
+                    .foregroundStyle(isExpanded ? Color.pulseAccent : Color.pulseAbsent)
             }
             .padding(.vertical, PulseSpacing.xs)
 
             if isExpanded {
+                // Web `.items { padding:0 0 12px 48px }`, `.it-name { font-size:14px }`,
+                // `.it-note { font-size:12px }`.
                 VStack(alignment: .leading, spacing: PulseSpacing.sm) {
                     ForEach(session.session.items, id: \.name) { item in
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(item.name).font(.subheadline)
+                            Text(item.name).font(.system(size: 14))
                             Text(item.prescription)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(Color.pulseTextSecondary)
                             if let note = item.note {
                                 Text(note)
-                                    .font(.caption2)
+                                    .font(.system(size: 12))
                                     .foregroundStyle(Color.pulseTextSecondary)
                             }
                         }
                     }
                 }
-                .padding(.leading, 40)
+                .padding(.leading, 48)
                 .padding(.bottom, PulseSpacing.sm)
             }
         }

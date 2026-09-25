@@ -62,7 +62,7 @@ private struct DashboardTrainingLoadCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Charge hebdomadaire")
+            DashboardCardHeader("Charge hebdomadaire")
             if weeks.isEmpty {
                 Text("Pas d'activité sur la période.")
                     .font(PulseFont.body)
@@ -111,7 +111,7 @@ private struct DashboardSportShareCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Répartition par sport")
+            DashboardCardHeader("Répartition par sport")
             if shares.isEmpty {
                 Text("Pas d'activité sur la période.")
                     .font(PulseFont.body)
@@ -147,7 +147,7 @@ private struct DashboardStreakCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("Régularité")
+                DashboardCardHeader("Régularité")
                 Spacer()
                 Text(dashboardStreakLabel(current: streak.current))
                     .font(PulseFont.metricLabel)
@@ -182,7 +182,7 @@ private struct DashboardZonesCard: View {
 
         return PulseCard {
             HStack {
-                SectionHeader("Temps par zone d'effort")
+                DashboardCardHeader("Temps par zone d'effort")
                 Spacer()
                 Text("\(dashboardFormatHM(Int(totalSeconds))) cumulées")
                     .font(PulseFont.metricLabel)
@@ -227,7 +227,7 @@ private struct DashboardRecordsCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Records de la période")
+            DashboardCardHeader("Records de la période")
             VStack(spacing: 0) {
                 if let r = records.longestSession {
                     DashboardRecordRow(name: "Séance la plus longue", value: dashboardFormatHM(Int(r.value)), caption: r.date.map(dashboardLongDate))

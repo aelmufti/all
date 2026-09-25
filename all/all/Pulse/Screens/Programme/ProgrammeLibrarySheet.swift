@@ -34,8 +34,9 @@ struct ProgrammeLibrarySheet: View {
                     pickingSection(choice)
                 } else {
                     Section {
+                        // Web `.u11 { font-family:mono; font-size:11px }`.
                         Text(domain.hint)
-                            .font(.footnote)
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                     Section {
@@ -66,20 +67,22 @@ struct ProgrammeLibrarySheet: View {
 
     @ViewBuilder
     private func pickingSection(_ choice: ProgrammeChoice) -> some View {
+        // Web `.u11 { font-family:mono; font-size:11px }` pour les trois
+        // textes ci-dessous (intro, consigne, note de sélection).
         Section {
             Text(pickIntro(choice))
-                .font(.footnote)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.pulseTextSecondary)
             Text(domain.kind == .sleep
                  ? "Coche les jours où tu dois te lever à heure imposée. Les autres servent de référence pour le décalage social et le rattrapage."
                  : "Choisis les jours où tu peux t’entraîner.")
-                .font(.caption)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.pulseTextSecondary)
             ProgrammeDayPicker(order: Self.pickerOrder, picked: $pickedDays)
                 .listRowInsets(EdgeInsets())
                 .padding(.vertical, PulseSpacing.xs)
             Text(pickNote(choice))
-                .font(.caption)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(pickShort(choice) ? Color.pulseDanger : Color.pulseTextSecondary)
             Button("Commencer aujourd’hui") {
                 onActivate(choice.id, pickedDays.sorted())
@@ -155,7 +158,8 @@ private struct ProgrammeChoiceRow: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(choice.name).font(.subheadline.weight(.semibold))
-                Text(choice.goal).font(.caption).foregroundStyle(Color.pulseTextSecondary)
+                // Web `.pick-goal { font-size:13px }`.
+                Text(choice.goal).font(.system(size: 13)).foregroundStyle(Color.pulseTextSecondary)
                 Text("\(meta) · \(choice.source)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
@@ -180,8 +184,9 @@ private struct ProgrammeDayPicker: View {
     let order: [Int]
     @Binding var picked: Set<Int>
 
+    // Web `.dpick { gap:6px }`, `.dbtn { height:46px; min-height:46px }`.
     var body: some View {
-        HStack(spacing: PulseSpacing.xs) {
+        HStack(spacing: 6) {
             ForEach(order, id: \.self) { day in
                 let isOn = picked.contains(day)
                 Button {
@@ -189,7 +194,7 @@ private struct ProgrammeDayPicker: View {
                 } label: {
                     Text(ProgrammeDate.weekdayLetters[day])
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .frame(maxWidth: .infinity, minHeight: 46)
                         .background(isOn ? Color.pulseTextPrimary : Color.pulseSurface)
                         .foregroundStyle(isOn ? Color.pulseSurface : Color.pulseTextSecondary)
                         .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
