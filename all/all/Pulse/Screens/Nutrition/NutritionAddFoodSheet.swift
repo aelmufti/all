@@ -47,7 +47,7 @@ struct NutritionAddFoodSheet: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if viewModel.sheetView != .menu {
+                if viewModel.sheetView != .menu && viewModel.editingEntryId == nil {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
                             viewModel.sheetGoBack()
@@ -74,7 +74,7 @@ struct NutritionAddFoodSheet: View {
         case .menu: return "Ajouter un aliment"
         case .scan: return "Scanner un code-barres"
         case .frequent: return "Aliments fréquents"
-        case .manual: return "Ajouter au journal"
+        case .manual: return viewModel.editingEntryId != nil ? "Modifier l'entrée" : "Ajouter au journal"
         }
     }
 }
@@ -376,8 +376,10 @@ private struct NutritionAddManualForm: View {
                         .font(.caption2)
                         .foregroundStyle(Color.pulseTextSecondary)
 
-                    Toggle("Enregistrer dans ma bibliothèque", isOn: $viewModel.saveToLib)
-                        .font(.footnote)
+                    if viewModel.editingEntryId == nil {
+                        Toggle("Enregistrer dans ma bibliothèque", isOn: $viewModel.saveToLib)
+                            .font(.footnote)
+                    }
                 }
             }
             .padding(PulseSpacing.lg)
@@ -396,7 +398,7 @@ private struct NutritionAddManualForm: View {
                         if viewModel.isMutating {
                             ProgressView()
                         } else {
-                            Text("Ajouter")
+                            Text(viewModel.editingEntryId != nil ? "Enregistrer" : "Ajouter")
                         }
                     }
                     .frame(maxWidth: .infinity)
