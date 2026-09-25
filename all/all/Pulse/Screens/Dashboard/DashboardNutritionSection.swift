@@ -62,7 +62,7 @@ private struct DashboardNutritionEmptyCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Nutrition")
+            DashboardCardHeader("Nutrition")
             Text("\(nutrition.daysLogged) jour\(nutrition.daysLogged > 1 ? "s" : "") saisi\(nutrition.daysLogged > 1 ? "s" : "") sur la période, dont aucun complet. Les moyennes ont besoin de journées entières pour vouloir dire quelque chose.")
                 .font(PulseFont.body)
                 .foregroundStyle(Color.pulseTextSecondary)
@@ -75,7 +75,7 @@ private struct DashboardIntakeCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Apport vs dépense")
+            DashboardCardHeader("Apport vs dépense")
             Chart {
                 ForEach(nutrition.series) { day in
                     if let kcal = day.kcal, let date = dashboardDate(from: day.date) {
@@ -122,7 +122,7 @@ private struct DashboardMacrosCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("Répartition macros")
+                DashboardCardHeader("Répartition macros")
                 Spacer()
                 Text("moyenne \(completeDays) j")
                     .font(PulseFont.metricLabel)
@@ -165,7 +165,7 @@ private struct DashboardLoggingGridCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("Régularité de saisie")
+                DashboardCardHeader("Régularité de saisie")
                 Spacer()
                 Text("\(logRate) % des 30 derniers jours")
                     .font(PulseFont.metricLabel)
@@ -199,7 +199,7 @@ private struct DashboardTopFoodsCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("Aliments les plus fréquents")
+                DashboardCardHeader("Aliments les plus fréquents")
                 Spacer()
                 Text("\(nutrition.days) jours · \(nutrition.totalEntries) entrées")
                     .font(PulseFont.metricLabel)

@@ -15,17 +15,39 @@ import SwiftUI
 
 // MARK: - Légende partagée (calendrier entraînement, frise sommeil)
 
-/// Puce ronde + libellé — légende des couleurs, réutilisée par la carte
-/// entraînement (calendrier de la semaine) et la carte sommeil (frise des
-/// nuits).
+/// Puce carrée arrondie + libellé — légende des couleurs, réutilisée par la
+/// carte entraînement (calendrier de la semaine) et la carte sommeil (frise
+/// des nuits). Web `.dsw { width:9px; height:9px; border-radius:3px }`,
+/// `.dlg { gap:6px }`.
 struct ProgrammeLegendDot: View {
     let color: Color
     let label: String
+    /// Liseré seul, sans remplissage — équivalent `.dsw.missed` (bordure
+    /// pleine, fond transparent).
+    var outlined: Bool = false
+    /// Liseré en pointillés, sans remplissage — équivalent `.dsw.today`
+    /// (contour tireté, fond transparent).
+    var dashed: Bool = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 8, height: 8)
+        HStack(spacing: 6) {
+            swatch
             Text(label).foregroundStyle(Color.pulseTextSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private var swatch: some View {
+        let shape = RoundedRectangle(cornerRadius: 3)
+        if dashed {
+            shape.strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: [1.5]))
+                .frame(width: 9, height: 9)
+        } else if outlined {
+            shape.strokeBorder(color, lineWidth: 1)
+                .frame(width: 9, height: 9)
+        } else {
+            shape.fill(color)
+                .frame(width: 9, height: 9)
         }
     }
 }

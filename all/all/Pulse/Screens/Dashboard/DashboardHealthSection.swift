@@ -56,7 +56,7 @@ private struct DashboardRestingHrCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("FC au repos")
+                DashboardCardHeader("FC au repos")
                 Spacer()
                 Text(deltaLabel)
                     .font(PulseFont.metricLabel)
@@ -96,7 +96,7 @@ private struct DashboardRespirationCard: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("Respiration nocturne")
+                DashboardCardHeader("Respiration nocturne")
                 Spacer()
                 Text(health.respirationBand != nil ? "bande = normale personnelle" : "trop peu de nuits")
                     .font(PulseFont.metricLabel)
@@ -141,7 +141,7 @@ private struct DashboardSpo2Card: View {
     var body: some View {
         PulseCard {
             HStack {
-                SectionHeader("SpO2 · distribution")
+                DashboardCardHeader("SpO2 · distribution")
                 Spacer()
                 Text("\(health.spo2Nights) nuits")
                     .font(PulseFont.metricLabel)
@@ -172,7 +172,7 @@ private struct DashboardWeightCard: View {
         PulseCard {
             if health.weightSeries.count > 1 {
                 HStack {
-                    SectionHeader("Poids")
+                    DashboardCardHeader("Poids")
                     Spacer()
                     Text(deltaLabel)
                         .font(PulseFont.metricLabel)
@@ -196,7 +196,7 @@ private struct DashboardWeightCard: View {
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             } else {
-                SectionHeader("Poids") { Text("aucune pesée").font(PulseFont.metricLabel).foregroundStyle(Color.pulseTextSecondary) }
+                DashboardCardHeader("Poids") { Text("aucune pesée").font(PulseFont.metricLabel).foregroundStyle(Color.pulseTextSecondary) }
                 Text("Pas de pesée sur la période. La saisie se fait sur la page Santé, jour par jour.")
                     .font(PulseFont.body)
                     .foregroundStyle(Color.pulseTextSecondary)
@@ -215,7 +215,7 @@ private struct DashboardCorrelationsCard: View {
 
     var body: some View {
         PulseCard {
-            SectionHeader("Ce qui bouge ensemble")
+            DashboardCardHeader("Ce qui bouge ensemble")
             VStack(spacing: PulseSpacing.md) {
                 ForEach(correlations) { correlation in
                     VStack(alignment: .leading, spacing: PulseSpacing.xs) {

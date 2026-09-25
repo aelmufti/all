@@ -2,24 +2,60 @@
 //  HomeView.swift
 //  all (bridge-connect)
 //
-//  Écran Accueil — port 1-1 de `custom-connect/web/src/app/pages/home/home.component.ts` :
-//  FC « Maintenant » (+ mini-graphe + vitaux), entraînement de la semaine +
-//  intensité, séance du jour/à venir, « Depuis le réveil » (pas/calories) et
-//  « Nuit dernière » (durée, hypnogramme, régularité du coucher). Trois
-//  états : chargement (`LoadingView`), erreur (`ErrorView`), données.
+//  Écran Accueil — port 1-1 de `custom-connect/web/src/app/pages/home/home.component.ts`
+//  au gabarit **mobile** (<900px, celui qui s'applique réellement à ce
+//  téléphone) : FC « Maintenant » (+ mini-graphe + vitaux), entraînement de
+//  la semaine + intensité, séance du jour/à venir, « Depuis le réveil »
+//  (pas/calories) et « Nuit dernière » (durée, hypnogramme, régularité du
+//  coucher). Trois états : chargement (`LoadingView`), erreur (`ErrorView`),
+//  données.
+//
+//  Fidélité structurelle : au gabarit mobile, le web n'enferme PAS chaque
+//  section dans une carte à coins arrondis (`section{background:var(--surface);
+//  border:1px solid var(--border);border-radius:16px}` n'existe qu'à partir de
+//  `@media (min-width:900px)`) — les sections s'enchaînent à plat, séparées
+//  par un simple filet (`border-top:1px solid var(--line)`), avec juste
+//  « Depuis le réveil » sur fond `--surface`. D'où l'absence de `PulseCard`
+//  ci-dessous : chaque section gère son propre padding/filet, pas de carte.
 //
 //  Couleurs par métrique (cf. `DesignSystem.swift`) : chaque donnée reprend
-//  la teinte de sa métrique (FC → `.pulseHR`, stress → `.pulseStress`,
-//  SpO2 → `.pulseSpo2`, respiration → `.pulseResp`, pas → `.pulseSteps`,
-//  calories → `.pulseCalories`, sommeil → `.pulseSleep`/phases `.pulseSleep*`)
-//  — jamais l'accent bleu générique pour une donnée de métrique.
+//  la teinte de sa métrique (FC → `.pulseHR`, sommeil → `.pulseSleep`/phases
+//  `.pulseSleep*`) — mais SEULEMENT là où le CSS Angular l'indique
+//  explicitly. Vérification faite bloc par bloc : les vitaux « Maintenant »
+//  (stress/oxygène/respiration), les valeurs « Depuis le réveil » et la durée/
+//  l'horaire « Nuit dernière » n'ont PAS de couleur de métrique dans
+//  `home.component.ts` (`.vital-val`, `.metric-val`, `.night-dur`, `.reg-clock`
+//  héritent tous de `--text`, sans règle de couleur dédiée) — contrairement à
+//  la maquette statique (`Pulse Refonte.dc.html`) qui, pour « Depuis le
+//  réveil », dessine des barres horizontales teintées par métrique (widget
+//  différent de celui réellement livré par le composant Angular, jauge
+//  verticale + point). Écart maquette/Angular tranché en faveur d'Angular
+//  (source de structure/fonctionnalités selon la consigne) ; la maquette n'a
+//  servi qu'aux tailles/espacements/couleurs qui, elles, concordent.
+//
+//  `DesignSystem.swift` n'expose pas de jeton séparé pour `--line` (utilisé
+//  par les filets `border-top` de section) : `pulseBorder` (`--border`) est
+//  réutilisé, le plus proche disponible — pas de hex inventé.
 //
 //  À brancher dans `PulseShellView`, case `.accueil`, à la place de
 //  `ComingSoonView(title: "Accueil", …)` — pas de dépendance de navigation
-//  externe : l'écran gère sa propre `NavigationStack`. Divergence assumée vs
-//  le web : les liens `routerLink="/programme"` (« Voir le programme »,
-//  bande « Coucher moyen ») ne sont pas portés — pas d'API de navigation
-//  inter-onglets exposée à cet écran, cf. contrainte de périmètre du prompt.
+//  externe : l'écran gère sa propre `NavigationStack`. Divergences assumées
+//  vs le web (aucune API de navigation inter-onglets exposée à cet écran) :
+//  les liens `routerLink="/programme"` (« Voir le programme », bande
+//  « Coucher moyen ») ne sont pas portés. De même, au gabarit mobile, Angular
+//  masque déjà lui-même le focus de séance, la liste d'exercices et le lien
+//  « Voir le programme » (`.session-focus/.items/.session-more{display:none}`,
+//  visibles seulement ≥900px) : la carte séance ne montre donc que titre/
+//  horaire, nom/durée, méta et le badge « fait », comme le web mobile.
+//
+//  FC en direct : `HomeLiveHeartRate` n'expose pas la machine à états
+//  `phase` (starting/waiting/measuring/lost) du `LiveHrService` Angular, ni
+//  son second signal `note()` distinct de `hint()`. `liveStateLabel`
+//  ci-dessous approxime `liveLabel()` à partir des champs disponibles
+//  (`enabled/reachable/heartRate/stale`) ; le lien « état du lien » (phase
+//  "lost") n'est pas porté (pas d'API de navigation, cf. ci-dessus) ; un seul
+//  `live.hint` est affiché (position de `.direct-hint`), au lieu des deux
+//  signaux distincts du web.
 //
 
 import SwiftUI
@@ -102,97 +138,201 @@ struct HomeView: View {
             }
         case .loaded:
             ScrollView {
-                VStack(spacing: PulseSpacing.lg) {
-                    NowCard(viewModel: viewModel)
-                    WeekTrainingCard(viewModel: viewModel)
+                VStack(spacing: 0) {
+                    NowSection(viewModel: viewModel)
+                    WeekTrainingSection(viewModel: viewModel)
                     if let session = viewModel.session {
-                        SessionCard(session: session)
+                        SessionSection(session: session)
                     }
-                    WakeCard(viewModel: viewModel)
-                    NightCard(viewModel: viewModel)
+                    WakeSection(viewModel: viewModel)
+                    NightSection(viewModel: viewModel)
                 }
-                .padding(PulseSpacing.lg)
+                // SCSS `:host{padding-bottom:16px}` — marge basse de toute la page.
+                .padding(.bottom, 16)
             }
+            .background(Color.pulseBackground)
         }
     }
 }
 
-/// Couleur par métrique pour les vitaux de « Maintenant » — jamais l'accent
-/// bleu générique (cf. en-tête du fichier).
-private func vitalAccent(_ id: String) -> Color {
-    switch id {
-    case "stress": return .pulseStress
-    case "spo2": return .pulseSpo2
-    case "resp": return .pulseResp
-    default: return .pulseAccent
+// MARK: - Filet de séparation entre sections (`border-top:1px solid var(--line)`)
+
+private extension View {
+    func homeTopDivider() -> some View {
+        overlay(alignment: .top) {
+            Rectangle().fill(Color.pulseBorder).frame(height: 1)
+        }
     }
 }
 
-// MARK: - « Maintenant » (FC + vitaux)
+// MARK: - Étiquette de section (`.lab` — PAS `SectionHeader`/`PulseFont.sectionTitle`,
+// réservé aux titres de carte d'autres écrans : l'Accueil web n'a pas de gros
+// titres de section, seulement ces petites étiquettes discrètes mono/majuscules).
 
-private struct NowCard: View {
+private struct HomeLabel: View {
+    let text: String
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 10, design: .monospaced))
+            // `.12em` de 10px ≈ 1.2pt.
+            .tracking(1.2)
+            .foregroundStyle(Color.pulseTextSecondary)
+    }
+}
+
+// MARK: - Pastille « périmé » (`.stale-pill`)
+
+private struct StalePill: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(Color.pulseStress).frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.pulseTextPrimary)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(Color.pulseSurface, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.pulseBorder, lineWidth: 1))
+    }
+}
+
+// MARK: - Filet pointillé (`.f-lead`, jauge de séparation nom/valeur des « facts »)
+
+private struct DotLeader: View {
+    var body: some View {
+        GeometryReader { geo in
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: geo.size.height / 2))
+                path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height / 2))
+            }
+            .stroke(Color.pulseBorder, style: StrokeStyle(lineWidth: 1, dash: [1, 3]))
+        }
+        .frame(minWidth: 10, maxWidth: .infinity)
+        .frame(height: 1)
+    }
+}
+
+// MARK: - Formatage nombre groupé (`| number:'1.0-0'`, ex. « 8 420 »)
+
+private enum HomeNumberFormat {
+    /// Espace fine insécable comme le `DecimalPipe` Angular (locale fr).
+    static let integerFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = "\u{202F}"
+        formatter.groupingSize = 3
+        formatter.maximumFractionDigits = 0
+        formatter.locale = Locale(identifier: "fr_FR")
+        return formatter
+    }()
+
+    static func grouped(_ value: Double) -> String {
+        integerFormatter.string(from: NSNumber(value: value.rounded()))
+            ?? String(Int(value.rounded()))
+    }
+}
+
+// MARK: - « Maintenant » (FC + entraînement direct + vitaux)
+
+private struct NowSection: View {
     let viewModel: HomeViewModel
 
     var body: some View {
-        PulseCard {
-            HStack {
-                SectionHeader(viewModel.staleLabel == nil ? "Maintenant" : "Dernier relevé")
-                Spacer()
-                if let staleLabel = viewModel.staleLabel {
-                    Text(staleLabel)
-                        .font(PulseFont.metricLabel)
+        // SCSS `.now { padding:26px 22px 24px; gap:22px; }`.
+        VStack(alignment: .leading, spacing: 22) {
+            header
+
+            // `.pulse` : colonne bpm+sous-titre à gauche, mini-graphe à
+            // droite, alignés sur la ligne de base basse (`align-items:flex-end`).
+            HStack(alignment: .bottom, spacing: 18) {
+                VStack(alignment: .leading, spacing: 3) {
+                    bpmRow
+                    Text(nowSubtitle)
+                        .font(.system(size: 11))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
+                HeartRateSparkline(samples: viewModel.day?.hr ?? [], stale: viewModel.staleLabel != nil)
+                    .frame(maxWidth: .infinity)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: PulseSpacing.sm) {
-                Text(viewModel.shownHr.map(String.init) ?? "—")
-                    .font(.system(size: 52, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(viewModel.shownHr == nil ? Color.pulseTextSecondary : Color.pulseHR)
-                Text("bpm")
-                    .font(PulseFont.metricUnit)
-                    .foregroundStyle(Color.pulseTextSecondary)
-                if viewModel.live?.heartRate != nil, viewModel.live?.enabled == true,
-                    viewModel.live?.reachable == true
-                {
-                    Image(systemName: "heart.fill")
-                        .foregroundStyle(Color.pulseHR)
-                        .symbolEffect(.pulse, options: .repeating)
-                        .accessibilityLabel("En direct")
-                }
-            }
-
-            HeartRateSparkline(samples: viewModel.day?.hr ?? [], stale: viewModel.staleLabel != nil)
-
-            Text(nowSubtitle)
-                .font(.footnote)
-                .foregroundStyle(Color.pulseTextSecondary)
-
+            // `.now-head`/`.direct` : `margin-top:-8px` sur un `gap:22px` ⇒
+            // écart net ≈14px.
             liveControl
+                .padding(.top, -8)
 
-            HStack(spacing: PulseSpacing.lg) {
-                ForEach(viewModel.vitals) { vital in
-                    StatTile(
-                        label: vital.label,
-                        value: vital.value.map(String.init) ?? "—",
-                        unit: vital.value != nil ? vital.unit : nil,
-                        accent: vitalAccent(vital.id)
-                    )
-                }
+            if let hint = viewModel.live?.hint {
+                // `.direct-hint { margin:-10px 0 0; font-size:12px; line-height:1.5; }`.
+                Text(hint)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .padding(.top, -10)
+            }
+
+            vitals
+        }
+        .padding(.top, 26)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 24)
+    }
+
+    /// Miroir de `.head` (h1 + pastille périmé) — le gear `routerLink="/parametres"`
+    /// est déjà porté par la roue crantée de la barre d'outils native
+    /// (`SystemMenuView`), pas dupliqué ici.
+    private var header: some View {
+        HStack {
+            Text(viewModel.staleLabel == nil ? "Maintenant" : "Dernier relevé")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
+            Spacer()
+            if let staleLabel = viewModel.staleLabel {
+                StalePill(label: staleLabel)
             }
         }
+    }
+
+    private var bpmRow: some View {
+        HStack(spacing: 11) {
+            Text(viewModel.shownHr.map(String.init) ?? "—")
+                .font(.system(size: 60, weight: .semibold, design: .monospaced))
+                .foregroundStyle(bpmColor)
+            if isLiveBeating {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(Color.pulseHR)
+                    .symbolEffect(.pulse, options: .repeating)
+                    .accessibilityLabel("En direct")
+            }
+        }
+    }
+
+    private var isLiveBeating: Bool {
+        viewModel.live?.heartRate != nil && viewModel.live?.enabled == true
+            && viewModel.live?.reachable == true
+    }
+
+    /// `.bpm.empty{color:--absent}` / `.bpm.stale{color:--text-dim}` — au
+    /// gabarit web les deux classes ont même spécificité, `.stale` déclarée
+    /// après l'emporte quand elle s'applique : un jour périmé prime toujours
+    /// sur « valeur absente ».
+    private var bpmColor: Color {
+        if viewModel.staleLabel != nil { return .pulseTextSecondary }
+        if viewModel.shownHr == nil { return .pulseAbsent }
+        return .pulseHR
     }
 
     private var nowSubtitle: String {
         var parts: [String] = []
-        if viewModel.live?.enabled == true, viewModel.live?.reachable == true,
-            viewModel.live?.heartRate != nil
-        {
+        if let live = viewModel.live, live.heartRate != nil, live.enabled, live.reachable, !live.stale {
             parts.append("en direct")
-        } else if let staleLabel = viewModel.staleLabel {
-            parts.append("dernier relevé · \(staleLabel)")
-        } else if let ago = viewModel.lastReadingLabel {
-            parts.append(ago)
+        } else if viewModel.staleLabel != nil, let date = viewModel.day?.date {
+            parts.append("dernier relevé le \(HomeViewModel.shortDate(date))")
+        } else if viewModel.live?.enabled == true {
+            parts.append("dernier relevé enregistré")
         } else {
             parts.append("battements par minute")
         }
@@ -202,23 +342,85 @@ private struct NowCard: View {
         return parts.joined(separator: " · ")
     }
 
+    /// `.direct` : bouton fantôme (pilule, pas l'accent bleu) + état en
+    /// direct — `liveStateLabel` approxime `liveLabel()` (cf. en-tête du
+    /// fichier, `HomeLiveHeartRate` n'a pas de champ `phase`).
     @ViewBuilder
     private var liveControl: some View {
-        HStack(spacing: PulseSpacing.sm) {
-            if viewModel.live?.enabled == true {
-                Button("Arrêter") { Task { await viewModel.stopLive() } }
-                    .font(.footnote)
-            } else {
-                Button("Reprendre la mesure") { Task { await viewModel.startLive() } }
-                    .font(.footnote)
+        HStack(spacing: PulseSpacing.md) {
+            Button {
+                Task {
+                    if viewModel.live?.enabled == true {
+                        await viewModel.stopLive()
+                    } else {
+                        await viewModel.startLive()
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if viewModel.live?.enabled != true {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.pulseHR)
+                    }
+                    Text(viewModel.live?.enabled == true ? "Arrêter" : "Reprendre la mesure")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.pulseTextSecondary)
+                .padding(.horizontal, 13)
+                .frame(height: 34)
+                .overlay(Capsule().strokeBorder(Color.pulseBorder, lineWidth: 1))
             }
-            if let hint = viewModel.live?.hint {
-                Text(hint)
-                    .font(.footnote)
+            .buttonStyle(.plain)
+
+            if let label = liveStateLabel {
+                Text(label)
+                    .font(.system(size: 12))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
-        .tint(Color.pulseAccent)
+    }
+
+    private var liveStateLabel: String? {
+        guard let live = viewModel.live, live.enabled else { return nil }
+        if live.heartRate != nil, live.reachable, !live.stale { return "Mesure en direct" }
+        if !live.reachable { return "En attente de la montre…" }
+        return "Mesure interrompue"
+    }
+
+    /// `.vitals` : stress/oxygène/respiration, jamais teintés par métrique
+    /// ici (`.vital-val` hérite de `--text`, cf. en-tête du fichier) +
+    /// « il y a N min » poussé à droite (`margin-left:auto`).
+    private var vitals: some View {
+        HStack(alignment: .bottom, spacing: 20) {
+            ForEach(viewModel.vitals) { vital in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(vital.label)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.pulseTextSecondary)
+                    HStack(alignment: .lastTextBaseline, spacing: 0) {
+                        Text(vital.value.map(String.init) ?? "—")
+                            .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(vitalValueColor)
+                        if vital.value != nil, !vital.unit.isEmpty {
+                            Text(" \(vital.unit)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                    }
+                }
+            }
+            if viewModel.staleLabel == nil, let ago = viewModel.lastReadingLabel {
+                Spacer(minLength: 0)
+                Text(ago)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+        }
+    }
+
+    private var vitalValueColor: Color {
+        viewModel.staleLabel == nil ? .pulseTextPrimary : .pulseTextSecondary
     }
 }
 
@@ -274,242 +476,349 @@ private struct HeartRateSparkline: View {
 
 // MARK: - Entraînement de la semaine (+ intensité)
 
-private struct WeekTrainingCard: View {
+private struct WeekTrainingSection: View {
     let viewModel: HomeViewModel
 
+    private static let dayLetters = ["L", "M", "M", "J", "V", "S", "D"]
+
     var body: some View {
-        PulseCard {
-            HStack {
-                SectionHeader("Entraînement de la semaine")
+        // SCSS `.week { border-top:1px solid var(--line); padding:16px 22px; gap:18px; }`.
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                HomeLabel(text: "Entraînement de la semaine")
                 Spacer()
                 Text(viewModel.weekRangeLabel)
-                    .font(PulseFont.metricLabel)
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 
             let lead = viewModel.weekLead
-            VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-                Text(lead.label.uppercased())
-                    .font(PulseFont.metricLabel)
-                    .foregroundStyle(Color.pulseTextSecondary)
-                HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
+            VStack(alignment: .leading, spacing: 7) {
+                HomeLabel(text: lead.label)
+                HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(lead.value)
-                        .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 42, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.pulseTextPrimary)
+                        // `letter-spacing:.01em` de 42px ≈ 0.42pt.
+                        .tracking(0.42)
                     Text(lead.sub)
-                        .font(.footnote)
+                        .font(.system(size: 13))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
 
-            WeekProgressChart(
-                training: viewModel.trainingShare,
-                intensity: viewModel.intensityShare
-            )
+            plot
 
-            if !viewModel.intensityShare.isEmpty {
-                HStack(spacing: PulseSpacing.md) {
-                    if !viewModel.trainingShare.isEmpty {
-                        WeekChartLegend(color: .pulseTextPrimary, label: "Séances")
-                    }
-                    WeekChartLegend(color: .pulseHR, label: "Intensité")
-                }
-            }
+            facts
 
-            VStack(alignment: .leading, spacing: PulseSpacing.sm) {
-                ForEach(viewModel.weekFacts) { fact in
-                    HStack {
-                        Text(fact.name)
-                            .font(.footnote)
-                            .foregroundStyle(Color.pulseTextPrimary)
-                        Spacer()
-                        Text(fact.value)
-                            .font(.system(.footnote, design: .monospaced))
-                            .foregroundStyle(Color.pulseTextPrimary)
-                    }
-                }
-            }
-            .padding(.top, PulseSpacing.xs)
-
+            // `.week-note { font-family:mono; font-size:10px; line-height:1.65; }`.
             Text(viewModel.weekNote)
-                .font(.caption2)
+                .font(.system(size: 10, design: .monospaced))
+                .lineSpacing(6.5)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 22)
+        .homeTopDivider()
+    }
+
+    private var plot: some View {
+        VStack(spacing: 9) {
+            WeekProgressChart(training: viewModel.trainingShare, intensity: viewModel.intensityShare)
+
+            HStack(spacing: 0) {
+                ForEach(Self.dayLetters.indices, id: \.self) { index in
+                    let today = index == todayIndex
+                    Text(Self.dayLetters[index])
+                        .font(.system(size: 10, weight: today ? .semibold : .regular, design: .monospaced))
+                        .foregroundStyle(today ? Color.pulseTextPrimary : Color.pulseTextSecondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+
+            if !viewModel.intensityShare.isEmpty {
+                HStack(spacing: 16) {
+                    if !viewModel.trainingShare.isEmpty {
+                        WeekChartLegend(color: .pulseTextPrimary, label: "Séances", dashed: false)
+                    }
+                    WeekChartLegend(color: .pulseHR, label: "Intensité", dashed: true)
+                }
+            }
+        }
+    }
+
+    /// Miroir de `weekIndex()` (VM, privé) recalculé ici à partir des
+    /// utilitaires publics (`parseDateKey`/`startOfWeek`) — pas d'accès à la
+    /// propriété privée de la VM, celle-ci reste figée (cf. périmètre).
+    private var todayIndex: Int? {
+        guard let dateString = viewModel.day?.date,
+            let refDate = HomeViewModel.parseDateKey(dateString)
+        else { return nil }
+        let monday = HomeViewModel.startOfWeek(refDate)
+        let days =
+            Calendar.current.dateComponents(
+                [.day], from: monday, to: Calendar.current.startOfDay(for: refDate)
+            ).day ?? 0
+        return max(0, min(6, days))
+    }
+
+    private var facts: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(viewModel.weekFacts) { fact in
+                HStack(spacing: 8) {
+                    Text(fact.name)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.pulseTextPrimary)
+                        .lineLimit(1)
+                    DotLeader()
+                    Text(fact.value)
+                        .font(.system(size: 15, design: .monospaced))
+                        .foregroundStyle(Color.pulseTextPrimary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.top, 15)
+        .homeTopDivider()
     }
 }
 
-/// Mini-graphe de progression hebdomadaire — équivalent simplifié du SVG
-/// `weekCurve()` côté Angular (deux courbes de part d'objectif, 0 → lundi,
-/// 1 → objectif atteint) : le trait plein pour l'entraînement, le pointillé
-/// pour l'intensité, une ligne de référence à l'objectif.
+/// Mini-graphe de progression hebdomadaire — port du SVG `weekCurve()` côté
+/// Angular : trait plein (entraînement) + aire, pointillé oblique
+/// (« rythme régulier »), ligne d'objectif horizontale + point creux à
+/// l'objectif, pointillé FC (intensité) + point plein. La boîte (hauteur +
+/// filet bas) reste affichée même sans donnée, comme `.chart` côté web.
 private struct WeekProgressChart: View {
     let training: [Double]
     let intensity: [Double]
 
     private static let headroom = 0.9
 
+    private var hasGoal: Bool { !training.isEmpty || !intensity.isEmpty }
+
     private var top: Double {
-        let highest = max(1, max(training.max() ?? 0, intensity.max() ?? 0))
+        let highest = max(1, training.max() ?? 0, intensity.max() ?? 0)
         return highest / Self.headroom
     }
 
-    var body: some View {
-        if training.isEmpty && intensity.isEmpty {
-            EmptyView()
-        } else {
-            Canvas { context, size in
-                let goalY = size.height * (1 - CGFloat(1 / top))
-                var goalPath = Path()
-                goalPath.move(to: CGPoint(x: 0, y: goalY))
-                goalPath.addLine(to: CGPoint(x: size.width, y: goalY))
-                context.stroke(
-                    goalPath, with: .color(.pulseBorder),
-                    style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+    private var goalFraction: Double { 1 - 1 / top }
 
-                drawCurve(training, in: &context, size: size, color: .pulseTextPrimary, dash: [])
-                // Intensité = zones FC (cf. `.c-int { stroke: var(--m-hr) }` côté
-                // web) : couleur métrique FC, jamais l'accent bleu générique.
-                drawCurve(intensity, in: &context, size: size, color: .pulseHR, dash: [6, 4])
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            let goalY = size.height * CGFloat(goalFraction)
+
+            ZStack(alignment: .topLeading) {
+                if hasGoal {
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: goalY))
+                        path.addLine(to: CGPoint(x: size.width, y: goalY))
+                    }
+                    .stroke(
+                        Color.pulseTextPrimary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: size.height))
+                        path.addLine(to: CGPoint(x: size.width, y: goalY))
+                    }
+                    .stroke(
+                        Color.pulseTextPrimary.opacity(0.45),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+                }
+
+                if !training.isEmpty {
+                    area(training, size: size).fill(Color.pulseTextPrimary.opacity(0.08))
+                    line(training, size: size)
+                        .stroke(
+                            Color.pulseTextPrimary,
+                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+
+                if !intensity.isEmpty {
+                    line(intensity, size: size)
+                        .stroke(
+                            Color.pulseHR,
+                            style: StrokeStyle(
+                                lineWidth: 2, lineCap: .round, lineJoin: .round, dash: [6, 4]))
+                }
+
+                if let point = endPoint(training, size: size) {
+                    Circle().fill(Color.pulseTextPrimary).frame(width: 9, height: 9).position(point)
+                }
+                if let point = endPoint(intensity, size: size) {
+                    Circle().fill(Color.pulseHR).frame(width: 9, height: 9).position(point)
+                }
+                if hasGoal {
+                    Circle()
+                        .fill(Color.pulseBackground)
+                        .overlay(Circle().strokeBorder(Color.pulseTextPrimary.opacity(0.5), lineWidth: 1.5))
+                        .frame(width: 9, height: 9)
+                        .position(x: size.width, y: goalY)
+                }
             }
-            .frame(height: 84)
+        }
+        .frame(height: 104)
+        // SCSS `.chart { border-bottom:1px solid var(--border); }` — filet BAS
+        // uniquement (pas de filet haut ici, `homeTopDivider()` ne s'applique
+        // qu'entre sections).
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.pulseBorder).frame(height: 1)
         }
     }
 
-    private func drawCurve(
-        _ values: [Double], in context: inout GraphicsContext, size: CGSize, color: Color,
-        dash: [CGFloat]
-    ) {
-        guard !values.isEmpty else { return }
+    private func points(_ values: [Double], size: CGSize) -> [CGPoint] {
         func point(_ index: Int, _ value: Double) -> CGPoint {
-            CGPoint(
-                x: size.width * CGFloat(index) / 7,
-                y: size.height * (1 - CGFloat(value / top)))
+            CGPoint(x: size.width * CGFloat(index) / 7, y: size.height * (1 - CGFloat(value / top)))
         }
-        var path = Path()
-        path.move(to: point(0, 0))
-        for (i, v) in values.enumerated() {
-            path.addLine(to: point(i + 1, v))
+        return ([0.0] + values).enumerated().map { index, value in point(index, value) }
+    }
+
+    private func line(_ values: [Double], size: CGSize) -> Path {
+        Path { path in
+            let pts = points(values, size: size)
+            guard let first = pts.first else { return }
+            path.move(to: first)
+            for point in pts.dropFirst() { path.addLine(to: point) }
         }
-        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, dash: dash))
+    }
+
+    private func area(_ values: [Double], size: CGSize) -> Path {
+        Path { path in
+            let pts = points(values, size: size)
+            guard let first = pts.first, let last = pts.last else { return }
+            path.move(to: CGPoint(x: first.x, y: size.height))
+            for point in pts { path.addLine(to: point) }
+            path.addLine(to: CGPoint(x: last.x, y: size.height))
+            path.closeSubpath()
+        }
+    }
+
+    private func endPoint(_ values: [Double], size: CGSize) -> CGPoint? {
+        guard !values.isEmpty else { return nil }
+        return points(values, size: size).last
     }
 }
 
-/// Puce de légende du mini-graphe — miroir de `.lg` côté web.
+/// Puce de légende du mini-graphe — miroir de `.lg` côté web (`i` plein pour
+/// les séances, `i.int` pointillé pour l'intensité).
 private struct WeekChartLegend: View {
     let color: Color
     let label: String
+    var dashed: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Rectangle().fill(color).frame(width: 14, height: 2)
+            if dashed {
+                Path { path in
+                    path.move(to: .zero)
+                    path.addLine(to: CGPoint(x: 14, y: 0))
+                }
+                .stroke(color, style: StrokeStyle(lineWidth: 2, dash: [3, 2]))
+                .frame(width: 14, height: 2)
+            } else {
+                Rectangle().fill(color).frame(width: 14, height: 2)
+            }
             Text(label)
-                .font(PulseFont.metricLabel)
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
 }
 
 // MARK: - Séance (jour ou à venir)
+//
+// Gabarit mobile Angular : `.session-focus`/`.items`/`.session-more` sont
+// `display:none` (réapparaissent seulement ≥900px, cf. en-tête du fichier).
+// La carte mobile ne montre donc que titre/horaire, nom/durée, méta et le
+// badge « fait ».
 
-private struct SessionCard: View {
+private struct SessionSection: View {
     let session: HomeViewModel.SessionCardModel
 
     var body: some View {
-        PulseCard {
-            HStack {
-                SectionHeader(session.title)
+        // SCSS `.session { border-top:1px solid var(--line); padding:16px 22px; gap:9px; }`.
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                HomeLabel(text: session.title)
                 Spacer()
                 if let when = session.when {
                     Text(when)
-                        .font(PulseFont.metricLabel)
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(session.late ? Color.pulseDanger : Color.pulseTextPrimary)
                 }
             }
 
             HStack(alignment: .firstTextBaseline) {
                 Text(session.name)
-                    .font(.system(.body, weight: .semibold))
+                    .font(.system(size: 15))
                     .foregroundStyle(Color.pulseTextPrimary)
                 Spacer()
                 if let duration = session.duration {
                     Text(duration)
-                        .font(.system(.body, design: .monospaced))
+                        .font(.system(size: 15, design: .monospaced))
                         .foregroundStyle(Color.pulseTextPrimary)
                 }
             }
 
             Text(session.meta)
-                .font(PulseFont.metricLabel)
+                .font(.system(size: 10, design: .monospaced))
+                .tracking(0.4)
                 .foregroundStyle(Color.pulseTextSecondary)
 
             if session.done {
-                Label(session.doneLabel, systemImage: "checkmark.circle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseSuccess)
-            }
-
-            if let focus = session.focus {
-                Text(focus)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseTextSecondary)
-            }
-
-            if !session.items.isEmpty {
-                VStack(alignment: .leading, spacing: PulseSpacing.sm) {
-                    ForEach(session.items, id: \.name) { item in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name)
-                                .font(.subheadline)
-                                .foregroundStyle(Color.pulseTextPrimary)
-                            Text(item.prescription)
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(Color.pulseTextSecondary)
-                        }
-                        .padding(.top, PulseSpacing.xs)
-                    }
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(session.doneLabel)
+                        .font(.system(size: 11))
                 }
+                .foregroundStyle(Color.pulseSuccess)
             }
         }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 22)
+        .homeTopDivider()
     }
 }
 
 // MARK: - Depuis le réveil (pas + calories)
 
-private struct WakeCard: View {
+private struct WakeSection: View {
     let viewModel: HomeViewModel
 
     var body: some View {
-        PulseCard {
-            SectionHeader("Depuis le réveil")
-            HStack(alignment: .top, spacing: PulseSpacing.lg) {
-                ForEach(viewModel.wake) { metric in
-                    WakeMetricView(metric: metric, accent: Self.accent(for: metric.id))
+        // SCSS `.wake { background:var(--surface); border-top:1px solid var(--line); padding:18px 22px; gap:14px; }`.
+        VStack(alignment: .leading, spacing: 14) {
+            HomeLabel(text: "Depuis le réveil")
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array(viewModel.wake.enumerated()), id: \.element.id) { index, metric in
+                    WakeMetricView(metric: metric)
                         .frame(maxWidth: .infinity)
+                        .padding(.leading, index == 0 ? 0 : 12)
+                        .overlay(alignment: .leading) {
+                            if index > 0 {
+                                Rectangle().fill(Color.pulseBorder).frame(width: 1)
+                            }
+                        }
                 }
             }
         }
-    }
-
-    /// Couleur par métrique — pas → `.pulseSteps`, calories (brûlées ou
-    /// mangées) → `.pulseCalories`, jamais l'accent bleu générique.
-    private static func accent(for id: String) -> Color {
-        switch id {
-        case "steps": return .pulseSteps
-        case "burned", "eaten": return .pulseCalories
-        default: return .pulseAccent
-        }
+        .padding(.vertical, 18)
+        .padding(.horizontal, 22)
+        .background(Color.pulseSurface)
+        .homeTopDivider()
     }
 }
 
 /// Une jauge « Depuis le réveil » : trait vertical + point de position
 /// (rythme atteint), valeur et écart au rythme — port de `.metric`/`.wake-gauge`
-/// côté web.
+/// côté web. Valeur/nom NEUTRES (`.metric-val` hérite de `--text`, aucune
+/// teinte de métrique dans le CSS Angular — cf. en-tête du fichier).
 private struct WakeMetricView: View {
     let metric: HomeViewModel.WakeMetric
-    let accent: Color
 
     var body: some View {
-        HStack(alignment: .top, spacing: PulseSpacing.sm) {
+        HStack(alignment: .top, spacing: 9) {
             GeometryReader { geo in
                 ZStack(alignment: .top) {
                     Capsule()
@@ -525,13 +834,15 @@ private struct WakeMetricView: View {
             }
             .frame(width: 6)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(metric.label.uppercased())
-                    .font(PulseFont.metricLabel)
+                    .font(.system(size: 10, design: .monospaced))
+                    // `.08em` de 10px ≈ 0.8pt.
+                    .tracking(0.8)
                     .foregroundStyle(Color.pulseTextSecondary)
-                Text(metric.value.map { String(Int($0.rounded())) } ?? "—")
-                    .font(.system(size: 20, weight: .medium, design: .monospaced))
-                    .foregroundStyle(metric.value == nil ? Color.pulseTextSecondary : accent)
+                Text(metric.value.map(HomeNumberFormat.grouped) ?? "—")
+                    .font(.system(size: 21, weight: .medium, design: .monospaced))
+                    .foregroundStyle(metric.value == nil ? Color.pulseTextSecondary : Color.pulseTextPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 if let delta = metric.delta {
@@ -539,7 +850,7 @@ private struct WakeMetricView: View {
                     // même choix que `.wake-delta`/`.wake-delta.hit` côté web
                     // (couleur d'écart, pas la couleur de la métrique).
                     Text("\(delta.sign)\(Int(delta.value))")
-                        .font(.system(.caption, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(delta.hit ? Color.pulseSuccess : Color.pulseStress)
                 }
             }
@@ -550,21 +861,23 @@ private struct WakeMetricView: View {
 
 // MARK: - Nuit dernière (durée, hypnogramme, coucher moyen)
 
-private struct NightCard: View {
+private struct NightSection: View {
     let viewModel: HomeViewModel
 
     var body: some View {
-        PulseCard {
-            SectionHeader("Nuit dernière")
+        // SCSS `.night { padding:20px 22px 24px; gap:14px; }` — pas de filet haut.
+        VStack(alignment: .leading, spacing: 14) {
+            HomeLabel(text: "Nuit dernière")
 
             if let duration = viewModel.nightDurationLabel {
-                HStack(alignment: .firstTextBaseline, spacing: PulseSpacing.sm) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(duration)
-                        .font(.system(size: 30, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color.pulseSleep)
+                        .font(.system(size: 36, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.pulseTextPrimary)
+                        .tracking(-0.72)  // `-0.02em` de 36px.
                     if let delta = viewModel.nightDelta {
                         Text(delta.label)
-                            .font(.footnote)
+                            .font(.system(size: 12))
                             .foregroundStyle(delta.short ? Color.pulseDanger : Color.pulseTextSecondary)
                     }
                 }
@@ -572,36 +885,38 @@ private struct NightCard: View {
                     Hypnogram(blocks: blocks)
                 }
             } else {
-                VStack(alignment: .leading, spacing: PulseSpacing.xs) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(viewModel.nightMissing.title)
-                        .font(.subheadline)
+                        .font(.system(size: 14))
                         .foregroundStyle(Color.pulseTextPrimary)
                     Text(viewModel.nightMissing.sub)
-                        .font(.footnote)
+                        .font(.system(size: 12))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
 
             if let bedtime = viewModel.bedtime {
-                VStack(alignment: .leading, spacing: PulseSpacing.sm) {
-                    HStack {
-                        SectionHeader("Coucher moyen")
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline) {
+                        HomeLabel(text: "Coucher moyen")
                         Spacer()
                         Text(bedtime.clock)
-                            .font(.system(.title3, design: .monospaced).weight(.semibold))
-                            .foregroundStyle(Color.pulseSleep)
+                            .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.pulseTextPrimary)
                     }
                     BedtimeSpread(bedtime: bedtime)
                     Text(bedtime.note)
-                        .font(.caption2)
+                        .font(.system(size: 10, design: .monospaced))
+                        .lineSpacing(5)
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
-                .padding(.top, PulseSpacing.sm)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(Color.pulseBorder).frame(height: 1)
-                }
+                .padding(.top, 14)
+                .homeTopDivider()
             }
         }
+        .padding(.top, 20)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 24)
     }
 }
 
@@ -622,7 +937,8 @@ private struct Hypnogram: View {
             }
         }
         .frame(height: 24)
-        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+        // SCSS `.hyp { border-radius:7px; }`.
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     private func color(for stage: HomeSleepStageKind) -> Color {

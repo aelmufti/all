@@ -49,7 +49,8 @@ struct ProgrammeSleepSection: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(domain.active?.name ?? domain.label)
-                    .font(.subheadline.weight(.semibold))
+                    // Web `.prog-name { font-size:17px; font-weight:600 }`.
+                    .font(.system(size: 17, weight: .semibold))
                 Text(domain.active?.source ?? "")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
@@ -62,13 +63,15 @@ struct ProgrammeSleepSection: View {
     }
 
     private var hero: some View {
+        // Web `.hero-n { font-size:44px; font-weight:600 }` — `.hero-of`
+        // hérite famille mono + poids 600, seule la taille (22px) change.
         HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(detail.nights > 0 ? "\(detail.hits)" : "—")
-                    .font(PulseFont.metricValue)
+                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
                     .foregroundStyle(detail.nights > 0 ? Color.pulseTextPrimary : Color.pulseAbsent)
                 Text("/\(detail.total)")
-                    .font(.title2)
+                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Text("critères tenus · \(programmeSleepWindowLabel(detail))")
@@ -96,15 +99,16 @@ struct ProgrammeSleepSection: View {
     }
 
     private var legend: some View {
-        HStack(spacing: PulseSpacing.md) {
+        HStack(spacing: 14) {
             ProgrammeLegendDot(color: .pulseSleep, label: "avant un jour travaillé")
             ProgrammeLegendDot(color: .pulseSleep.opacity(0.42), label: "avant un jour libre")
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(.system(size: 11, design: .monospaced))
     }
 
+    // Web `.metrics { gap:14px }`.
     private var metricsList: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.md) {
+        VStack(alignment: .leading, spacing: 14) {
             ForEach(detail.metrics) { metric in
                 ProgrammeSleepMetricRow(metric: metric)
             }
@@ -112,16 +116,40 @@ struct ProgrammeSleepSection: View {
         .padding(.top, PulseSpacing.xs)
     }
 
+    /// « Ce que dit le papier » — `<app-panel title="…" [summary]="N critères">`,
+    /// simplifié en carte toujours dépliée (même parti pris que la carte
+    /// alimentation). Reprend aussi le bloc `.evid` (label · détail + preuve
+    /// par critère), absent jusqu'ici.
     private var notesCard: some View {
         PulseCard {
-            SectionHeader("Ce que dit le papier") {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Ce que dit le papier")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
                 Text("\(detail.metrics.count) critères")
-                    .font(.caption2)
+                    .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             ForEach(domain.active?.notes ?? [], id: \.self) { note in
-                Text(note).font(.footnote)
+                Text(note).font(.system(size: 14))
             }
+
+            // Web `.evid { gap:10px; padding-top:10px; border-top:1px solid var(--line) }`,
+            // `.ev-name { font-size:13px; font-weight:600 }`,
+            // `.ev-txt { font-size:12px; line-height:1.6 }`.
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(detail.metrics) { metric in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(metric.label) · \(metric.detail)")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(metric.evidence)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.pulseTextSecondary)
+                    }
+                }
+            }
+
             Text(programmeWorkDaysLabel(domain))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.pulseTextSecondary)
@@ -133,12 +161,26 @@ private struct ProgrammeSleepMetricRow: View {
     let metric: ProgrammeSleepMetric
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // Web `.met.info { padding-top:12px; border-top:1px solid var(--line) }`
+        // — sépare les critères descriptifs (sans cible) des critères notés.
+        VStack(alignment: .leading, spacing: 0) {
+            if metric.informative {
+                Divider()
+                Spacer().frame(height: PulseSpacing.md)
+            }
+            content
+        }
+    }
+
+    // Web `.met { gap:6px }`, `.met-name { font-size:15px; font-weight:600 }`,
+    // `.met-val { font-family:mono; font-size:19px; font-weight:600 }`.
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .lastTextBaseline) {
-                Text(metric.label).font(.subheadline.weight(.semibold))
+                Text(metric.label).font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(programmeSleepValueText(metric))
-                    .font(.system(.body, design: .monospaced)).fontWeight(.semibold)
+                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
             }
 
             GeometryReader { geo in
@@ -169,14 +211,15 @@ private struct ProgrammeSleepMetricRow: View {
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 
+            // Web `.met-note { font-size:12px; line-height:1.5 }`.
             if !metric.informative, let band = metric.band {
                 Text("\(band.label) · \(band.risk)")
-                    .font(.caption2)
+                    .font(.system(size: 12))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             if let note = metric.note {
                 Text(note)
-                    .font(.caption2)
+                    .font(.system(size: 12))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
