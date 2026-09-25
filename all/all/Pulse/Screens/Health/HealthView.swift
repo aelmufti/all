@@ -33,8 +33,10 @@ struct HealthView: View {
                     LoadingView(message: "Chargement de la santé…")
                 }
             }
-            .navigationTitle("Santé")
-            .navigationBarTitleDisplayMode(.large)
+            // Titre porté en contenu (24pt, dans `HealthDayNavigator`) comme
+            // les autres écrans : le grand titre système réservait ~96pt vides
+            // au-dessus. Barre masquée.
+            .toolbar(.hidden, for: .navigationBar)
             .background(Color.pulseBackground)
         }
         .task {
