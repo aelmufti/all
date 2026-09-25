@@ -26,34 +26,41 @@ struct HealthDayNavigator: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            HStack(spacing: 6) {
-                Button {
-                    Task { await viewModel.shiftDay(by: -1) }
-                } label: {
-                    Text("‹").font(.system(size: 14, design: .monospaced))
-                }
-                .buttonStyle(HealthDayPillStyle())
-
-                Text(shortLabel)
-                    .font(.system(size: 13, design: .monospaced))
+            HStack(spacing: PulseSpacing.md) {
+                Text("Santé")
+                    .font(.system(size: 24, weight: .semibold))
+                    .tracking(-0.2)
                     .foregroundStyle(Color.pulseTextPrimary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-                    .background(Color.pulseSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .strokeBorder(Color.pulseBorder, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                Spacer()
+                HStack(spacing: 6) {
+                    Button {
+                        Task { await viewModel.shiftDay(by: -1) }
+                    } label: {
+                        Text("‹").font(.system(size: 14, design: .monospaced))
+                    }
+                    .buttonStyle(HealthDayPillStyle())
 
-                Button {
-                    Task { await viewModel.shiftDay(by: 1) }
-                } label: {
-                    Text("›").font(.system(size: 14, design: .monospaced))
+                    Text(shortLabel)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(Color.pulseTextPrimary)
+                        .lineLimit(1)
+                        .padding(.horizontal, PulseSpacing.md)
+                        .frame(height: 40)
+                        .background(Color.pulseSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                    Button {
+                        Task { await viewModel.shiftDay(by: 1) }
+                    } label: {
+                        Text("›").font(.system(size: 14, design: .monospaced))
+                    }
+                    .buttonStyle(HealthDayPillStyle())
+                    .disabled(viewModel.isLastDay)
                 }
-                .buttonStyle(HealthDayPillStyle())
-                .disabled(viewModel.isLastDay)
             }
             Text(viewModel.dateLabel)
                 .font(.footnote)

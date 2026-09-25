@@ -67,17 +67,18 @@ struct DashboardView: View {
             // remplacé par une piste maison (`DashboardPeriodTrack`) qui
             // reprend l'habillage réel de la maquette (piste grise, pilule
             // active en relief blanc) plutôt que le rendu natif iOS.
-            HStack(alignment: .center, spacing: PulseSpacing.md) {
-                Text("Statistiques")
-                    .font(.system(size: 24, weight: .semibold))
-                    .tracking(-0.2)
-                    .foregroundStyle(Color.pulseTextPrimary)
-                Spacer()
-                DashboardPeriodTrack(selection: Binding(
-                    get: { viewModel.period },
-                    set: { viewModel.selectPeriod($0) }
-                ))
-            }
+            Text("Statistiques")
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.2)
+                .foregroundStyle(Color.pulseTextPrimary)
+
+            // Sélecteur de période sur sa propre ligne, pleine largeur (pilules
+            // à largeur égale) : à côté du titre 24pt il manquait de place et
+            // « 1 an » repassait à la ligne, avec une moitié d'écran vide.
+            DashboardPeriodTrack(selection: Binding(
+                get: { viewModel.period },
+                set: { viewModel.selectPeriod($0) }
+            ))
 
             DashboardChipRow(
                 items: DashboardTab.allCases.map { ($0, $0.label) },
@@ -186,7 +187,9 @@ private struct DashboardPeriodTrack: View {
                     Text(period.shortLabel)
                         .font(.system(size: 11, weight: period == selection ? .semibold : .regular, design: .monospaced))
                         .foregroundStyle(period == selection ? Color.pulseTextPrimary : Color.pulseTextSecondary)
-                        .padding(.horizontal, 10)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .frame(maxWidth: .infinity)
                         .frame(height: 30)
                         .background(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
