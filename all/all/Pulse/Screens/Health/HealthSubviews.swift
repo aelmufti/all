@@ -759,6 +759,47 @@ struct WeightCard: View {
                     .frame(height: 110)
             }
 
+            // Historique des pesées réellement stockées (`weight_log`, via
+            // `weight.series`) — au-delà de la courbe de tendance : chaque
+            // pesée saisie, la plus récente en tête, tap = aller à ce jour
+            // (pour la corriger / l'effacer). Ajout demandé (le web n'a que la
+            // courbe) pour « voir les pesées stockées dans la bdd ».
+            if let series = viewModel.weight?.series, !series.isEmpty {
+                let recent = Array(series.reversed())
+                VStack(spacing: 0) {
+                    ForEach(recent.prefix(8), id: \.date) { point in
+                        Button {
+                            Task { await viewModel.selectDate(point.date) }
+                        } label: {
+                            HStack {
+                                Text(HealthViewModel.shortDateLabel(point.date))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(
+                                        point.date == viewModel.date ? Color.pulseTextPrimary : Color.pulseTextSecondary
+                                    )
+                                Spacer()
+                                Text("\(String(format: "%.1f", point.kg)) kg")
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(Color.pulseTextPrimary)
+                            }
+                            .padding(.vertical, 7)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .overlay(alignment: .top) {
+                            Rectangle().fill(Color.pulseBorder).frame(height: 0.5)
+                        }
+                    }
+                    if recent.count > 8 {
+                        Text("+ \(recent.count - 8) pesée\(recent.count - 8 > 1 ? "s" : "") plus ancienne\(recent.count - 8 > 1 ? "s" : "") — navigue les jours")
+                            .font(.caption2)
+                            .foregroundStyle(Color.pulseTextSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, PulseSpacing.xs)
+                    }
+                }
+            }
+
             HStack(spacing: PulseSpacing.sm) {
                 TextField("kg", text: $viewModel.weightInputText)
                     #if os(iOS)
