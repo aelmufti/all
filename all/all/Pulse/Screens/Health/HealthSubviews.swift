@@ -44,6 +44,7 @@ struct HealthDayNavigator: View {
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, PulseSpacing.md)
                         .frame(height: 40)
                         .background(Color.pulseSurface)
@@ -509,7 +510,8 @@ struct StressBarChart: View {
             Chart(samples, id: \.ts) { sample in
                 BarMark(
                     x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
-                    y: .value("Stress", sample.value)
+                    y: .value("Stress", sample.value),
+                    width: .ratio(1)
                 )
                 .foregroundStyle(zoneColor(sample.value))
             }
@@ -539,17 +541,19 @@ struct CaloriesSummary: View {
 
     var body: some View {
         // Histogramme 24 h empilé — base (BMR réparti, teinte calorie
-        // translucide) + actif (plein) — miroir de `app-calories-chart`
-        // (barres `var(--c-cal)` sur base `color-mix(var(--m-cal) 34%)`),
-        // à la place des 3 tuiles (l'ancienne simplification native).
+        // translucide) + actif (plein) — miroir de `app-calories-chart`.
+        // Un seul Chart qui remplit le cadre (comme les autres graphes) : la
+        // version précédente empilait chart + légende dans un VStack, et le
+        // Chart s'écrasait à 0 dans le cadre fixe de 180 (→ rien affiché).
         let base = viewModel.hourlyBaseCalories
         let active = viewModel.hourlyActiveCalories
-        return VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+        let hasData = zip(base, active).contains { $0 > 0 || $1 > 0 }
+        if hasData {
             Chart {
                 ForEach(0..<24, id: \.self) { h in
-                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", base[h]), width: .ratio(0.62))
+                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", base[h]), width: .ratio(0.7))
                         .foregroundStyle(Color.pulseCalories.opacity(0.34))
-                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", active[h]), width: .ratio(0.62))
+                    BarMark(x: .value("Heure", Double(h)), y: .value("kcal", active[h]), width: .ratio(0.7))
                         .foregroundStyle(Color.pulseCalories)
                 }
             }
@@ -570,27 +574,12 @@ struct CaloriesSummary: View {
                     AxisGridLine().foregroundStyle(Color.pulseBorder.opacity(0.6))
                 }
             }
-
-            HStack(spacing: PulseSpacing.md) {
-                caloriesLegend(color: Color.pulseCalories, label: "Actives \(formatted(viewModel.activeCalories))")
-                caloriesLegend(color: Color.pulseCalories.opacity(0.34), label: "Passives \(formatted(viewModel.passiveCalories))")
-                Spacer()
-            }
-        }
-    }
-
-    private func caloriesLegend(color: Color, label: String) -> some View {
-        HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 9, height: 9)
-            Text(label)
-                .font(.system(size: 11, design: .monospaced))
+        } else {
+            Text("Aucune donnée pour ce jour.")
+                .font(.footnote)
                 .foregroundStyle(Color.pulseTextSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private func formatted(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        return String(Int(value.rounded()))
     }
 }
 
