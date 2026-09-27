@@ -22,7 +22,9 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>bridge-connect utilise le Bluetooth pour se connecter à votre montre Garmin et récupérer ses fichiers d'activité.</string>
-	<key>NSCameraUsageDescription</key>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+		<string>bridge-connect lit vos événements de calendrier pour les synchroniser vers votre montre Garmin.</string>
+		<key>NSCameraUsageDescription</key>
 	<string>bridge-connect utilise l'appareil photo pour scanner le code-barres d'un aliment et l'ajouter à votre journal nutritionnel.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>

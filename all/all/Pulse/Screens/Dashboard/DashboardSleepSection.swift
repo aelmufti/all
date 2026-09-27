@@ -33,6 +33,74 @@ struct DashboardSleepSection: View {
     }
 }
 
+/// Carte « Heure de coucher conseillée » — met en avant la reco calculée côté
+/// serveur (`/api/stats/sleep-recommendation`). Ne s'affiche que quand la reco
+/// est exploitable (≥ 3 nuits) ; sous ce seuil l'appelant montre autre chose.
+struct DashboardSleepRecommendationCard: View {
+    let reco: DashboardSleepRecommendation
+
+    var body: some View {
+        PulseCard {
+            DashboardCardHeader("Heure de coucher conseillée")
+
+            HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
+                Text(reco.recommendedBedtime ?? "—")
+                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.pulseSleep)
+                if let target = reco.targetHours {
+                    Text("pour viser ~\(dashboardHoursHM(target))")
+                        .font(PulseFont.metricLabel)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                }
+            }
+
+            Text(shiftLine)
+                .font(PulseFont.body)
+                .foregroundStyle(shiftTint)
+
+            Text(rationale)
+                .font(.footnote)
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
+    }
+
+    private var shiftLine: String {
+        let shift = reco.shiftMin ?? 0
+        let habit = reco.currentBedtime.map { " (habituellement ~\($0))" } ?? ""
+        if shift <= -5 {
+            return "Soit ~\(abs(shift)) min plus tôt que d'habitude\(habit)."
+        } else if shift >= 5 {
+            return "Tu peux même te coucher ~\(shift) min plus tard\(habit)."
+        } else {
+            return "C'est déjà à peu près ton heure habituelle — continue ainsi\(habit)."
+        }
+    }
+
+    private var shiftTint: Color {
+        (reco.shiftMin ?? 0) <= -5 ? Color.pulseTextPrimary : Color.pulseSuccess
+    }
+
+    private var rationale: String {
+        let target = reco.targetHours.map { dashboardHoursHM($0) } ?? "—"
+        let base: String
+        if reco.basis == "stress" {
+            base = "Cible calée sur la durée de sommeil qui, chez toi, précède les journées les moins stressées (\(target))."
+        } else {
+            base = "Cible calée sur l'objectif de \(target) de sommeil."
+        }
+        let wake = reco.waketime.map { "à heure de lever constante (~\($0)), " } ?? ""
+        let awake = (reco.avgAwakeMin.map { $0 > 0 } ?? false)
+            ? " et de tes \(reco.avgAwakeMin!) min d'éveil nocturne habituel"
+            : ""
+        return "\(base) Calculé \(wake)sur \(reco.nights) nuits\(awake)."
+    }
+}
+
+/// Vue « Tendance » du détail Sommeil — refondue pour suivre l'Écran 2 de la
+/// maquette : grand graphe « Durée par nuit » (aire), trois tuiles de synthèse
+/// (Moyenne / Dette / Éveil), barres de composition des phases, tuiles de
+/// régularité. Les vues plus fouillées (nuit par nuit, insights stress/
+/// fragmentation) restent accessibles via les sous-onglets Dette / Régularité.
 private struct DashboardSleepTrendCard: View {
     let viewModel: DashboardViewModel
 
@@ -43,14 +111,40 @@ private struct DashboardSleepTrendCard: View {
         }
     }
 
+    private var avgHours: Double? {
+        let hours = points.map(\.hours)
+        guard !hours.isEmpty else { return nil }
+        return hours.reduce(0, +) / Double(hours.count)
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.lg) {
+            durationCard
+
+            if let debt = viewModel.sleepDebt, debt.nights > 0 {
+                DashboardSleepTileRow(tiles: debtTiles(debt))
+            }
+
+            if let composition = viewModel.sleepInsights?.composition {
+                DashboardSleepCompositionCard(composition: composition)
+            }
+
+            if let regularity = viewModel.sleepRegularity, regularity.score != nil {
+                DashboardSleepRegularityTiles(regularity: regularity)
+            }
+        }
+    }
+
+    private var durationCard: some View {
         PulseCard {
             HStack {
-                DashboardCardHeader("Sommeil · \(viewModel.sleepNightsCount) nuits")
+                DashboardCardHeader("Durée par nuit")
                 Spacer()
-                Text(rangeLabel)
-                    .font(PulseFont.metricLabel)
-                    .foregroundStyle(Color.pulseTextSecondary)
+                if let avgHours {
+                    Text("moy \(dashboardHoursHM(avgHours))")
+                        .font(PulseFont.metricLabel)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                }
             }
             if points.count < 2 {
                 Text("Pas assez de nuits pour une tendance.")
@@ -58,6 +152,18 @@ private struct DashboardSleepTrendCard: View {
                     .foregroundStyle(Color.pulseTextSecondary)
             } else {
                 Chart(points, id: \.date) { point in
+                    AreaMark(
+                        x: .value("Date", point.date),
+                        y: .value("Heures", point.hours)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [DashboardMetricColor.sleep.opacity(0.24), DashboardMetricColor.sleep.opacity(0)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(.monotone)
+
                     LineMark(
                         x: .value("Date", point.date),
                         y: .value("Heures", point.hours)
@@ -65,7 +171,7 @@ private struct DashboardSleepTrendCard: View {
                     .foregroundStyle(DashboardMetricColor.sleep)
                     .interpolationMethod(.monotone)
                 }
-                .frame(height: 190)
+                .frame(height: 160)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 5)) { AxisValueLabel(format: .dateTime.day().month()) }
                 }
@@ -73,12 +179,187 @@ private struct DashboardSleepTrendCard: View {
         }
     }
 
-    private var rangeLabel: String {
-        let hours = points.map(\.hours)
-        guard !hours.isEmpty else { return "aucune nuit" }
-        let avg = hours.reduce(0, +) / Double(hours.count)
-        return "moy \(String(format: "%.1f", avg)) h"
+    private func debtTiles(_ debt: DashboardSleepDebt) -> [DashboardSleepTile] {
+        [
+            DashboardSleepTile(
+                label: "Moyenne",
+                value: dashboardHoursHM(debt.avgHours),
+                sub: "objectif \(debt.targetHours):00"
+            ),
+            DashboardSleepTile(
+                label: "Dette",
+                value: (debt.debtHours <= 0 ? "à jour" : "−\(dashboardHoursHM(abs(debt.debtHours)))"),
+                sub: "\(debt.deficitNights) nuit\(debt.deficitNights > 1 ? "s" : "") sous l'objectif",
+                tint: debt.debtHours > 0 ? .pulseStress : .pulseSuccess
+            ),
+            DashboardSleepTile(
+                label: "Éveil / nuit",
+                value: "\(debt.avgAwakeMin)",
+                sub: "min en moyenne"
+            ),
+        ]
     }
+}
+
+/// Une tuile de synthèse (label mono, grande valeur mono, sous-ligne) dans un
+/// cadre bordé — reprend le style des `.tile` de la maquette.
+private struct DashboardSleepTile: Identifiable {
+    let id = UUID()
+    let label: String
+    let value: String
+    var sub: String = ""
+    var tint: Color = .pulseTextPrimary
+}
+
+private struct DashboardSleepTileRow: View {
+    let tiles: [DashboardSleepTile]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: PulseSpacing.sm) {
+            ForEach(tiles) { tile in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tile.label.uppercased())
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .tracking(0.6)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(tile.value)
+                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tile.tint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if !tile.sub.isEmpty {
+                        Text(tile.sub)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(Color.pulseTextSecondary)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(PulseSpacing.md)
+                .background(Color.pulseSurface)
+                .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                        .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                )
+            }
+        }
+    }
+}
+
+/// Barres de composition des phases (Profond / Léger / Paradoxal) avec repère
+/// de fourchette de référence — équivalent de l'Écran 2 de la maquette.
+private struct DashboardSleepCompositionCard: View {
+    let composition: DashboardComposition
+
+    var body: some View {
+        PulseCard {
+            DashboardCardHeader("Composition moyenne")
+            VStack(spacing: PulseSpacing.md) {
+                ForEach(dashboardCompositionRows(composition), id: \.label) { row in
+                    HStack(spacing: PulseSpacing.sm) {
+                        Text(row.label)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Color.pulseTextSecondary)
+                            .frame(width: 74, alignment: .leading)
+                        GeometryReader { proxy in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.pulseSurfaceAlt)
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(row.out ? Color.pulseDanger : dashboardPhaseColor(row.label))
+                                    .frame(width: proxy.size.width * CGFloat(min(max(row.pct / 100, 0), 1)))
+                                // Repère : fourchette de référence (bande translucide).
+                                Rectangle()
+                                    .fill(Color.pulseTextPrimary.opacity(0.35))
+                                    .frame(width: 2)
+                                    .offset(x: proxy.size.width * CGFloat((row.lo + row.hi) / 200))
+                            }
+                        }
+                        .frame(height: 8)
+                        Text("\(Int(row.pct.rounded())) %")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(row.out ? Color.pulseDanger : Color.pulseTextPrimary)
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                }
+            }
+            Text("Le trait vertical marque la fourchette de référence. En part du sommeil réel, moyenné sur \(composition.nights) nuits ; l'éveil représente \(String(format: "%.0f", composition.wasoPct)) % de la fenêtre.")
+                .font(.footnote)
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
+    }
+}
+
+private struct DashboardSleepRegularityTiles: View {
+    let regularity: DashboardSleepRegularity
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+            DashboardCardHeader("Régularité")
+            HStack(alignment: .top, spacing: PulseSpacing.sm) {
+                regularityTile(label: "Coucher", value: regularity.bedtime ?? "—", sub: regularity.bedStdMin.map { "±\($0) min" } ?? "")
+                regularityTile(label: "Lever", value: regularity.waketime ?? "—", sub: regularity.wakeStdMin.map { "±\($0) min" } ?? "")
+                if let score = regularity.score {
+                    regularityTile(label: "Score", value: "\(score)", sub: dashboardRegularityWord(score), tint: dashboardRegularityColor(score: score))
+                }
+            }
+        }
+    }
+
+    private func regularityTile(label: String, value: String, sub: String, tint: Color = .pulseTextPrimary) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .tracking(0.6)
+                .foregroundStyle(Color.pulseTextSecondary)
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+            if !sub.isEmpty {
+                Text(sub)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(PulseSpacing.md)
+        .background(Color.pulseSurface)
+        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
+    }
+}
+
+/// Couleur par phase de sommeil (aligne les barres sur la palette de phases du
+/// thème plutôt que sur une teinte unique).
+private func dashboardPhaseColor(_ label: String) -> Color {
+    switch label {
+    case "Profond": return .pulseSleepDeep
+    case "Léger": return .pulseSleepLight
+    case "Paradoxal": return .pulseSleepRem
+    default: return .pulseSleep
+    }
+}
+
+/// Qualificatif court du score de régularité (accompagne le chiffre).
+private func dashboardRegularityWord(_ score: Int) -> String {
+    switch score {
+    case 80...: return "excellent"
+    case 65..<80: return "bon"
+    case 50..<65: return "moyen"
+    default: return "irrégulier"
+    }
+}
+
+/// Formatte des heures décimales en `H:MM` (ex. 7.2 → « 7:12 »).
+private func dashboardHoursHM(_ hours: Double) -> String {
+    let totalMinutes = Int((hours * 60).rounded())
+    return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
 }
 
 private struct DashboardSleepDebtCard: View {

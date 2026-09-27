@@ -32,6 +32,12 @@ import SwiftUI
 
 struct ActivitiesView: View {
     @State private var vm = ActivitiesViewModel()
+    // Chargé une seule fois : dans un NavigationStack, revenir du détail (pop)
+    // fait réapparaître la racine et relancerait `.task`, ce qui repasserait en
+    // `.loading` et détruirait la ScrollView (scroll remis en haut). On garde
+    // donc la liste telle quelle au retour ; le rafraîchissement passe par le
+    // pull-to-refresh (`.refreshable`).
+    @State private var hasLoaded = false
 
     var body: some View {
         NavigationStack {
@@ -39,7 +45,11 @@ struct ActivitiesView: View {
                 .background(Color.pulseBackground)
                 .navigationTitle("Activités")
                 .toolbar(.hidden, for: .navigationBar)
-                .task { await vm.load() }
+                .task {
+                    guard !hasLoaded else { return }
+                    await vm.load()
+                    hasLoaded = true
+                }
                 .navigationDestination(for: Int.self) { id in
                     ActivityDetailView(activityId: id)
                 }
@@ -74,9 +84,13 @@ struct ActivitiesView: View {
                 }
             }
             .padding(.horizontal, PulseSpacing.lg)
-            .padding(.top, PulseSpacing.sm)
+            // Même padding haut que les autres écrans (Accueil/Santé/Nutrition/
+            // Programme/Stats utilisent `lg`) pour que le titre soit à la même
+            // hauteur d'un onglet à l'autre.
+            .padding(.top, PulseSpacing.lg)
             .padding(.bottom, PulseSpacing.lg)
         }
+        .pulseTabBarClearance()
         .refreshable { await vm.load() }
     }
 

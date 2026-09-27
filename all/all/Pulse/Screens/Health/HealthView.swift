@@ -59,6 +59,7 @@ struct HealthView: View {
             }
             .padding(PulseSpacing.lg)
         }
+        .pulseTabBarClearance()
         .background(Color.pulseBackground)
     }
 }

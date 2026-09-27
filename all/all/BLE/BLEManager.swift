@@ -700,7 +700,7 @@ extension BLEManager: CBPeripheralDelegate {
             if spoolStore == nil {
                 log.error("SpoolStore indisponible — le téléchargement de fichiers ne pourra pas écrire sur disque")
             }
-            let session = GarminSession(communicator: communicator, spoolStore: spoolStore, uploader: pulseUploader)
+            let session = GarminSession(communicator: communicator, spoolStore: spoolStore, uploader: pulseUploader, calendarSource: EventKitCalendarSource.shared)
             // Live-2 : même `communicator` (conforme aux deux protocoles),
             // aucun service REALTIME_* enregistré ici — juste prête à recevoir
             // des toggles utilisateur (cf. commentaire de la propriété).

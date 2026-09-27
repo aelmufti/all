@@ -417,6 +417,29 @@ struct DashboardSleepRegularity: Decodable, Equatable {
     let wakeStdMin: Int?
 }
 
+// MARK: - api/stats/sleep-recommendation
+
+/// Heure de coucher conseillée pour « aller un peu mieux » : heure de lever
+/// habituelle − (durée cible + éveil habituel). `status == "insufficient"`
+/// (moins de 3 nuits) → seuls `nights` et `status` sont présents. `basis`
+/// indique si la durée cible vient de l'objectif ou du lien stress observé.
+struct DashboardSleepRecommendation: Decodable, Equatable {
+    let nights: Int
+    let status: String
+    let basis: String?
+    let targetHours: Double?
+    let avgSleepHours: Double?
+    let waketime: String?
+    let currentBedtime: String?
+    let recommendedBedtime: String?
+    let shiftMin: Int?
+    let avgAwakeMin: Int?
+    let stressSignificant: Bool?
+    let stressR: Double?
+
+    var isActionable: Bool { status == "ok" && recommendedBedtime != nil }
+}
+
 // MARK: - api/wellness/days
 
 /// Sous-ensemble de `WellnessDayRow` (le contrôleur Nest renvoie beaucoup plus

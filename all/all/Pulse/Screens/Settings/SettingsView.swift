@@ -4,12 +4,15 @@
 //
 //  Écran Paramètres natif — équivalent SwiftUI (partiel) de la page Angular
 //  `/parametres` (`custom-connect/web/src/app/pages/settings/
-//  settings.component.ts`), restreint à trois sections : Synchronisation
-//  (source + statut — le cœur du contrat bridge-connect/Pulse), Profil
-//  (année de naissance / sexe / taille — affichage + édition simple, le
-//  poids reste en lecture seule, saisi sur la page Santé), et Application
-//  (adresse de Pulse, compte, déconnexion). Les autres feuilles Angular
-//  (Objectifs, Objectif calorique, Minutes d'intensité, Thème, Export,
+//  settings.component.ts`). Organisé autour du **mode de connectivité** : le
+//  sélecteur de source est la colonne vertébrale et n'affiche que les contrôles
+//  du mode retenu (bridge → adresse + « Statut du pont » ; iPhone BLE → token +
+//  « Collecteur (Montre) » ; legacy → rien). Les sections neutres encadrent ce
+//  bloc : Apparence (thème), État de la synchro (fraîcheur + inventaire, calculés
+//  côté serveur, indépendants de la source), Profil (année de naissance / sexe /
+//  taille — le poids reste en lecture seule, saisi sur la page Santé) et
+//  Application (adresse de Pulse, compte, déconnexion). Les autres feuilles
+//  Angular (Objectifs, Objectif calorique, Minutes d'intensité, Export,
 //  Réanalyser) sont hors périmètre de cet écran.
 //
 //  `Form`/`Section` de style Réglages iOS plutôt que les cartes `PulseCard`
@@ -30,6 +33,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showStatus = false
     @State private var showWatch = false
+    @State private var showProgramme = false
 
     var body: some View {
         NavigationStack {
@@ -43,6 +47,7 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showStatus) { StatusView() }
         .sheet(isPresented: $showWatch) { WatchSectionView() }
+        .sheet(isPresented: $showProgramme) { ProgrammeView() }
     }
 
     @ViewBuilder
@@ -57,9 +62,13 @@ struct SettingsView: View {
         case .loaded:
             Form {
                 SettingsAppearanceSection()
-                SettingsSyncSourceSection(viewModel: viewModel)
+                SettingsProgrammeSection(onOpen: { showProgramme = true })
+                SettingsSyncSourceSection(
+                    viewModel: viewModel,
+                    onStatus: { showStatus = true },
+                    onWatch: { showWatch = true }
+                )
                 SettingsStatusSection(viewModel: viewModel)
-                SettingsSystemSection(onStatus: { showStatus = true }, onWatch: { showWatch = true })
                 SettingsProfileSection(viewModel: viewModel)
                 SettingsApplicationSection(viewModel: viewModel, username: auth.username)
             }
@@ -97,10 +106,48 @@ private struct SettingsAppearanceSection: View {
     }
 }
 
-// MARK: - Synchronisation > Source
+// MARK: - Programme
+//
+// Programme (entraînement / alimentation / sommeil) était un onglet primaire ;
+// c'est une fonction de configuration (choix et suivi de plans), déplacée ici
+// pour laisser sa place dans la barre à l'onglet Sommeil. Ouvre `ProgrammeView`
+// en feuille, comme « Statut du pont » et « Collecteur (Montre) ».
+
+private struct SettingsProgrammeSection: View {
+    let onOpen: () -> Void
+
+    var body: some View {
+        Section {
+            Button(action: onOpen) {
+                SettingsNavRow(
+                    icon: "calendar",
+                    title: "Programme",
+                    subtitle: "Plans entraînement, alimentation, sommeil"
+                )
+            }
+        } header: {
+            Text("Programme")
+        }
+    }
+}
+
+// MARK: - Mode de connectivité (source + contrôles propres au mode)
+//
+// Colonne vertébrale de l'écran : le sélecteur de source choisit *qui* collecte,
+// et seuls les contrôles du mode retenu s'affichent en dessous. Chaque mode a sa
+// propre histoire matérielle, donc son propre secondaire :
+//   • bridge  → le pont du homelab parle en Bluetooth → accès « Statut du pont »
+//               (lien BLE bridge↔montre, synchro auto ; `StatusView`).
+//   • phone   → cette app est le collecteur → token d'ingestion + « Collecteur
+//               (Montre) » (Diagnostic / Temps réel ; `WatchSectionView`).
+//   • legacy  → adb depuis l'hôte, rien à régler ici.
+// La fraîcheur/l'inventaire (indépendants de la source) restent en section neutre
+// « État de la synchro » (`SettingsStatusSection`).
 
 private struct SettingsSyncSourceSection: View {
     var viewModel: SettingsViewModel
+    let onStatus: () -> Void
+    let onWatch: () -> Void
 
     var body: some View {
         Section {
@@ -131,10 +178,24 @@ private struct SettingsSyncSourceSection: View {
                             .font(.caption)
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
+                    Button(action: onStatus) {
+                        SettingsNavRow(
+                            icon: "dot.radiowaves.up.forward",
+                            title: "Statut du pont",
+                            subtitle: "Lien BLE bridge↔montre, synchro automatique"
+                        )
+                    }
                 }
 
                 if source.source == "phone" {
                     SettingsIngestTokenRow(viewModel: viewModel, token: source.ingestToken)
+                    Button(action: onWatch) {
+                        SettingsNavRow(
+                            icon: "antenna.radiowaves.left.and.right",
+                            title: "Collecteur (Montre)",
+                            subtitle: "Diagnostic BLE, temps réel"
+                        )
+                    }
                 }
 
                 if source.overridden {
@@ -150,7 +211,7 @@ private struct SettingsSyncSourceSection: View {
                     .foregroundStyle(Color.pulseDanger)
             }
         } header: {
-            Text("Synchronisation")
+            Text("Mode de connectivité")
         } footer: {
             Text("« Téléphone » est la chaîne historique (adb depuis l'hôte). « garmin-bridge » parle en Bluetooth depuis le serveur. « iPhone (BLE) » : cette app pousse les .fit en HTTP. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons.")
         }
@@ -349,38 +410,14 @@ private struct SettingsProfileSection: View {
     }
 }
 
-// MARK: - Système (Statut + Montre)
+// MARK: - Ligne de navigation (secondaire propre à un mode)
 //
-// Regroupe le secondaire iPhone dans Paramètres : accès à l'écran Statut
-// (`/statut`) et à la section Montre (collecteur BLE). L'ancien menu système
-// séparé et l'entrée « Rapport SpO2 » (toujours accessible depuis Santé) ont
-// été retirés.
+// Utilisée dans le bloc « Mode de connectivité » pour ouvrir le secondaire
+// d'un mode donné : « Statut du pont » (bridge) et « Collecteur (Montre) »
+// (iPhone BLE). Le secondaire n'est plus regroupé dans une section « Système »
+// commune — chaque entrée vit sous le mode auquel elle appartient.
 
-private struct SettingsSystemSection: View {
-    let onStatus: () -> Void
-    let onWatch: () -> Void
-
-    var body: some View {
-        Section("Système") {
-            Button(action: onStatus) {
-                SettingsSystemRow(
-                    icon: "dot.radiowaves.up.forward",
-                    title: "Statut",
-                    subtitle: "Lien BLE, synchronisation automatique"
-                )
-            }
-            Button(action: onWatch) {
-                SettingsSystemRow(
-                    icon: "antenna.radiowaves.left.and.right",
-                    title: "Montre",
-                    subtitle: "Collecteur : diagnostic BLE, temps réel"
-                )
-            }
-        }
-    }
-}
-
-private struct SettingsSystemRow: View {
+private struct SettingsNavRow: View {
     let icon: String
     let title: String
     let subtitle: String

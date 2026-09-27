@@ -57,6 +57,23 @@ func dashboardLongDate(_ calendarDay: String) -> String {
     return dashboardDayMonthFormatter.string(from: date)
 }
 
+private let dashboardRecordIsoFormatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+}()
+
+private let dashboardRecordIsoPlainFormatter = ISO8601DateFormatter()
+
+/// Date d'un record (`records.*.date` = `start_time`, un timestamp ISO complet,
+/// pas une chaîne calendaire). N'affiche que la date, jamais l'heure.
+func dashboardRecordDate(_ iso: String) -> String {
+    let date = dashboardRecordIsoFormatter.date(from: iso)
+        ?? dashboardRecordIsoPlainFormatter.date(from: iso)
+    guard let date else { return iso }
+    return dashboardDayMonthFormatter.string(from: date)
+}
+
 // MARK: - Durées
 
 /// `hm()` côté Angular : minutes rondes en `"1h05"`.

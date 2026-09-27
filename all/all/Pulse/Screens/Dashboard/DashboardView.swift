@@ -2,9 +2,14 @@
 //  DashboardView.swift
 //  all (bridge-connect)
 //
-//  Vue racine de l'écran Dashboard (« Statistiques » côté Pulse) — en-tête
-//  période + onglets, puis dispatch vers la section de l'onglet actif. Point
-//  d'entrée exposé pour le hub « Plus ».
+//  Vue racine de l'écran Dashboard (« Statistiques » côté Pulse) — « aperçu
+//  d'abord » : en-tête période + une carte de résumé par domaine (Sommeil,
+//  Entraînement, Santé, Nutrition) + une ligne Carte, chacune poussant
+//  `DashboardDomainDetailView` (contenu détaillé, section réutilisée telle
+//  quelle). Remplace l'ancien empilement onglets+sous-vue+section unique :
+//  fini l'onglet actif qui masque les 4 autres domaines, tout est visible
+//  d'un coup d'œil, on ne pousse que celui qui nous intéresse. Point d'entrée
+//  exposé pour le hub « Plus ».
 //
 
 import SwiftUI
@@ -13,27 +18,32 @@ struct DashboardView: View {
     @State private var viewModel = DashboardViewModel()
 
     var body: some View {
-        Group {
-            if viewModel.hasAnyData {
-                loadedContent
-            } else {
-                switch viewModel.state {
-                case .loading:
-                    LoadingView(message: "Chargement des statistiques…")
-                case .failed(let message):
-                    ErrorView(message: message) { viewModel.retry() }
-                case .loaded:
-                    // Cas transitoire : données arrivées mais toutes vides,
-                    // le contenu ci-dessous gère l'état "rien sur la période".
-                    loadedContent
+        NavigationStack {
+            Group {
+                if viewModel.hasAnyData {
+                    overview
+                } else {
+                    switch viewModel.state {
+                    case .loading:
+                        LoadingView(message: "Chargement des statistiques…")
+                    case .failed(let message):
+                        ErrorView(message: message) { viewModel.retry() }
+                    case .loaded:
+                        // Cas transitoire : données arrivées mais toutes vides,
+                        // le contenu ci-dessous gère l'état "rien sur la période".
+                        overview
+                    }
                 }
             }
+            .background(Color.pulseBackground)
+            .navigationDestination(for: DashboardTab.self) { tab in
+                DashboardDomainDetailView(tab: tab, viewModel: viewModel)
+            }
         }
-        .background(Color.pulseBackground)
         .task { await viewModel.loadIfNeeded() }
     }
 
-    private var loadedContent: some View {
+    private var overview: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: PulseSpacing.lg) {
                 header
@@ -42,106 +52,110 @@ struct DashboardView: View {
                     DashboardInlineError(message: message) { viewModel.retry() }
                 }
 
-                if !dashboardSubViews(for: viewModel.tab).isEmpty {
-                    DashboardSegRow(
-                        items: dashboardSubViews(for: viewModel.tab).map { ($0, $0.label) },
-                        selection: viewModel.subView
-                    ) { viewModel.selectSubView($0) }
+                // Une carte-domaine s'affiche même sans donnée sur la période
+                // (tiret + pas de courbe, cf. `DashboardSummary.swift`) plutôt
+                // que d'être masquée : les 4 domaines restent toujours visibles.
+                NavigationLink(value: DashboardTab.sleep) {
+                    DashboardSummaryCard(summary: viewModel.sleepSummary)
                 }
+                .buttonStyle(.plain)
 
-                if viewModel.isCurrentTabEmpty {
-                    DashboardEmptyTabCard(periodLabel: viewModel.period.label, tabLabel: viewModel.tab.label)
-                } else {
-                    tabBody
+                NavigationLink(value: DashboardTab.training) {
+                    DashboardSummaryCard(summary: viewModel.trainingSummary)
                 }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: DashboardTab.health) {
+                    DashboardSummaryCard(summary: viewModel.healthSummary)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: DashboardTab.nutrition) {
+                    DashboardSummaryCard(summary: viewModel.nutritionSummary)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: DashboardTab.map) {
+                    DashboardMapRow()
+                }
+                .buttonStyle(.plain)
             }
             .padding(PulseSpacing.lg)
         }
+        .pulseTabBarClearance()
         .refreshable { await viewModel.load() }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.md) {
-            // `.top .h1` + `.seg` côté Angular : titre et sélecteur de période
-            // sur la même ligne — le `Picker` système (`.segmented`) est
-            // remplacé par une piste maison (`DashboardPeriodTrack`) qui
-            // reprend l'habillage réel de la maquette (piste grise, pilule
-            // active en relief blanc) plutôt que le rendu natif iOS.
             Text("Statistiques")
                 .font(.system(size: 24, weight: .semibold))
                 .tracking(-0.2)
                 .foregroundStyle(Color.pulseTextPrimary)
 
-            // Sélecteur de période sur sa propre ligne, pleine largeur (pilules
-            // à largeur égale) : à côté du titre 24pt il manquait de place et
-            // « 1 an » repassait à la ligne, avec une moitié d'écran vide.
+            // `.top .seg` côté Angular : le `Picker` système (`.segmented`) est
+            // remplacé par une piste maison (`DashboardPeriodTrack`) qui
+            // reprend l'habillage réel de la maquette (piste grise, pilule
+            // active en relief blanc). Sur sa propre ligne, pleine largeur
+            // (pilules à largeur égale) : à côté du titre 24pt il manquait de
+            // place et « 1 an » repassait à la ligne, avec une moitié d'écran
+            // vide.
             DashboardPeriodTrack(selection: Binding(
                 get: { viewModel.period },
                 set: { viewModel.selectPeriod($0) }
             ))
-
-            DashboardChipRow(
-                items: DashboardTab.allCases.map { ($0, $0.label) },
-                selection: viewModel.tab
-            ) { viewModel.selectTab($0) }
-        }
-    }
-
-    @ViewBuilder
-    private var tabBody: some View {
-        switch viewModel.tab {
-        case .sleep:
-            DashboardSleepSection(viewModel: viewModel)
-        case .training:
-            DashboardTrainingSection(viewModel: viewModel)
-        case .health:
-            DashboardHealthSection(viewModel: viewModel)
-        case .nutrition:
-            DashboardNutritionSection(viewModel: viewModel)
-        case .map:
-            DashboardMapPlaceholderCard()
         }
     }
 }
 
 // MARK: - Composants partagés de l'écran
 
-/// Rangée d'onglets défilable horizontalement — `nav.tabs`/`.tab` côté
-/// Angular (pilule pleine largeur de contenu, capsule complète — cf. maquette
-/// « Statistiques » 560-849 ; pas de survol sur iOS, un seul état actif).
-struct DashboardChipRow<Value: Hashable>: View {
-    let items: [(Value, String)]
-    let selection: Value
-    let onSelect: (Value) -> Void
-
+/// Ligne « Carte des sorties » — plus discrète que les 4 cartes de résumé
+/// (pas de valeur clé ni de courbe, cf. maquette) : la carte GPS interactive
+/// est un écran à part (`DashboardMapPlaceholderCard`), pas un domaine de
+/// stats comme les autres.
+private struct DashboardMapRow: View {
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(items, id: \.0) { value, label in
-                    Button {
-                        onSelect(value)
-                    } label: {
-                        Text(label)
-                            .font(.system(size: 13, weight: value == selection ? .medium : .regular))
-                            .padding(.horizontal, 15)
-                            .padding(.vertical, 9)
-                            .background(value == selection ? Color.pulseTextPrimary : Color.pulseSurface)
-                            .foregroundStyle(value == selection ? Color.pulseBackground : Color.pulseTextSecondary)
-                            .overlay(
-                                Capsule().strokeBorder(value == selection ? Color.clear : Color.pulseBorder, lineWidth: 1)
-                            )
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+        HStack(spacing: PulseSpacing.md) {
+            Image(systemName: "map.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.pulseTextSecondary)
+                .frame(width: 26, height: 26)
+                .background(Color.pulseTextSecondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Text("Carte des sorties")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.pulseTextPrimary)
+
+            Spacer()
+
+            // Pas de source de données pour un nombre de tracés GPS parmi les
+            // endpoints déjà chargés (`DashboardTrainingTab.count` compte les
+            // séances, pas les tracés) — note générique plutôt qu'un chiffre
+            // inventé.
+            Text("tracés GPS")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Color.pulseTextSecondary)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.pulseTextSecondary)
         }
+        .padding(PulseSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pulseSurface)
+        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: PulseRadius.card, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
     }
 }
 
-/// Sélecteur de sous-vue — `<app-seg class="views">` côté Angular. Contrairement
-/// à `DashboardChipRow` (onglets, capsule, défilante), la maquette la rend en
-/// pleine largeur, sans défilement : pilules d'angle 9 pt de largeur égale.
+/// Sélecteur de sous-vue — `<app-seg class="views">` côté Angular. La
+/// maquette la rend en pleine largeur, sans défilement (contrairement à une
+/// rangée de capsules défilante) : pilules d'angle 9 pt de largeur égale.
 struct DashboardSegRow<Value: Hashable>: View {
     let items: [(Value, String)]
     let selection: Value

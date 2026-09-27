@@ -24,15 +24,18 @@ import SwiftUI
 
 struct ProgrammeView: View {
     @State private var viewModel = ProgrammeViewModel()
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             content
                 .background(Color.pulseBackground)
-                // Titre porté en contenu (`header`, 24pt) : le titre système
-                // en plus affichait « Programme » deux fois (barre + contenu),
-                // l'un au-dessus de l'autre. Barre masquée, comme les autres écrans.
-                .toolbar(.hidden, for: .navigationBar)
+                // Depuis le déplacement dans Paramètres, Programme est une
+                // feuille : titre système + bouton fermer, comme Statut/Montre
+                // (le titre 24pt en contenu a été retiré, cf. `header`).
+                .navigationTitle("Programme")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { SheetCloseButton { dismiss() } }
         }
         .task {
             await viewModel.load()
@@ -91,14 +94,13 @@ struct ProgrammeView: View {
             }
             .padding(PulseSpacing.lg)
         }
+        .pulseTabBarClearance()
     }
 
+    // Titre désormais porté par la barre de navigation de la feuille — ne reste
+    // que la note d'état (programmes actifs), alignée à droite en tête de liste.
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Programme")
-                .font(.system(size: 24, weight: .semibold))
-                .tracking(-0.2)
-                .foregroundStyle(Color.pulseTextPrimary)
+        HStack {
             Spacer()
             Text(programmeActiveNote(viewModel.domains))
                 .font(.system(size: 11, design: .monospaced))
