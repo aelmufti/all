@@ -39,12 +39,33 @@ struct DashboardSleepSection: View {
 struct DashboardSleepRecommendationCard: View {
     let reco: DashboardSleepRecommendation
 
+    /// Réveil réglé dans l'app pour DEMAIN (`Pulse/Core/WakeScheduleStore.swift`)
+    /// prime sur l'heure de lever habituelle du serveur — recalcul purement
+    /// local, aucun appel réseau. `nil` → reco serveur affichée telle quelle.
+    /// Cette carte étant utilisée à la fois par l'écran Sommeil et l'onglet
+    /// Sommeil du Dashboard, l'adaptation apparaît aux deux endroits.
+    private var adapted: AdaptedBedtime? {
+        WakeScheduleStore.shared.adaptedBedtime(reco: reco)
+    }
+
+    /// Palier en cours ce soir — recalcul local s'il existe, sinon celui du
+    /// serveur (reco basée sur le lever habituel).
+    private var stepped: Bool {
+        adapted?.stepped ?? (reco.stepped ?? false)
+    }
+
+    /// Cible finale à afficher sur la ligne de palier (recalcul local en
+    /// priorité, sinon celle envoyée par le serveur).
+    private var steppedTargetLabel: String? {
+        adapted?.targetBedtime ?? reco.targetBedtime
+    }
+
     var body: some View {
         PulseCard {
             DashboardCardHeader("Heure de coucher conseillée")
 
             HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
-                Text(reco.recommendedBedtime ?? "—")
+                Text(adapted?.bedtime ?? reco.recommendedBedtime ?? "—")
                     .font(.system(size: 44, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Color.pulseSleep)
                 if let target = reco.targetHours {
@@ -54,9 +75,21 @@ struct DashboardSleepRecommendationCard: View {
                 }
             }
 
-            Text(shiftLine)
-                .font(PulseFont.body)
-                .foregroundStyle(shiftTint)
+            if let adapted {
+                Text("pour te réveiller à \(WakeScheduleStore.hhmm(adapted.wakeMinutes)) \(dashboardWeekdayShort(adapted.weekday)) — réglé sur ton téléphone")
+                    .font(PulseFont.body)
+                    .foregroundStyle(Color.pulseTextPrimary)
+            } else {
+                Text(shiftLine)
+                    .font(PulseFont.body)
+                    .foregroundStyle(shiftTint)
+            }
+
+            if stepped, let target = steppedTargetLabel {
+                Text("Palier de ce soir — cible \(target), à atteindre par paliers de 15 min tous les 2-3 soirs.")
+                    .font(PulseFont.body)
+                    .foregroundStyle(Color.pulseTextPrimary)
+            }
 
             Text(rationale)
                 .font(.footnote)
@@ -92,7 +125,14 @@ struct DashboardSleepRecommendationCard: View {
         let awake = (reco.avgAwakeMin.map { $0 > 0 } ?? false)
             ? " et de tes \(reco.avgAwakeMin!) min d'éveil nocturne habituel"
             : ""
-        return "\(base) Calculé \(wake)sur \(reco.nights) nuits\(awake)."
+        var text = "\(base) Calculé \(wake)sur \(reco.nights) nuits\(awake)."
+        if let latency = reco.latencyMin, latency > 0 {
+            text += " Coucher = endormissement − \(latency) min."
+        }
+        if let bonus = reco.debtBonusMin, bonus > 0, let debt = reco.debtHours {
+            text += " +\(bonus) min pour rembourser ~\(String(format: "%.1f", debt)) h de dette sur 7 nuits."
+        }
+        return text
     }
 }
 
@@ -103,6 +143,11 @@ struct DashboardSleepRecommendationCard: View {
 /// fragmentation) restent accessibles via les sous-onglets Dette / Régularité.
 private struct DashboardSleepTrendCard: View {
     let viewModel: DashboardViewModel
+
+    /// Nuit survolée sur la courbe — pas de `DashboardFigureRow` dans cette
+    /// section : la valeur pointée se montre en annotation sur le marqueur,
+    /// comme le poids (`DashboardWeightCard`).
+    @State private var selectedDate: Date?
 
     private var points: [(date: Date, hours: Double)] {
         zip(viewModel.wellnessDates, viewModel.wellnessSleepHours).compactMap { date, hours in
@@ -140,7 +185,14 @@ private struct DashboardSleepTrendCard: View {
             HStack {
                 DashboardCardHeader("Durée par nuit")
                 Spacer()
-                if let avgHours {
+                // Section sans figrow : la nuit survolée se lit ici, en tête de
+                // carte, plutôt qu'en annotation sur le point (qui débordait du
+                // tracé près des bords et faisait « sauter » le graphe).
+                if let hoverLabel {
+                    Text(hoverLabel)
+                        .font(PulseFont.metricLabel)
+                        .foregroundStyle(Color.pulseTextPrimary)
+                } else if let avgHours {
                     Text("moy \(dashboardHoursHM(avgHours))")
                         .font(PulseFont.metricLabel)
                         .foregroundStyle(Color.pulseTextSecondary)
@@ -151,32 +203,59 @@ private struct DashboardSleepTrendCard: View {
                     .font(PulseFont.body)
                     .foregroundStyle(Color.pulseTextSecondary)
             } else {
-                Chart(points, id: \.date) { point in
-                    AreaMark(
-                        x: .value("Date", point.date),
-                        y: .value("Heures", point.hours)
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [DashboardMetricColor.sleep.opacity(0.24), DashboardMetricColor.sleep.opacity(0)],
-                            startPoint: .top, endPoint: .bottom
+                Chart {
+                    ForEach(points, id: \.date) { point in
+                        AreaMark(
+                            x: .value("Date", point.date),
+                            y: .value("Heures", point.hours)
                         )
-                    )
-                    .interpolationMethod(.monotone)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [DashboardMetricColor.sleep.opacity(0.24), DashboardMetricColor.sleep.opacity(0)],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                        .interpolationMethod(.monotone)
 
-                    LineMark(
-                        x: .value("Date", point.date),
-                        y: .value("Heures", point.hours)
-                    )
-                    .foregroundStyle(DashboardMetricColor.sleep)
-                    .interpolationMethod(.monotone)
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("Heures", point.hours)
+                        )
+                        .foregroundStyle(DashboardMetricColor.sleep)
+                        .interpolationMethod(.monotone)
+                    }
+                    // Repère de la nuit survolée — annotation sur le marqueur,
+                    // pas d'override de tuile : cette section n'a pas de figrow.
+                    if let sel = selectedPoint {
+                        RuleMark(x: .value("Date", sel.date))
+                            .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                        PointMark(x: .value("Date", sel.date), y: .value("Heures", sel.hours))
+                            .foregroundStyle(DashboardMetricColor.sleep)
+                            .symbolSize(80)
+                    }
                 }
                 .frame(height: 160)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 5)) { AxisValueLabel(format: .dateTime.day().month()) }
                 }
+                .chartXSelection(value: $selectedDate)
             }
         }
+    }
+
+    private var selectedPoint: (date: Date, hours: Double)? {
+        guard let selectedDate else { return nil }
+        return points.min {
+            abs($0.date.timeIntervalSince1970 - selectedDate.timeIntervalSince1970)
+                < abs($1.date.timeIntervalSince1970 - selectedDate.timeIntervalSince1970)
+        }
+    }
+
+    /// Lecture de la nuit survolée, montrée en tête de carte.
+    private var hoverLabel: String? {
+        guard let sel = selectedPoint else { return nil }
+        return "\(String(format: "%.1f", sel.hours)) h · \(dashboardShortDayMonth(sel.date))"
     }
 
     private func debtTiles(_ debt: DashboardSleepDebt) -> [DashboardSleepTile] {
@@ -360,6 +439,14 @@ private func dashboardRegularityWord(_ score: Int) -> String {
 private func dashboardHoursHM(_ hours: Double) -> String {
     let totalMinutes = Int((hours * 60).rounded())
     return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
+}
+
+/// Abrév. courte du jour de semaine (Calendar weekday 1…7, dimanche en tête)
+/// — utilisé par la carte reco pour indiquer le jour du réveil réglé.
+private func dashboardWeekdayShort(_ weekday: Int) -> String {
+    let labels = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."]
+    guard (1...7).contains(weekday) else { return "" }
+    return labels[weekday - 1]
 }
 
 private struct DashboardSleepDebtCard: View {

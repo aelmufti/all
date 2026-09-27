@@ -420,9 +420,15 @@ struct DashboardSleepRegularity: Decodable, Equatable {
 // MARK: - api/stats/sleep-recommendation
 
 /// Heure de coucher conseillée pour « aller un peu mieux » : heure de lever
-/// habituelle − (durée cible + éveil habituel). `status == "insufficient"`
-/// (moins de 3 nuits) → seuls `nights` et `status` sont présents. `basis`
-/// indique si la durée cible vient de l'objectif ou du lien stress observé.
+/// habituelle − (durée cible + éveil habituel + délai d'endormissement).
+/// `status == "insufficient"` (moins de 3 nuits) → seuls `nights` et `status`
+/// sont présents. `basis` indique si la durée cible vient de l'objectif ou du
+/// lien stress observé. v2 (champs en plus, tous optionnels pour rester
+/// compatible avec un serveur v1) : `recommendedBedtime` est le coucher DE CE
+/// SOIR (avec palier appliqué si besoin), `targetBedtime` la cible finale sans
+/// palier ; `stepped` indique si un palier a été appliqué ; `latencyMin` est
+/// le délai d'endormissement retranché ; `debtHours`/`debtBonusMin` reflètent
+/// le bonus de durée dû à une dette de sommeil récente.
 struct DashboardSleepRecommendation: Decodable, Equatable {
     let nights: Int
     let status: String
@@ -432,10 +438,16 @@ struct DashboardSleepRecommendation: Decodable, Equatable {
     let waketime: String?
     let currentBedtime: String?
     let recommendedBedtime: String?
+    let targetBedtime: String?
+    let stepped: Bool?
+    let stepMin: Int?
+    let latencyMin: Int?
     let shiftMin: Int?
     let avgAwakeMin: Int?
     let stressSignificant: Bool?
     let stressR: Double?
+    let debtHours: Double?
+    let debtBonusMin: Int?
 
     var isActionable: Bool { status == "ok" && recommendedBedtime != nil }
 }
