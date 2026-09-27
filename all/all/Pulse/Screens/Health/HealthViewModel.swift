@@ -192,6 +192,12 @@ final class HealthViewModel {
                 body: WeightSaveRequest(date: date, kg: kg)
             )
             await loadWeight()
+            // Écriture auto vers la montre : le téléphone pousse le poids dans le
+            // profil de la montre (le seul réglage qu'il pousse). Part tout de
+            // suite si la montre est liée, sinon au prochain lien BLE (cf.
+            // `BLEManager.requestWatchWeightWrite`). La pesée reste par ailleurs
+            // stockée côté Pulse quoi qu'il arrive.
+            BLEManager.shared.requestWatchWeightWrite(kg: kg)
             weightMessage = "Pesée enregistrée pour le \(Self.shortDateLabel(date))."
         } catch {
             weightMessage = "Poids refusé : vérifie la valeur (entre 25 et 300 kg)."

@@ -12,6 +12,15 @@
 import SwiftUI
 import Charts
 
+/// Point mis en évidence quand le doigt survole un graphique : remplace la
+/// valeur de tête (la « dernière valeur ») par la valeur pointée + son heure,
+/// puis redevient `nil` au relâchement. Commun à tous les graphes de l'écran
+/// Santé (courbes Swift Charts + barres dessinées main).
+struct ChartHoverPoint: Equatable {
+    let value: Double
+    let timeLabel: String
+}
+
 // MARK: - Navigation de jour
 
 struct HealthDayNavigator: View {
@@ -334,30 +343,52 @@ struct HealthMetricChartCard: View {
     var viewModel: HealthViewModel
     let day: WellnessDayDetail
 
+    /// Valeur pointée au survol du graphique — quand elle est renseignée, la
+    /// tête affiche la valeur/l'heure du point touché plutôt que la moyenne.
+    @State private var hover: ChartHoverPoint?
+
     var body: some View {
         PulseCard {
             let headline = viewModel.metricHeadline
+            // Au survol : la grosse valeur devient celle du point touché et le
+            // libellé de droite affiche son heure (sinon la plage habituelle).
+            let value = hover.map { formatValue($0.value) } ?? headline.value
+            let detail = hover?.timeLabel ?? headline.range
             HStack(alignment: .lastTextBaseline) {
                 HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
                     // Maquette « Santé » : classe `.hero-n` = 32px (pas
                     // `PulseFont.metricValue`, 36 — jeton générique StatTile).
-                    Text(headline.value)
+                    Text(value)
                         .font(.system(size: 32, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
+                        .contentTransition(.numericText())
                     Text(headline.unit)
                         .font(PulseFont.metricUnit)
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 Spacer()
-                if !headline.range.isEmpty {
-                    Text(headline.range)
+                if !detail.isEmpty {
+                    Text(detail)
                         .font(PulseFont.metricUnit)
-                        .foregroundStyle(Color.pulseTextSecondary)
+                        .foregroundStyle(hover != nil ? Color.pulseTextPrimary : Color.pulseTextSecondary)
                 }
             }
             chart
                 .frame(height: 180)
+        }
+        // Le point survolé n'a de sens que pour l'onglet courant : on le purge
+        // au changement de métrique (sinon une valeur cardio resterait affichée
+        // sur l'onglet stress).
+        .onChange(of: viewModel.selectedTab) { _, _ in hover = nil }
+    }
+
+    /// Formatage de la valeur survolée selon l'onglet — miroir de la précision
+    /// utilisée par `metricHeadline` (respiration à la décimale, sinon entier).
+    private func formatValue(_ v: Double) -> String {
+        switch viewModel.selectedTab {
+        case .respiration: return String(format: "%.1f", v)
+        default: return String(Int(v.rounded()))
         }
     }
 
@@ -379,19 +410,19 @@ struct HealthMetricChartCard: View {
     private var chart: some View {
         switch viewModel.selectedTab {
         case .cardio:
-            SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil, xDomain: dayDomain)
+            SampleLineChart(samples: day.hr, color: Color.pulseHR, yRange: nil, xDomain: dayDomain, hover: $hover)
         case .stress:
             // Barres colorées par zone (repos/bas/moyen/élevé), dessinées à la
             // main comme les calories : Swift Charts rendait les barres vides.
-            StressZoneChart(samples: day.stress, dayStart: dayDomain.lowerBound.timeIntervalSince1970)
+            StressZoneChart(samples: day.stress, dayStart: dayDomain.lowerBound.timeIntervalSince1970, hover: $hover)
         case .energie:
-            SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100, xDomain: dayDomain)
+            SampleLineChart(samples: day.bodyBatteryPivot, color: Color.pulseBattery, yRange: 0...100, xDomain: dayDomain, hover: $hover)
         case .spo2:
-            SampleLineChart(samples: day.spo2, color: Color.pulseSpo2, yRange: nil, xDomain: dayDomain)
+            SampleLineChart(samples: day.spo2, color: Color.pulseSpo2, yRange: nil, xDomain: dayDomain, hover: $hover)
         case .respiration:
-            SampleLineChart(samples: day.respiration, color: Color.pulseResp, yRange: nil, xDomain: dayDomain)
+            SampleLineChart(samples: day.respiration, color: Color.pulseResp, yRange: nil, xDomain: dayDomain, hover: $hover)
         case .calories:
-            CaloriesSummary(viewModel: viewModel)
+            CaloriesSummary(viewModel: viewModel, hover: $hover)
         }
     }
 }
@@ -435,32 +466,66 @@ struct SampleLineChart: View {
     let color: Color
     let yRange: ClosedRange<Double>?
     let xDomain: ClosedRange<Date>
+    @Binding var hover: ChartHoverPoint?
+
+    /// Position (temporelle) du doigt sur l'axe X — `chartXSelection` renvoie
+    /// une date continue ; on recale sur l'échantillon le plus proche.
+    @State private var selectedDate: Date?
 
     var body: some View {
         if samples.isEmpty {
             emptyState
         } else {
-            Chart(samples, id: \.ts) { sample in
-                // Aire sous la courbe teintée métrique — miroir de l'attribut
-                // `fill-opacity="0.16"` sur `<path [attr.d]="areaPath()">`
-                // dans `stream-chart.component.ts`.
-                AreaMark(
-                    x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
-                    y: .value("Valeur", sample.value)
-                )
-                .foregroundStyle(color.opacity(0.16))
-                .interpolationMethod(.monotone)
+            Chart {
+                ForEach(samples, id: \.ts) { sample in
+                    // Aire sous la courbe teintée métrique — miroir de l'attribut
+                    // `fill-opacity="0.16"` sur `<path [attr.d]="areaPath()">`
+                    // dans `stream-chart.component.ts`.
+                    AreaMark(
+                        x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
+                        y: .value("Valeur", sample.value)
+                    )
+                    .foregroundStyle(color.opacity(0.16))
+                    .interpolationMethod(.monotone)
 
-                LineMark(
-                    x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
-                    y: .value("Valeur", sample.value)
-                )
-                .foregroundStyle(color)
-                .interpolationMethod(.monotone)
+                    LineMark(
+                        x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sample.ts))),
+                        y: .value("Valeur", sample.value)
+                    )
+                    .foregroundStyle(color)
+                    .interpolationMethod(.monotone)
+                }
+                // Repère du point survolé : trait vertical + pastille pleine.
+                if let sel = selectedSample {
+                    RuleMark(x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sel.ts))))
+                        .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                    PointMark(
+                        x: .value("Heure", Date(timeIntervalSince1970: TimeInterval(sel.ts))),
+                        y: .value("Valeur", sel.value)
+                    )
+                    .foregroundStyle(color)
+                    .symbolSize(80)
+                }
             }
             .chartYScale(domain: yRange ?? autoRange)
             .healthChartAxes(domain: xDomain)
+            .chartXSelection(value: $selectedDate)
+            .onChange(of: selectedDate) { _, newValue in
+                guard let newValue, let sample = nearest(to: newValue) else { hover = nil; return }
+                hover = ChartHoverPoint(value: sample.value, timeLabel: HealthViewModel.clock(Int(sample.ts)))
+            }
         }
+    }
+
+    private var selectedSample: WellnessSample? {
+        guard let selectedDate else { return nil }
+        return nearest(to: selectedDate)
+    }
+
+    private func nearest(to date: Date) -> WellnessSample? {
+        let t = date.timeIntervalSince1970
+        return samples.min { abs($0.ts - t) < abs($1.ts - t) }
     }
 
     private var autoRange: ClosedRange<Double> {
@@ -543,6 +608,11 @@ struct StressBarChart: View {
 private struct StressZoneChart: View {
     let samples: [WellnessSample]
     let dayStart: TimeInterval
+    @Binding var hover: ChartHoverPoint?
+
+    /// Fenêtre de 5 min survolée (repérée par son `ts`) — trace un trait
+    /// vertical sur la barre pointée.
+    @State private var selectedTs: Double?
 
     private let span: Double = 86_400
 
@@ -555,20 +625,47 @@ private struct StressZoneChart: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack(spacing: 6) {
-                Canvas { context, size in
-                    let slotW = max(size.width * 300 / span, 1)
-                    for bucket in buckets {
-                        let fx = (bucket.ts - dayStart) / span
-                        guard fx >= 0, fx <= 1 else { continue }
-                        let barH = min(max(bucket.value / 100, 0), 1) * size.height
-                        let rect = CGRect(
-                            x: fx * size.width - slotW / 2,
-                            y: size.height - barH,
-                            width: slotW,
-                            height: barH
-                        )
-                        context.fill(Path(rect), with: .color(zoneColor(bucket.value)))
+                GeometryReader { geo in
+                    Canvas { context, size in
+                        let slotW = max(size.width * 300 / span, 1)
+                        for bucket in buckets {
+                            let fx = (bucket.ts - dayStart) / span
+                            guard fx >= 0, fx <= 1 else { continue }
+                            let barH = min(max(bucket.value / 100, 0), 1) * size.height
+                            let rect = CGRect(
+                                x: fx * size.width - slotW / 2,
+                                y: size.height - barH,
+                                width: slotW,
+                                height: barH
+                            )
+                            context.fill(Path(rect), with: .color(zoneColor(bucket.value)))
+                        }
+                        // Trait vertical sur la fenêtre survolée.
+                        if let selectedTs {
+                            let fx = (selectedTs - dayStart) / span
+                            if fx >= 0, fx <= 1 {
+                                let x = fx * size.width
+                                context.stroke(
+                                    Path { $0.move(to: CGPoint(x: x, y: 0)); $0.addLine(to: CGPoint(x: x, y: size.height)) },
+                                    with: .color(Color.pulseTextSecondary.opacity(0.4)),
+                                    lineWidth: 1
+                                )
+                            }
+                        }
                     }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { g in
+                                let fx = max(0, min(1, g.location.x / max(geo.size.width, 1)))
+                                let ts = dayStart + fx * span
+                                if let b = buckets.min(by: { abs($0.ts - ts) < abs($1.ts - ts) }) {
+                                    selectedTs = b.ts
+                                    hover = ChartHoverPoint(value: b.value, timeLabel: HealthViewModel.clock(Int(b.ts)))
+                                }
+                            }
+                            .onEnded { _ in selectedTs = nil; hover = nil }
+                    )
                 }
                 HStack {
                     Text("0h"); Spacer(); Text("6h"); Spacer(); Text("12h"); Spacer(); Text("18h"); Spacer(); Text("24h")
@@ -596,6 +693,10 @@ private struct StressZoneChart: View {
 /// portage).
 struct CaloriesSummary: View {
     var viewModel: HealthViewModel
+    @Binding var hover: ChartHoverPoint?
+
+    /// Heure (0–23) survolée — met en évidence sa colonne.
+    @State private var selectedHour: Int?
 
     var body: some View {
         // Histogramme 24 h empilé — base (BMR réparti, translucide) + actif
@@ -624,9 +725,27 @@ struct CaloriesSummary: View {
                             }
                             .frame(maxWidth: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
+                            .overlay {
+                                // Colonne survolée : liseré discret.
+                                if selectedHour == i {
+                                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                        .stroke(Color.pulseTextSecondary.opacity(0.5), lineWidth: 1)
+                                }
+                            }
                         }
                     }
                     .frame(width: geo.size.width, height: h, alignment: .bottom)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { g in
+                                let idx = Int((g.location.x / max(geo.size.width, 1)) * 24)
+                                let hour = min(max(idx, 0), 23)
+                                selectedHour = hour
+                                hover = ChartHoverPoint(value: totals[hour], timeLabel: "\(hour)h")
+                            }
+                            .onEnded { _ in selectedHour = nil; hover = nil }
+                    )
                 }
                 HStack {
                     Text("0h"); Spacer(); Text("6h"); Spacer(); Text("12h"); Spacer(); Text("18h"); Spacer(); Text("24h")
@@ -801,6 +920,20 @@ struct IntensityCard: View {
 
 struct WeightCard: View {
     @Bindable var viewModel: HealthViewModel
+    /// État de l'écriture du poids vers la montre par le téléphone (upload FIT,
+    /// cf. `BLEManager.requestWatchWeightWrite`) — distinct du statut de push
+    /// côté serveur (`viewModel.watchNote`, qui ne concerne que le pont homelab).
+    @ObservedObject private var ble = BLEManager.shared
+    /// Focus du champ de saisie — sert à refermer le pavé numérique dès qu'on
+    /// enregistre (le `.decimalPad` iOS n'a pas de touche « retour »).
+    @FocusState private var weightFieldFocused: Bool
+    /// Pesée survolée sur la courbe de tendance — remplace la grosse valeur du
+    /// jour par la pesée pointée (comme les graphes de Santé).
+    @State private var weightHover: WeightSeriesPoint?
+
+    private var canSaveWeight: Bool {
+        !viewModel.weightInputText.isEmpty && !viewModel.isSavingWeight
+    }
 
     var body: some View {
         PulseCard {
@@ -810,20 +943,22 @@ struct WeightCard: View {
                     .foregroundStyle(Color.pulseTextSecondary)
                     .tracking(0.6)
                 Spacer()
-                Text(viewModel.weighLabel)
+                Text(weightHover.map { HealthViewModel.shortDateLabel($0.date) } ?? viewModel.weighLabel)
                     .font(PulseFont.metricUnit)
-                    .foregroundStyle(Color.pulseTextSecondary)
+                    .foregroundStyle(weightHover != nil ? Color.pulseTextPrimary : Color.pulseTextSecondary)
             }
             HStack(alignment: .lastTextBaseline) {
                 // Maquette / SCSS Pulse : classe `.weigh .n44` (44px), même
                 // jeton que la durée de sommeil — pas `PulseFont.metricValue`.
-                if let shown = viewModel.shownWeight {
+                // Au survol de la courbe : la pesée pointée prime sur celle du jour.
+                if let shown = weightHover?.kg ?? viewModel.shownWeight {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         Text(String(format: "%.1f", shown))
                             .font(.system(size: 44, weight: .semibold, design: .monospaced))
                             .foregroundStyle(
-                                viewModel.dayWeight == nil ? Color.pulseTextSecondary : Color.pulseTextPrimary
+                                (weightHover == nil && viewModel.dayWeight == nil) ? Color.pulseTextSecondary : Color.pulseTextPrimary
                             )
+                            .contentTransition(.numericText())
                         Text("kg")
                             .font(PulseFont.metricUnit)
                             .foregroundStyle(Color.pulseTextSecondary)
@@ -848,7 +983,7 @@ struct WeightCard: View {
             }
 
             if let series = viewModel.weight?.series, series.count > 1 {
-                WeightLineChart(series: series)
+                WeightLineChart(series: series, hover: $weightHover)
                     .frame(height: 110)
             }
 
@@ -898,20 +1033,44 @@ struct WeightCard: View {
                     #if os(iOS)
                     .keyboardType(.decimalPad)
                     #endif
-                    .textFieldStyle(.roundedBorder)
-                Button(viewModel.dayWeight != nil ? "Corriger" : "Enregistrer") {
+                    .focused($weightFieldFocused)
+                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                    .padding(.horizontal, PulseSpacing.md)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                            .fill(Color.pulseSurfaceAlt)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                            .stroke(weightFieldFocused ? Color.pulseAccent : Color.pulseBorder, lineWidth: 1)
+                    )
+
+                Button {
+                    // Referme le pavé numérique puis enregistre.
+                    weightFieldFocused = false
                     Task { await viewModel.saveWeight() }
+                } label: {
+                    Text("Enregistrer")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.pulseOnAccent)
+                        .padding(.horizontal, PulseSpacing.lg)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                                .fill(canSaveWeight ? Color.pulseAccent : Color.pulseEmpty)
+                        )
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.pulseAccent)
-                .disabled(viewModel.weightInputText.isEmpty || viewModel.isSavingWeight)
+                .buttonStyle(.plain)
+                .disabled(!canSaveWeight)
             }
 
             HStack(alignment: .firstTextBaseline) {
                 if let message = viewModel.weightMessage {
                     Text(message).font(.caption).foregroundStyle(Color.pulseTextSecondary)
                 } else if let series = viewModel.weight?.series, series.count > 1 {
-                    Text("\(series.count) pesées · la ligne suit la moyenne 7 jours")
+                    Text("\(series.count) pesées · poids réel saisi")
                         .font(.caption)
                         .foregroundStyle(Color.pulseTextSecondary)
                 } else {
@@ -939,23 +1098,105 @@ struct WeightCard: View {
                         viewModel.weight?.push.status == "sent" ? Color.pulseSteps : Color.pulseTextSecondary
                     )
             }
+
+            // Écriture directe téléphone → montre (upload FIT). Ne s'affiche que
+            // lorsqu'une écriture est en cours/aboutie/échouée sur ce lien.
+            if ble.weightWriteState != .idle {
+                HStack(spacing: PulseSpacing.xs) {
+                    Image(systemName: watchWriteIcon)
+                        .font(.system(size: 11))
+                    Text("Montre : \(ble.weightWriteState.label)")
+                        .font(.caption)
+                }
+                .foregroundStyle(watchWriteColor)
+            }
+        }
+    }
+
+    private var watchWriteIcon: String {
+        switch ble.weightWriteState {
+        case .sent: return "checkmark.circle.fill"
+        case .refused, .failed: return "exclamationmark.triangle.fill"
+        case .uploading: return "arrow.up.circle"
+        default: return "clock"
+        }
+    }
+
+    private var watchWriteColor: Color {
+        switch ble.weightWriteState {
+        case .sent: return Color.pulseSteps
+        case .refused, .failed: return Color.pulseCalories
+        default: return Color.pulseTextSecondary
         }
     }
 }
 
 struct WeightLineChart: View {
     let series: [WeightSeriesPoint]
+    /// Pesée survolée — remontée au `WeightCard` pour que la grosse valeur
+    /// affiche la pesée pointée (et sa date), comme les graphes de Santé.
+    @Binding var hover: WeightSeriesPoint?
+
+    @State private var selectedDate: Date?
+
+    /// Domaine Y calé sur les pesées RÉELLES saisies (min → max), avec une
+    /// marge, plutôt que l'échelle auto (qui écrasait la courbe en une ligne
+    /// plate). On veut « voir » les kilos qui bougent, pas un 0–100.
+    private var yDomain: ClosedRange<Double> {
+        let values = series.map(\.kg)
+        guard let lo = values.min(), let hi = values.max() else { return 0...1 }
+        if lo == hi { return (lo - 1)...(hi + 1) }
+        let margin = max(0.3, (hi - lo) * 0.15)
+        return (lo - margin)...(hi + margin)
+    }
 
     var body: some View {
         // Miroir `color="var(--m-steps)"` (Angular, `health.component.ts`) —
         // la tendance de poids reprend la teinte « pas », pas l'accent bleu.
-        Chart(series, id: \.date) { point in
-            LineMark(
-                x: .value("Date", HealthViewModel.parseDate(point.date) ?? Date()),
-                y: .value("Poids", point.avg)
-            )
-            .foregroundStyle(Color.pulseSteps)
-            .interpolationMethod(.monotone)
+        // On trace les pesées RÉELLES (`kg`), pas la moyenne 7 j lissée.
+        Chart {
+            ForEach(series, id: \.date) { point in
+                LineMark(
+                    x: .value("Date", HealthViewModel.parseDate(point.date) ?? Date()),
+                    y: .value("Poids", point.kg)
+                )
+                .foregroundStyle(Color.pulseSteps)
+                .interpolationMethod(.monotone)
+
+                PointMark(
+                    x: .value("Date", HealthViewModel.parseDate(point.date) ?? Date()),
+                    y: .value("Poids", point.kg)
+                )
+                .foregroundStyle(Color.pulseSteps)
+                .symbolSize(18)
+            }
+            if let sel = selectedPoint, let date = HealthViewModel.parseDate(sel.date) {
+                RuleMark(x: .value("Date", date))
+                    .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                PointMark(x: .value("Date", date), y: .value("Poids", sel.kg))
+                    .foregroundStyle(Color.pulseSteps)
+                    .symbolSize(80)
+            }
+        }
+        .chartYScale(domain: yDomain)
+        .chartXSelection(value: $selectedDate)
+        .onChange(of: selectedDate) { _, newValue in
+            hover = newValue.flatMap { nearest(to: $0) }
+        }
+    }
+
+    private var selectedPoint: WeightSeriesPoint? {
+        guard let selectedDate else { return nil }
+        return nearest(to: selectedDate)
+    }
+
+    private func nearest(to date: Date) -> WeightSeriesPoint? {
+        let t = date.timeIntervalSince1970
+        return series.min {
+            let a = HealthViewModel.parseDate($0.date)?.timeIntervalSince1970 ?? 0
+            let b = HealthViewModel.parseDate($1.date)?.timeIntervalSince1970 ?? 0
+            return abs(a - t) < abs(b - t)
         }
     }
 }

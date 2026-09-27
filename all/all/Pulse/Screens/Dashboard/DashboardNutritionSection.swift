@@ -14,17 +14,21 @@ import SwiftUI
 struct DashboardNutritionSection: View {
     let viewModel: DashboardViewModel
 
+    /// Jour survolé sur le graphe Apport vs dépense — répercuté sur la tuile
+    /// figrow « kcal / jour » (tuile 0, toujours visible en `prefix(3)`).
+    @State private var intakeHover: DashboardNutritionDay?
+
     var body: some View {
         if let nutrition = viewModel.nutrition {
             if nutrition.completeDays == 0 {
                 DashboardNutritionEmptyCard(nutrition: nutrition)
             } else {
                 VStack(alignment: .leading, spacing: PulseSpacing.lg) {
-                    DashboardFigureRow(tiles: figures(for: nutrition))
+                    DashboardFigureRow(tiles: figures(for: nutrition), highlights: figureHighlight)
 
                     switch viewModel.subView {
                     case .intake:
-                        DashboardIntakeCard(nutrition: nutrition)
+                        DashboardIntakeCard(nutrition: nutrition, hover: $intakeHover)
                     case .macros:
                         DashboardMacrosCard(macros: nutrition.macros, completeDays: nutrition.completeDays)
                     case .logging:
@@ -32,13 +36,24 @@ struct DashboardNutritionSection: View {
                     case .foods:
                         DashboardTopFoodsCard(nutrition: nutrition)
                     default:
-                        DashboardIntakeCard(nutrition: nutrition)
+                        DashboardIntakeCard(nutrition: nutrition, hover: $intakeHover)
                     }
                 }
+                .onChange(of: viewModel.subView) { _, _ in intakeHover = nil }
             }
         } else {
             DashboardSkeletonCard()
         }
+    }
+
+    private var figureHighlight: [Int: String] {
+        guard viewModel.subView == .intake, let day = intakeHover else { return [:] }
+        // Graphe multi-séries : on met à jour d'un coup l'apport (tuile 0) ET
+        // la dépense (tuile 1) du jour survolé — « toutes les valeurs du moment ».
+        var out: [Int: String] = [:]
+        if let kcal = day.kcal { out[0] = "\(kcal)" }
+        if let expenditure = day.expenditure { out[1] = "\(expenditure)" }
+        return out
     }
 
     private func figures(for nutrition: DashboardNutritionTab) -> [DashboardFigure] {
@@ -72,6 +87,9 @@ private struct DashboardNutritionEmptyCard: View {
 
 private struct DashboardIntakeCard: View {
     let nutrition: DashboardNutritionTab
+    @Binding var hover: DashboardNutritionDay?
+
+    @State private var selectedDate: Date?
 
     var body: some View {
         PulseCard {
@@ -96,10 +114,24 @@ private struct DashboardIntakeCard: View {
                         .interpolationMethod(.monotone)
                     }
                 }
+                // Repère du jour survolé (apport) — seuls les jours saisis
+                // (`kcal != nil`) ont une barre à pointer.
+                if let sel = selectedDay, let kcal = sel.kcal, let date = dashboardDate(from: sel.date) {
+                    RuleMark(x: .value("Date", date, unit: .day))
+                        .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                    PointMark(x: .value("Date", date, unit: .day), y: .value("kcal", kcal))
+                        .foregroundStyle(Color.pulseAccent)
+                        .symbolSize(80)
+                }
             }
             .frame(height: 160)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 5)) { AxisValueLabel(format: .dateTime.day().month()) }
+            }
+            .chartXSelection(value: $selectedDate)
+            .onChange(of: selectedDate) { _, newValue in
+                hover = newValue.flatMap(nearestLoggedDay)
             }
 
             DashboardLegendRow(items: [
@@ -112,6 +144,24 @@ private struct DashboardIntakeCard: View {
                 .font(.footnote)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
+    }
+
+    private var selectedDay: DashboardNutritionDay? {
+        guard let selectedDate else { return nil }
+        return nearestLoggedDay(to: selectedDate)
+    }
+
+    /// Jour le plus proche PARMI ceux ayant un apport saisi (`kcal != nil`) —
+    /// un jour vide n'a pas de barre, rien à pointer dessus.
+    private func nearestLoggedDay(to date: Date) -> DashboardNutritionDay? {
+        let t = date.timeIntervalSince1970
+        return nutrition.series
+            .filter { $0.kcal != nil }
+            .min {
+                let a = dashboardDate(from: $0.date)?.timeIntervalSince1970 ?? 0
+                let b = dashboardDate(from: $1.date)?.timeIntervalSince1970 ?? 0
+                return abs(a - t) < abs(b - t)
+            }
     }
 }
 

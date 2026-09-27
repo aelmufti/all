@@ -151,11 +151,21 @@ final class HomeViewModel {
             async let dayTask: HomeDayDetail = client.get("api/wellness/day/\(today)")
             async let activitiesTask: HomeActivityListResponse = client.get(
                 "api/activities", query: ["limit": "40"])
+            // La FC live est rapatriée AVANT de décider du repli : elle arrive
+            // par un canal séparé (`api/live/hr`, temps réel) de l'historique du
+            // jour (`api/wellness/day`, alimenté par ingestion `.fit` par lots).
+            async let liveTask: Void = refreshLive()
             var day = try await dayTask
             let activityList = try await activitiesTask
             self.activities = activityList.items
+            await liveTask
 
-            if !day.hasData {
+            // Repli sur le dernier jour AVEC données — SAUF si la FC live est
+            // joignable : dans ce cas on reste sur aujourd'hui (le direct
+            // alimente le bpm, les panneaux se rempliront à la prochaine
+            // ingestion). Sinon, au passage de minuit, on afficherait « périmé »
+            // (jour n-1) alors qu'on mesure en direct à l'instant même.
+            if !day.hasData && !isLiveNow {
                 let recent: [HomeDaySummaryDate] = try await client.get(
                     "api/wellness/days", query: ["limit": "1"])
                 if let latest = recent.last?.date, latest != today {
@@ -165,13 +175,13 @@ final class HomeViewModel {
             self.day = day
             state = .loaded
 
-            // Best-effort : ne bloquent pas l'affichage principal.
+            // Best-effort : ne bloquent pas l'affichage principal (le live est
+            // déjà rapatrié ci-dessus).
             async let programmeTask = loadProgramme(date: today)
             async let intensityTask = loadIntensity()
-            async let liveTask = refreshLive()
             async let sleepDebtTask = loadSleepDebt()
             async let nutritionTask = loadNutrition(date: today)
-            _ = await (programmeTask, intensityTask, liveTask, sleepDebtTask, nutritionTask)
+            _ = await (programmeTask, intensityTask, sleepDebtTask, nutritionTask)
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -272,6 +282,14 @@ final class HomeViewModel {
             return bpm
         }
         return lastHr
+    }
+
+    /// La montre livre une FC en direct exploitable — même condition que
+    /// `shownHr`. Sert à ancrer « Maintenant » sur aujourd'hui plutôt que de
+    /// retomber sur le dernier jour ingéré au passage de minuit.
+    var isLiveNow: Bool {
+        guard let live else { return false }
+        return live.enabled && live.reachable && !live.stale && live.heartRate != nil
     }
 
     var vitals: [Vital] {

@@ -234,12 +234,20 @@ private struct DashboardPeriodTrack: View {
 /// `.fig-n` 19 px de la maquette).
 struct DashboardFigureRow: View {
     let tiles: [DashboardFigure]
+    /// Survol d'un graphe associé : remplace la valeur des tuiles visées (par
+    /// index dans les 3 premières, cf. `visibleTiles`) par la valeur du moment
+    /// pointé — même principe que le survol des graphes de l'écran Santé, mais
+    /// répercuté sur la figrow. Un dictionnaire (et non un seul index) pour les
+    /// graphes multi-séries : « Apport vs dépense » met à jour deux tuiles d'un
+    /// coup. Vide = figrow au repos, valeurs habituelles.
+    var highlights: [Int: String] = [:]
 
     private var visibleTiles: [DashboardFigure] { Array(tiles.prefix(3)) }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            ForEach(visibleTiles) { tile in
+            ForEach(Array(visibleTiles.enumerated()), id: \.element.id) { index, tile in
+                let overridden = highlights[index]
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tile.label.uppercased())
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
@@ -248,11 +256,12 @@ struct DashboardFigureRow: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                     HStack(alignment: .lastTextBaseline, spacing: 2) {
-                        Text(tile.value)
+                        Text(overridden ?? tile.value)
                             .font(.system(size: 19, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(tile.accent)
+                            .foregroundStyle(overridden != nil ? Color.pulseTextPrimary : tile.accent)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
+                            .contentTransition(.numericText())
                         if let unit = tile.unit {
                             Text(unit)
                                 .font(.system(size: 11, weight: .regular, design: .monospaced))

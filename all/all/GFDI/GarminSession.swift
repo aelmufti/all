@@ -82,6 +82,31 @@ enum GarminSyncState: Equatable {
     case done
 }
 
+/// État de l'écriture du poids vers le profil de la montre (upload d'un fichier
+/// FIT Settings, cf. `writeWeight`/`FitSettingsWriter`). Distinct de la synchro
+/// de fichiers (`GarminSyncState`) : c'est un flux montant, pas descendant.
+enum WatchWeightWriteState: Equatable {
+    case idle
+    /// Demande reçue mais lien pas encore prêt (ou occupé par un download) —
+    /// sera tentée dès que possible.
+    case queued
+    case uploading
+    case sent
+    case refused(String)
+    case failed(String)
+
+    var label: String {
+        switch self {
+        case .idle: return "—"
+        case .queued: return "en attente de la montre"
+        case .uploading: return "transmission en cours…"
+        case .sent: return "poids transmis à la montre"
+        case .refused(let reason): return "poids refusé par la montre (\(reason))"
+        case .failed(let reason): return "échec de transmission (\(reason))"
+        }
+    }
+}
+
 /// Orchestre la poignée de main GFDI puis le listing du manifeste directory sur
 /// un `CommunicatorV2` déjà démarré. Une instance par lien BLE.
 final class GarminSession: ObservableObject {
@@ -92,7 +117,9 @@ final class GarminSession: ObservableObject {
     private enum MessageType {
         static let response: UInt16 = 5000
         static let downloadRequest: UInt16 = 5002
+        static let uploadRequest: UInt16 = 5003
         static let fileTransferData: UInt16 = 5004
+        static let createFile: UInt16 = 5005
         static let filter: UInt16 = 5007
         static let setFileFlag: UInt16 = 5008
         static let deviceInformation: UInt16 = 5024
@@ -139,6 +166,28 @@ final class GarminSession: ObservableObject {
     @Published private(set) var deliveredFileIndexes: Set<Int> = []
     /// État de la traversée `syncNewFiles()` — cf. `GarminSyncState`.
     @Published private(set) var syncState: GarminSyncState = .idle
+    /// État de l'écriture du poids vers la montre (cf. `writeWeight`).
+    @Published private(set) var weightWriteState: WatchWeightWriteState = .idle
+
+    /// Taille max de paquet GFDI annoncée par la montre (DEVICE_INFORMATION) —
+    /// borne la taille des morceaux d'upload (`maxPacketSize - 13`, cf. le
+    /// `take()` de gadgetbridge). 375 par défaut, comme le pont, tant que la
+    /// montre n'a rien annoncé (le fichier poids tient de toute façon en un
+    /// seul morceau).
+    private var watchMaxPacketSize: Int = 375
+
+    /// Upload de poids en cours (fichier FIT + progression). `nil` = aucun.
+    private struct WeightUpload {
+        let fileData: Data
+        let kg: Double
+        var fileIndex: UInt16?
+        var offset: Int = 0
+        var runningCrc: UInt16 = 0
+    }
+    private var weightUpload: WeightUpload?
+    /// Poids demandé mais pas encore parti (lien pas prêt / slot occupé) —
+    /// retenté à la libération du slot (`tryStartPendingWeightUpload`).
+    private var pendingWeightKg: Double?
 
     /// File d'attente de traversée, calculée une fois par `syncNewFiles()` à
     /// partir du dernier manifeste (`files`) et du journal Spool — pas re-triée
@@ -241,6 +290,15 @@ final class GarminSession: ObservableObject {
         switch originalType {
         case MessageType.downloadRequest:
             handleDownloadRequestStatus(rest)
+        case MessageType.createFile:
+            handleCreateFileStatus(rest)
+        case MessageType.uploadRequest:
+            handleUploadRequestStatus(rest)
+        case MessageType.fileTransferData:
+            // Accusé de NOTRE morceau d'upload (poids). Pendant un download,
+            // c'est nous qui accusons les morceaux de la montre (jamais l'inverse),
+            // donc ce cas ne se déclenche qu'en upload — garde sur `weightUpload`.
+            handleUploadDataStatus(rest)
         case MessageType.filter:
             handleFilterStatus(rest)
         case MessageType.setFileFlag:
@@ -288,6 +346,7 @@ final class GarminSession: ObservableObject {
         let deviceName = reader.readPascalString() ?? ""
         let deviceModel = reader.readPascalString() ?? ""
 
+        if maxPacketSize > 0 { watchMaxPacketSize = Int(maxPacketSize) }
         let swMajor = Int(softwareVersion) / 100
         let swMinor = Int(softwareVersion) % 100
         firmwareVersion = String(format: "%d.%02d", swMajor, swMinor)
@@ -481,7 +540,7 @@ final class GarminSession: ObservableObject {
     /// ~1 s après le listing). On diffère plutôt la re-list (cf.
     /// `pendingDirectoryRelisting`, rejouée à la libération du slot).
     func requestDirectoryListing() {
-        guard currentDownload == nil, downloadTarget == nil else {
+        guard currentDownload == nil, downloadTarget == nil, weightUpload == nil else {
             pendingDirectoryRelisting = true
             log.info("Re-list directory différée : un transfert occupe déjà le slot unique")
             return
@@ -568,6 +627,10 @@ final class GarminSession: ObservableObject {
             if pendingDirectoryRelisting {
                 log.info("Slot libéré — rejeu de la re-list directory différée")
                 requestDirectoryListing()
+            } else {
+                // Slot libre et pas de re-list en attente : c'est le moment
+                // d'écrire un poids resté en attente (cf. `writeWeight`).
+                tryStartPendingWeightUpload()
             }
             return
         }
@@ -1038,6 +1101,172 @@ final class GarminSession: ObservableObject {
             shift += 7
         }
         return value
+    }
+
+    // MARK: - Écriture du poids vers la montre (upload FIT Settings)
+    //
+    // Flux montant porté de gadgetbridge `FileTransferHandler.Upload` (AGPL-3.0) :
+    // CREATE_FILE → CreateFileStatus(OK, fileIndex) → UPLOAD_REQUEST →
+    // UploadRequestStatus(OK) → FILE_TRANSFER_DATA×N (CRC courante, morceaux de
+    // `maxPacketSize-13`) → FileTransferDataStatus par morceau → SYSTEM_EVENT
+    // SYNC_COMPLETE quand tout est accusé. Le fichier (FitSettingsWriter) tient en
+    // un seul morceau, mais la boucle multi-morceaux est portée fidèlement.
+    //
+    // Seul le poids est écrit : c'est le seul champ USER_PROFILE que la Venu 2 fw
+    // 19.05 honore (les champs d'objectif d'intensité sont acceptés puis ignorés,
+    // cf. CLAUDE.md). C'est la seule divergence assumée : le téléphone POUSSE ici
+    // un réglage vers la montre, là où le reste du collecteur ne fait que tirer.
+
+    /// Demande l'écriture du poids (kg) dans le profil de la montre. Idempotent
+    /// vis-à-vis d'un upload déjà en cours (remplace la demande en attente).
+    /// Démarre tout de suite si le lien est prêt et le slot libre, sinon met en
+    /// attente (`.queued`) et laisse `tryStartPendingWeightUpload` reprendre à la
+    /// libération du slot / fin de poignée de main.
+    func writeWeight(kg: Double) {
+        pendingWeightKg = kg
+        if weightUpload == nil { weightWriteState = .queued }
+        log.info("writeWeight demandé : \(kg, privacy: .public) kg")
+        tryStartPendingWeightUpload()
+    }
+
+    /// Démarre l'upload de poids en attente si les conditions sont réunies :
+    /// poignée de main terminée, aucun upload déjà en cours, et surtout aucun
+    /// download qui occupe le slot de transfert (on ne se bat jamais avec la
+    /// traversée de synchro — elle passe d'abord, l'upload suit).
+    private func tryStartPendingWeightUpload() {
+        guard let kg = pendingWeightKg else { return }
+        guard initialized else { return }
+        guard weightUpload == nil else { return }
+        guard currentDownload == nil, downloadTarget == nil else {
+            log.info("Upload poids différé : un transfert occupe le slot")
+            return
+        }
+        pendingWeightKg = nil
+        startWeightUpload(kg: kg)
+    }
+
+    private func startWeightUpload(kg: Double) {
+        let fit = FitSettingsWriter.userProfileSettings(weightKg: kg)
+        weightUpload = WeightUpload(fileData: fit, kg: kg)
+        weightWriteState = .uploading
+        log.info("Upload poids démarré : \(kg, privacy: .public) kg, fichier FIT de \(fit.count, privacy: .public) o")
+        // CREATE_FILE (5005) : taille + type de fichier SETTINGS (dataType 128,
+        // subType 2) + champs fixes + un identifiant aléatoire (comme le pont).
+        var writer = GarminByteWriter()
+        writer.writeUInt32LE(UInt32(fit.count))
+        writer.writeUInt8(128) // FileType SETTINGS dataType
+        writer.writeUInt8(2)   // FileType SETTINGS subType
+        writer.writeUInt16LE(0) // fileIndex
+        writer.writeUInt8(0)    // réservé
+        writer.writeUInt8(0)    // subtypemask
+        writer.writeUInt16LE(65535) // numbermask
+        writer.writeUInt16LE(0) // ???
+        writer.writeUInt64LE(UInt64.random(in: UInt64.min...UInt64.max))
+        send(GfdiFrame.build(messageType: MessageType.createFile, payload: writer.data), taskName: "create file (weight settings)")
+    }
+
+    private func handleCreateFileStatus(_ rest: Data) {
+        guard weightUpload != nil else { return }
+        var reader = GarminByteReader(rest)
+        guard let status = reader.readUInt8() else { return }
+        guard status == 0 else { failWeightUpload("CREATE_FILE status=\(status)"); return }
+        guard let createStatus = reader.readUInt8(), let fileIndex = reader.readUInt16LE() else {
+            failWeightUpload("CREATE_FILE réponse illisible"); return
+        }
+        // dataType, subType, fileNumber suivent — non exploités ici.
+        guard createStatus == 0 else { // CreateStatus.OK
+            refuseWeightUpload("createStatus=\(createStatus)"); return
+        }
+        weightUpload?.fileIndex = fileIndex
+        log.info("CREATE_FILE accepté : fileIndex=\(fileIndex, privacy: .public) — envoi UPLOAD_REQUEST")
+        // UPLOAD_REQUEST (5003) : fileIndex + taille + offset 0 + crcSeed 0.
+        var writer = GarminByteWriter()
+        writer.writeUInt16LE(fileIndex)
+        writer.writeUInt32LE(UInt32(weightUpload?.fileData.count ?? 0))
+        writer.writeUInt32LE(0) // dataOffset
+        writer.writeUInt16LE(0) // crcSeed
+        send(GfdiFrame.build(messageType: MessageType.uploadRequest, payload: writer.data), taskName: "upload request (weight)")
+    }
+
+    private func handleUploadRequestStatus(_ rest: Data) {
+        guard weightUpload != nil else { return }
+        var reader = GarminByteReader(rest)
+        guard let status = reader.readUInt8() else { return }
+        guard status == 0 else { failWeightUpload("UPLOAD_REQUEST status=\(status)"); return }
+        guard let uploadStatus = reader.readUInt8() else { failWeightUpload("UPLOAD_REQUEST réponse illisible"); return }
+        guard uploadStatus == 0 else { // UploadStatus.OK
+            refuseWeightUpload("uploadStatus=\(uploadStatus)"); return
+        }
+        log.info("UPLOAD_REQUEST accepté — envoi du contenu")
+        sendNextWeightChunk()
+    }
+
+    private func sendNextWeightChunk() {
+        guard var upload = weightUpload else { return }
+        let remaining = upload.fileData.count - upload.offset
+        guard remaining > 0 else { return }
+        let chunkSize = min(remaining, max(1, watchMaxPacketSize - 13))
+        let start = upload.fileData.startIndex + upload.offset
+        let chunk = upload.fileData.subdata(in: start ..< start + chunkSize)
+        let currentOffset = upload.offset
+        upload.runningCrc = Crc16.compute(chunk, initial: upload.runningCrc)
+        upload.offset += chunkSize
+        weightUpload = upload
+        // FILE_TRANSFER_DATA (5004) : flags(0) + CRC courante + offset + octets.
+        var writer = GarminByteWriter()
+        writer.writeUInt8(0)
+        writer.writeUInt16LE(upload.runningCrc)
+        writer.writeUInt32LE(UInt32(currentOffset))
+        writer.writeBytes(chunk)
+        send(GfdiFrame.build(messageType: MessageType.fileTransferData, payload: writer.data), taskName: "file transfer data (weight, offset \(currentOffset))")
+    }
+
+    private func handleUploadDataStatus(_ rest: Data) {
+        guard let upload = weightUpload else { return } // pas un upload → ignore
+        var reader = GarminByteReader(rest)
+        guard let status = reader.readUInt8() else { return }
+        guard status == 0 else { failWeightUpload("transfert status=\(status)"); return }
+        guard let transferStatus = reader.readUInt8() else { failWeightUpload("transfert réponse illisible"); return }
+        guard transferStatus == 0 else { // TransferStatus.OK
+            failWeightUpload("transferStatus=\(transferStatus)"); return
+        }
+        if upload.offset >= upload.fileData.count {
+            // Tout est accusé : SYSTEM_EVENT SYNC_COMPLETE (ordinal 0), value 0.
+            var systemEvent = GarminByteWriter()
+            systemEvent.writeUInt8(0) // GarminSystemEventType.SYNC_COMPLETE
+            systemEvent.writeUInt8(0)
+            send(GfdiFrame.build(messageType: MessageType.systemEvent, payload: systemEvent.data), taskName: "system event sync complete (weight)")
+            let kg = upload.kg
+            weightUpload = nil
+            weightWriteState = .sent
+            log.info("Poids \(kg, privacy: .public) kg transmis et accepté par la montre (SYNC_COMPLETE envoyé)")
+            weightUploadDidFinish()
+        } else {
+            sendNextWeightChunk()
+        }
+    }
+
+    private func failWeightUpload(_ reason: String) {
+        log.error("Upload poids échoué : \(reason, privacy: .public)")
+        weightUpload = nil
+        weightWriteState = .failed(reason)
+        weightUploadDidFinish()
+    }
+
+    private func refuseWeightUpload(_ reason: String) {
+        log.warning("Upload poids refusé par la montre : \(reason, privacy: .public)")
+        weightUpload = nil
+        weightWriteState = .refused(reason)
+        weightUploadDidFinish()
+    }
+
+    /// Slot de transfert libéré par la fin de l'upload : rejoue une re-list
+    /// directory différée pendant l'écriture (cf. `requestDirectoryListing`).
+    private func weightUploadDidFinish() {
+        if pendingDirectoryRelisting {
+            log.info("Slot libéré (fin upload poids) — rejeu de la re-list directory différée")
+            requestDirectoryListing()
+        }
     }
 
     // MARK: - Envoi

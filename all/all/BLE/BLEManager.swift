@@ -131,6 +131,23 @@ final class BLEManager: NSObject, ObservableObject {
     /// nouveau lien par `resetGfdiDiscoveryState`, réabonné dans
     /// `activateProtocolIfPossible`).
     private var realtimeHeartRateSubscription: AnyCancellable?
+    /// Abonnement à `GarminSession.$weightWriteState` — remonte l'état de
+    /// l'écriture du poids vers l'UI (cf. `weightWriteState` ci-dessous) et
+    /// efface la demande en attente une fois le poids transmis. Même cycle de
+    /// vie que les autres abonnements de session (annulé/reconstruit par
+    /// `resetGfdiDiscoveryState`/`activateProtocolIfPossible`).
+    private var weightWriteSubscription: AnyCancellable?
+
+    /// Poids (kg) demandé à l'écriture vers la montre mais pas encore confirmé
+    /// transmis — conservé pour être rejoué à chaque nouveau lien (retry « au
+    /// prochain lien BLE » de l'écriture auto à l'enregistrement). Effacé quand
+    /// la session publie `.sent`. La donnée elle-même n'est jamais perdue : elle
+    /// est déjà stockée côté Pulse.
+    private var pendingWatchWeightKg: Double?
+    /// État de la dernière écriture de poids vers la montre, pour l'UI (carte
+    /// Poids de l'écran Santé). Reflète l'état de la session active, ou `.queued`
+    /// quand aucune montre n'est connectée.
+    @Published private(set) var weightWriteState: WatchWeightWriteState = .idle
 
     /// Une seule instance pour la durée de vie de l'app — partagée entre les
     /// `GarminSession` successives (une par lien BLE) pour ne pas relire le
@@ -390,6 +407,29 @@ final class BLEManager: NSObject, ObservableObject {
         garminSessionStateSubscription = nil
         realtimeHeartRateSubscription?.cancel()
         realtimeHeartRateSubscription = nil
+        weightWriteSubscription?.cancel()
+        weightWriteSubscription = nil
+        // Le lien est retombé : si une écriture de poids restait en attente, la
+        // remettre en `.queued` (elle sera rejouée au prochain lien). Rien à
+        // faire si elle avait déjà été transmise (pending effacé sur `.sent`).
+        weightWriteState = pendingWatchWeightKg == nil ? .idle : .queued
+    }
+
+    // MARK: - Écriture du poids vers la montre
+
+    /// Demande l'écriture du poids (kg) dans le profil de la montre. Appelée à
+    /// l'enregistrement d'une pesée (cf. `HealthViewModel.saveWeight`) : si une
+    /// montre est connectée, l'écriture part tout de suite ; sinon la demande est
+    /// retenue et rejouée au prochain lien BLE (la donnée reste par ailleurs
+    /// stockée côté Pulse). Le poids est le seul réglage que le téléphone pousse
+    /// vers la montre — cf. `GarminSession.writeWeight`.
+    func requestWatchWeightWrite(kg: Double) {
+        pendingWatchWeightKg = kg
+        if let session = garminSession {
+            session.writeWeight(kg: kg)
+        } else {
+            weightWriteState = .queued
+        }
     }
 
     private static func savedPeripheralIdentifier() -> UUID? {
@@ -730,7 +770,22 @@ extension BLEManager: CBPeripheralDelegate {
             // nouvelle session temps réel, comme ci-dessus pour `GarminSession`.
             realtimeHeartRateSubscription = realtime.$heartRate
                 .sink { [weak self] heartRate in self?.handleRealtimeHeartRate(heartRate) }
+            // Écriture du poids vers la montre : remonte l'état à l'UI et efface
+            // la demande en attente dès qu'elle est transmise (cf.
+            // `requestWatchWeightWrite`).
+            weightWriteSubscription = session.$weightWriteState
+                .sink { [weak self] state in
+                    guard let self else { return }
+                    self.weightWriteState = state
+                    if state == .sent { self.pendingWatchWeightKg = nil }
+                }
             session.start()
+            // Rejoue une écriture de poids restée en attente d'un lien (la
+            // session la met elle-même en file jusqu'à la fin de la poignée de
+            // main / la libération du slot).
+            if let kg = pendingWatchWeightKg {
+                session.writeWeight(kg: kg)
+            }
             return
         }
         log.info("Aucune caractéristique ML connue — repli sur l'abonnement générique")

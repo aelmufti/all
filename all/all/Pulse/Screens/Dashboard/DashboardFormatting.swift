@@ -57,6 +57,22 @@ func dashboardLongDate(_ calendarDay: String) -> String {
     return dashboardDayMonthFormatter.string(from: date)
 }
 
+private let dashboardShortDayMonthFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "d MMM"
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    formatter.locale = Locale(identifier: "fr_FR")
+    return formatter
+}()
+
+/// Format compact « d MMM » (ex. « 3 oct. ») — annotation sur un point survolé
+/// quand aucune tuile figrow visible ne correspond au graphe (poids, sommeil) :
+/// `dashboardShortDate` (`d/MM`) est trop cryptique pour une bulle isolée,
+/// `dashboardLongDate` inclut un jour de semaine qui n'apporte rien ici.
+func dashboardShortDayMonth(_ date: Date) -> String {
+    dashboardShortDayMonthFormatter.string(from: date)
+}
+
 private let dashboardRecordIsoFormatter: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

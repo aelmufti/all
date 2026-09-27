@@ -13,16 +13,24 @@ import SwiftUI
 struct DashboardHealthSection: View {
     let viewModel: DashboardViewModel
 
+    /// Point survolé sur le graphe FC repos / respiration — remonté ici (pas
+    /// dans la carte) car c'est la section qui calcule l'override figrow (elle
+    /// seule connaît l'index de tuile ET la sous-vue active). Le poids (tuile 4)
+    /// n'est jamais visible en figrow (`prefix(3)`) : `DashboardWeightCard` gère
+    /// son survol en interne, en annotation sur le graphe.
+    @State private var restingHover: DashboardHealthPoint?
+    @State private var respirationHover: DashboardHealthPoint?
+
     var body: some View {
         if let health = viewModel.health {
             VStack(alignment: .leading, spacing: PulseSpacing.lg) {
-                DashboardFigureRow(tiles: figures(for: health))
+                DashboardFigureRow(tiles: figures(for: health), highlights: figureHighlight)
 
                 switch viewModel.subView {
                 case .restingHr:
-                    DashboardRestingHrCard(health: health)
+                    DashboardRestingHrCard(health: health, hover: $restingHover)
                 case .respiration:
-                    DashboardRespirationCard(health: health)
+                    DashboardRespirationCard(health: health, hover: $respirationHover)
                 case .spo2:
                     DashboardSpo2Card(health: health)
                 case .weight:
@@ -30,12 +38,33 @@ struct DashboardHealthSection: View {
                 case .correlations:
                     DashboardCorrelationsCard(correlations: health.correlations)
                 default:
-                    DashboardRestingHrCard(health: health)
+                    DashboardRestingHrCard(health: health, hover: $restingHover)
                 }
+            }
+            // Le point survolé n'a de sens que pour la sous-vue courante : on le
+            // purge au changement de sous-vue (sinon une FC repos pointée
+            // resterait affichée en figrow sous l'onglet respiration).
+            .onChange(of: viewModel.subView) { _, _ in
+                restingHover = nil
+                respirationHover = nil
             }
         } else {
             DashboardSkeletonCard()
         }
+    }
+
+    /// Override de tuile figrow au survol — FC repos (tuile 0) ou respiration
+    /// (tuile 1), seulement pour la sous-vue actuellement affichée.
+    private var figureHighlight: [Int: String] {
+        switch viewModel.subView {
+        case .restingHr:
+            if let h = restingHover { return [0: String(Int(h.value.rounded()))] }
+        case .respiration:
+            if let h = respirationHover { return [1: String(format: "%.1f", h.value)] }
+        default:
+            break
+        }
+        return [:]
     }
 
     private func figures(for health: DashboardHealthTab) -> [DashboardFigure] {
@@ -52,6 +81,12 @@ struct DashboardHealthSection: View {
 
 private struct DashboardRestingHrCard: View {
     let health: DashboardHealthTab
+    @Binding var hover: DashboardHealthPoint?
+
+    /// Position (temporelle) du doigt — `chartXSelection` renvoie une date
+    /// continue, recalée sur le point le plus proche (miroir de
+    /// `SampleLineChart`, écran Santé).
+    @State private var selectedDate: Date?
 
     var body: some View {
         PulseCard {
@@ -67,19 +102,48 @@ private struct DashboardRestingHrCard: View {
                     .font(PulseFont.body)
                     .foregroundStyle(Color.pulseTextSecondary)
             } else {
-                Chart(health.restingSeries) { point in
-                    LineMark(
-                        x: .value("Date", dashboardDate(from: point.date) ?? Date()),
-                        y: .value("bpm", point.value)
-                    )
-                    .foregroundStyle(DashboardMetricColor.heartRate)
-                    .interpolationMethod(.monotone)
+                Chart {
+                    ForEach(health.restingSeries) { point in
+                        LineMark(
+                            x: .value("Date", dashboardDate(from: point.date) ?? Date()),
+                            y: .value("bpm", point.value)
+                        )
+                        .foregroundStyle(DashboardMetricColor.heartRate)
+                        .interpolationMethod(.monotone)
+                    }
+                    // Repère du point survolé : trait vertical + pastille pleine.
+                    if let sel = selectedPoint, let date = dashboardDate(from: sel.date) {
+                        RuleMark(x: .value("Date", date))
+                            .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                        PointMark(x: .value("Date", date), y: .value("bpm", sel.value))
+                            .foregroundStyle(DashboardMetricColor.heartRate)
+                            .symbolSize(80)
+                    }
                 }
                 .frame(height: 150)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 5)) { AxisValueLabel(format: .dateTime.day().month()) }
                 }
+                .chartXSelection(value: $selectedDate)
+                .onChange(of: selectedDate) { _, newValue in
+                    hover = newValue.flatMap(nearestRestingPoint)
+                }
             }
+        }
+    }
+
+    private var selectedPoint: DashboardHealthPoint? {
+        guard let selectedDate else { return nil }
+        return nearestRestingPoint(to: selectedDate)
+    }
+
+    private func nearestRestingPoint(to date: Date) -> DashboardHealthPoint? {
+        let t = date.timeIntervalSince1970
+        return health.restingSeries.min {
+            let a = dashboardDate(from: $0.date)?.timeIntervalSince1970 ?? 0
+            let b = dashboardDate(from: $1.date)?.timeIntervalSince1970 ?? 0
+            return abs(a - t) < abs(b - t)
         }
     }
 
@@ -92,6 +156,9 @@ private struct DashboardRestingHrCard: View {
 
 private struct DashboardRespirationCard: View {
     let health: DashboardHealthTab
+    @Binding var hover: DashboardHealthPoint?
+
+    @State private var selectedDate: Date?
 
     var body: some View {
         PulseCard {
@@ -120,10 +187,22 @@ private struct DashboardRespirationCard: View {
                         .foregroundStyle(Color.pulseAccent)
                         .interpolationMethod(.monotone)
                     }
+                    if let sel = selectedPoint, let date = dashboardDate(from: sel.date) {
+                        RuleMark(x: .value("Date", date))
+                            .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                        PointMark(x: .value("Date", date), y: .value("resp/min", sel.value))
+                            .foregroundStyle(Color.pulseAccent)
+                            .symbolSize(80)
+                    }
                 }
                 .frame(height: 150)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 5)) { AxisValueLabel(format: .dateTime.day().month()) }
+                }
+                .chartXSelection(value: $selectedDate)
+                .onChange(of: selectedDate) { _, newValue in
+                    hover = newValue.flatMap(nearestRespirationPoint)
                 }
                 if let band = health.respirationBand {
                     Text("habituel entre \(String(format: "%.0f", band.lo)) et \(String(format: "%.0f", band.hi)) respirations / min")
@@ -131,6 +210,20 @@ private struct DashboardRespirationCard: View {
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
+        }
+    }
+
+    private var selectedPoint: DashboardHealthPoint? {
+        guard let selectedDate else { return nil }
+        return nearestRespirationPoint(to: selectedDate)
+    }
+
+    private func nearestRespirationPoint(to date: Date) -> DashboardHealthPoint? {
+        let t = date.timeIntervalSince1970
+        return health.respirationSeries.min {
+            let a = dashboardDate(from: $0.date)?.timeIntervalSince1970 ?? 0
+            let b = dashboardDate(from: $1.date)?.timeIntervalSince1970 ?? 0
+            return abs(a - t) < abs(b - t)
         }
     }
 }
@@ -168,28 +261,50 @@ private struct DashboardSpo2Card: View {
 private struct DashboardWeightCard: View {
     let health: DashboardHealthTab
 
+    /// Pesée survolée — le poids (tuile 4) n'est jamais visible en figrow
+    /// (`prefix(3)` ne montre que les 3 premières tuiles) : contrairement à FC
+    /// repos/respiration, le survol se montre en annotation sur le point plutôt
+    /// que par override de tuile.
+    @State private var selectedDate: Date?
+
     var body: some View {
         PulseCard {
             if health.weightSeries.count > 1 {
                 HStack {
                     DashboardCardHeader("Poids")
                     Spacer()
-                    Text(deltaLabel)
+                    // Le poids (tuile 4) n'étant pas dans la figrow visible, la
+                    // valeur survolée s'affiche ici, en tête de carte, plutôt
+                    // qu'en annotation SUR le point : une annotation débordait du
+                    // tracé près des bords et forçait Swift Charts à recomposer
+                    // (le graphe « sautait » et le survol tremblait).
+                    Text(hoverLabel ?? deltaLabel)
                         .font(PulseFont.metricLabel)
-                        .foregroundStyle(Color.pulseTextSecondary)
+                        .foregroundStyle(hoverLabel != nil ? Color.pulseTextPrimary : Color.pulseTextSecondary)
                 }
-                Chart(health.weightSeries) { point in
-                    LineMark(
-                        x: .value("Date", dashboardDate(from: point.date) ?? Date()),
-                        y: .value("kg", point.kg)
-                    )
-                    .foregroundStyle(DashboardMetricColor.sleep)
-                    .interpolationMethod(.monotone)
+                Chart {
+                    ForEach(health.weightSeries) { point in
+                        LineMark(
+                            x: .value("Date", dashboardDate(from: point.date) ?? Date()),
+                            y: .value("kg", point.kg)
+                        )
+                        .foregroundStyle(DashboardMetricColor.sleep)
+                        .interpolationMethod(.monotone)
+                    }
+                    if let sel = selectedPoint, let date = dashboardDate(from: sel.date) {
+                        RuleMark(x: .value("Date", date))
+                            .foregroundStyle(Color.pulseTextSecondary.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                        PointMark(x: .value("Date", date), y: .value("kg", sel.kg))
+                            .foregroundStyle(DashboardMetricColor.sleep)
+                            .symbolSize(80)
+                    }
                 }
                 .frame(height: 150)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 5)) { AxisValueLabel(format: .dateTime.day().month()) }
                 }
+                .chartXSelection(value: $selectedDate)
                 if let first = health.weightSeries.first, let last = health.weightSeries.last {
                     Text("\(String(format: "%.1f", first.kg)) kg → \(String(format: "%.1f", last.kg)) kg · \(health.weightSeries.count) pesées")
                         .font(.footnote)
@@ -201,6 +316,27 @@ private struct DashboardWeightCard: View {
                     .font(PulseFont.body)
                     .foregroundStyle(Color.pulseTextSecondary)
             }
+        }
+    }
+
+    private var selectedPoint: DashboardWeightPoint? {
+        guard let selectedDate else { return nil }
+        return nearestWeightPoint(to: selectedDate)
+    }
+
+    /// Lecture du point survolé, montrée en tête de carte (pas d'annotation
+    /// sur le tracé — cf. commentaire dans l'en-tête).
+    private var hoverLabel: String? {
+        guard let sel = selectedPoint, let date = dashboardDate(from: sel.date) else { return nil }
+        return "\(String(format: "%.1f", sel.kg)) kg · \(dashboardShortDayMonth(date))"
+    }
+
+    private func nearestWeightPoint(to date: Date) -> DashboardWeightPoint? {
+        let t = date.timeIntervalSince1970
+        return health.weightSeries.min {
+            let a = dashboardDate(from: $0.date)?.timeIntervalSince1970 ?? 0
+            let b = dashboardDate(from: $1.date)?.timeIntervalSince1970 ?? 0
+            return abs(a - t) < abs(b - t)
         }
     }
 

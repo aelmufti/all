@@ -230,6 +230,9 @@ private enum HomeNumberFormat {
 
 private struct NowSection: View {
     let viewModel: HomeViewModel
+    /// Valeur survolée sur le mini-graphe (bpm) — écrase `shownHr` tant que le
+    /// doigt reste sur la courbe, cf. `HeartRateSparkline`.
+    @State private var hover: Int?
 
     var body: some View {
         // SCSS `.now { padding:26px 22px 24px; gap:22px; }`.
@@ -245,8 +248,10 @@ private struct NowSection: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
-                HeartRateSparkline(samples: viewModel.day?.hr ?? [], stale: viewModel.staleLabel != nil)
-                    .frame(maxWidth: .infinity)
+                HeartRateSparkline(
+                    samples: viewModel.day?.hr ?? [], stale: viewModel.staleLabel != nil, hover: $hover
+                )
+                .frame(maxWidth: .infinity)
             }
 
             // `.now-head`/`.direct` : `margin-top:-8px` sur un `gap:22px` ⇒
@@ -286,9 +291,17 @@ private struct NowSection: View {
 
     private var bpmRow: some View {
         HStack(spacing: 11) {
-            Text(viewModel.shownHr.map(String.init) ?? "—")
+            // `hover` (survol du mini-graphe) prime sur `shownHr` tant que le
+            // doigt est posé sur la courbe — revient à `shownHr` au relâcher.
+            Text(hover.map(String.init) ?? (viewModel.shownHr.map(String.init) ?? "—"))
                 .font(.system(size: 60, weight: .semibold, design: .monospaced))
                 .foregroundStyle(bpmColor)
+                .contentTransition(.numericText())
+                // Largeur réservée pour 3 chiffres (mono 60pt ≈ 36pt/chiffre) :
+                // sans ça, un passage 2→3 chiffres de la FC en direct élargit
+                // cette colonne, rétrécit le mini-graphe voisin et le fait
+                // « bouger » sous le doigt pendant le survol.
+                .frame(minWidth: 108, alignment: .leading)
             if isLiveBeating {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 22))
@@ -419,6 +432,12 @@ private struct NowSection: View {
 private struct HeartRateSparkline: View {
     let samples: [HomeSample]
     let stale: Bool
+    /// bpm survolé, remonté à `NowSection` pour écraser `shownHr` en direct.
+    @Binding var hover: Int?
+
+    /// Index (dans `points`) du dernier point touché — sert uniquement au
+    /// dessin du marqueur local, `hover` porte la valeur vers l'appelant.
+    @State private var selectedIndex: Int?
 
     private var points: [HomeSample] { Array(samples.suffix(60)) }
 
@@ -437,25 +456,55 @@ private struct HeartRateSparkline: View {
                         y: geo.size.height - CGFloat((sample.value - minValue) / span) * geo.size.height)
                 }
 
-                Path { path in
-                    guard let first = coords.first, let last = coords.last else { return }
-                    path.move(to: CGPoint(x: first.x, y: geo.size.height))
-                    for point in coords { path.addLine(to: point) }
-                    path.addLine(to: CGPoint(x: last.x, y: geo.size.height))
-                    path.closeSubpath()
-                }
-                .fill(color.opacity(0.1))
+                ZStack {
+                    Path { path in
+                        guard let first = coords.first, let last = coords.last else { return }
+                        path.move(to: CGPoint(x: first.x, y: geo.size.height))
+                        for point in coords { path.addLine(to: point) }
+                        path.addLine(to: CGPoint(x: last.x, y: geo.size.height))
+                        path.closeSubpath()
+                    }
+                    .fill(color.opacity(0.1))
 
-                Path { path in
-                    guard let first = coords.first else { return }
-                    path.move(to: first)
-                    for point in coords.dropFirst() { path.addLine(to: point) }
-                }
-                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    Path { path in
+                        guard let first = coords.first else { return }
+                        path.move(to: first)
+                        for point in coords.dropFirst() { path.addLine(to: point) }
+                    }
+                    .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
 
-                if let last = coords.last {
-                    Circle().fill(color).frame(width: 7, height: 7).position(last)
+                    if let last = coords.last {
+                        Circle().fill(color).frame(width: 7, height: 7).position(last)
+                    }
+
+                    // Marqueur de survol : trait vertical + point plein sur
+                    // l'échantillon touché (miroir du `RuleMark`/`PointMark`
+                    // de `SampleLineChart`, en dessiné-main ici).
+                    if let selectedIndex, coords.indices.contains(selectedIndex) {
+                        let point = coords[selectedIndex]
+                        Path { path in
+                            path.move(to: CGPoint(x: point.x, y: 0))
+                            path.addLine(to: CGPoint(x: point.x, y: geo.size.height))
+                        }
+                        .stroke(Color.pulseTextSecondary.opacity(0.4), lineWidth: 1)
+                        Circle().fill(color).frame(width: 9, height: 9).position(point)
+                    }
                 }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let fraction = max(0, min(1, value.location.x / max(geo.size.width, 1)))
+                            let index = Int((fraction * CGFloat(points.count - 1)).rounded())
+                            let clamped = max(0, min(points.count - 1, index))
+                            selectedIndex = clamped
+                            hover = Int(points[clamped].value.rounded())
+                        }
+                        .onEnded { _ in
+                            selectedIndex = nil
+                            hover = nil
+                        }
+                )
             }
             .frame(height: 48)
             .opacity(stale ? 0.45 : 1)
