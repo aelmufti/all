@@ -88,8 +88,12 @@ Points d'architecture actés (détail dans CADRAGE) :
 - **Archivage différé** après accusé Pulse — seule divergence de contrat vs pont Linux.
 - Risque rédhibitoire = **BLE arrière-plan iOS** (iOS ne laisse pas régler le
   supervision timeout, contrairement au LE Connection Update du pont) → à mesurer tôt.
-- Portage Swift du **sous-ensemble minimal** ; **pas de swift-protobuf** (réponses
-  protobuf codées en dur, cf. `garmin-bridge/.../ProtobufAck.java`).
+- Portage Swift du **sous-ensemble minimal**. Réponses protobuf **fixes** codées
+  en dur (accusés, cf. `garmin-bridge/.../ProtobufAck.java`). Réponses
+  **dynamiques** : **swift-protobuf** (SPM), types générés depuis un `.proto`
+  minimal (`all/proto/calendar.proto` → `all/GFDI/calendar.pb.swift`, via
+  `protoc --swift_out`). *Décision « pas de swift-protobuf » révisée le 2026-09-27
+  pour la synchro calendrier téléphone→montre (service 1) — cf. `CalendarSync.swift`.*
 
 ## Invariants protocole — ne pas réapprendre (hérités du pont)
 

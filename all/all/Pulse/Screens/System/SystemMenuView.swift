@@ -3,12 +3,12 @@
 //  all (bridge-connect)
 //
 //  Vue « Montre » — section collecteur BLE iOS (Diagnostic + Temps réel),
-//  propre à bridge-connect (sans équivalent web). Elle est désormais présentée
-//  depuis l'écran **Paramètres** (`SettingsView`, section « Système »), qui
-//  regroupe tout le secondaire iPhone (Statut + Montre) : la roue crantée de
-//  l'Accueil ouvre directement Paramètres. L'ancien menu intermédiaire
-//  (`SystemMenuView`) et l'entrée « Rapport SpO2 » (qui reste accessible depuis
-//  l'écran Santé) ont été retirés.
+//  propre à bridge-connect (sans équivalent web). Elle est présentée depuis
+//  l'écran **Paramètres** (`SettingsView`) sous le mode « iPhone (BLE) »
+//  uniquement (« Collecteur (Montre) ») : c'est le mode où cette app collecte.
+//  L'ancien menu intermédiaire (`SystemMenuView`) et la section « Système »
+//  fourre-tout (qui réunissait Statut + Montre) ont été retirés — chaque entrée
+//  vit désormais sous son mode de connectivité (Statut du pont sous « bridge »).
 //
 
 import SwiftUI

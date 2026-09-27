@@ -28,6 +28,16 @@ import Security
 /// valeur par défaut réelle.
 enum PulseConfig {
     private static let baseURLKey = "pulse.baseURL"
+    private static let calendarSyncKey = "calendar.syncEnabled"
+
+    /// Synchronisation du calendrier du téléphone vers la montre (cf.
+    /// `CalendarSync.swift`). Désactivée par défaut, comme `PREF_SYNC_CALENDAR`
+    /// côté pont : tant qu'elle est off, la montre reçoit une liste vide. Simple
+    /// préférence (pas un secret) → `UserDefaults`, comme `baseURL`.
+    static var calendarSyncEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: calendarSyncKey) }
+        set { UserDefaults.standard.set(newValue, forKey: calendarSyncKey) }
+    }
 
     /// URL de base de Pulse (ex. `https://pulse.<tailnet>.ts.net`).
     /// `nil` tant qu'elle n'a pas été renseignée.

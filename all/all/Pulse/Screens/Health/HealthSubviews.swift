@@ -26,7 +26,10 @@ struct HealthDayNavigator: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            HStack(spacing: PulseSpacing.md) {
+            // Titre aligné en haut (`.top`) : la pastille de date fait 40pt de
+            // haut ; en `.center` le titre était centré dans cette ligne et
+            // retombait plus bas que sur les écrans sans pastille.
+            HStack(alignment: .top, spacing: PulseSpacing.md) {
                 Text("Santé")
                     .font(.system(size: 24, weight: .semibold))
                     .tracking(-0.2)

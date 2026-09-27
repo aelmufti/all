@@ -14,6 +14,7 @@ import SwiftUI
 struct BLEDiagnosticView: View {
     @ObservedObject private var ble = BLEManager.shared
     @State private var ingestToken = ""
+    @State private var calendarSyncEnabled = PulseConfig.calendarSyncEnabled
 
     var body: some View {
         NavigationStack {
@@ -41,6 +42,27 @@ struct BLEDiagnosticView: View {
                         .foregroundStyle(.secondary)
                 }
                 .onAppear { ingestToken = PulseConfig.ingestToken ?? "" }
+                Section("Calendrier") {
+                    Toggle("Synchroniser vers la montre", isOn: $calendarSyncEnabled)
+                        .onChange(of: calendarSyncEnabled) { _, isOn in
+                            PulseConfig.calendarSyncEnabled = isOn
+                            // Déclenche l'invite d'accès système à l'activation ;
+                            // si l'utilisateur refuse, on remet le toggle à off.
+                            if isOn {
+                                EventKitCalendarSource.shared.requestAccess { granted in
+                                    DispatchQueue.main.async {
+                                        if !granted {
+                                            calendarSyncEnabled = false
+                                            PulseConfig.calendarSyncEnabled = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    Text("La montre récupère les événements à venir pendant qu'elle est connectée et l'app ouverte. Accès en lecture seule au calendrier iOS.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 // Liste de scan masquée dès qu'un lien est établi ou en cours de
                 // revalidation : une fois la montre connectée, la trentaine de
                 // périphériques BLE alentour n'est que du bruit (demande

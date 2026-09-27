@@ -34,6 +34,7 @@ final class DashboardViewModel {
     private(set) var sleepDebt: DashboardSleepDebt?
     private(set) var sleepInsights: DashboardSleepInsights?
     private(set) var sleepRegularity: DashboardSleepRegularity?
+    private(set) var sleepRecommendation: DashboardSleepRecommendation?
     private(set) var wellnessDays: [DashboardWellnessDayRow] = []
 
     private let client: PulseAPIClient
@@ -70,8 +71,14 @@ final class DashboardViewModel {
         Task { await load() }
     }
 
+    /// Fixe le domaine actif et réinitialise sa sous-vue par défaut — appelé
+    /// à l'apparition de `DashboardDomainDetailView` (poussé depuis l'aperçu).
+    /// Toujours réinitialiser `subView`, y compris quand `tab` ne change pas
+    /// en apparence (retour sur le même domaine) : sans ça, une `subView`
+    /// laissée par un AUTRE domaine resterait sélectionnée alors qu'elle ne
+    /// correspond à aucune sous-vue valide de celui-ci (l'ancien early-return
+    /// `guard tab != self.tab` ne protégeait que le cas où `tab` changeait).
     func selectTab(_ tab: DashboardTab) {
-        guard tab != self.tab else { return }
         self.tab = tab
         subView = dashboardSubViews(for: tab).first ?? subView
     }
@@ -95,6 +102,11 @@ final class DashboardViewModel {
                 "api/wellness/days",
                 query: ["limit": days, "days": days, "bodyBattery": "0"]
             )
+            // Reco d'heure de coucher : fetch **non bloquant** — c'est un ajout
+            // récent, un serveur Pulse pas encore à jour renvoie 404 ; on laisse
+            // alors la carte disparaître plutôt que de faire tomber tout l'écran.
+            async let sleepRecommendationResult: DashboardSleepRecommendation? =
+                try? await client.get("api/stats/sleep-recommendation", query: daysQuery)
 
             let (t, h, n, sd, si, sr, wd) = try await (
                 trainingResult, healthResult, nutritionResult,
@@ -106,6 +118,7 @@ final class DashboardViewModel {
             sleepDebt = sd
             sleepInsights = si
             sleepRegularity = sr
+            sleepRecommendation = await sleepRecommendationResult
             wellnessDays = wd
             state = .loaded
         } catch {

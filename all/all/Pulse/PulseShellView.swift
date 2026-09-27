@@ -25,13 +25,16 @@
 
 import SwiftUI
 
-/// Les 6 onglets primaires, dans l'ordre exact de la barre web.
+/// Les 6 onglets primaires. Écart assumé vs la barre web : l'onglet
+/// « Programme » cède sa place à un onglet **Sommeil** dédié (l'écran Programme
+/// est relégué dans Paramètres — c'est une fonction de configuration, pas un
+/// suivi quotidien). Les cinq autres suivent l'ordre web.
 enum PulseTab: String, CaseIterable, Identifiable {
     case accueil
     case activites
     case sante
     case nutrition
-    case programme
+    case sommeil
     case statistiques
 
     var id: String { rawValue }
@@ -42,20 +45,21 @@ enum PulseTab: String, CaseIterable, Identifiable {
         case .activites: return "Activités"
         case .sante: return "Santé"
         case .nutrition: return "Nutrition"
-        case .programme: return "Programme"
+        case .sommeil: return "Sommeil"
         case .statistiques: return "Stats"
         }
     }
 
     /// SF Symbol au plus proche de l'icône Material du web
-    /// (schedule · directions_run · favorite · restaurant · calendar_month · bar_chart).
+    /// (schedule · directions_run · favorite · restaurant · … · bar_chart) ;
+    /// le Sommeil, propre à l'app, prend `bed.double.fill`.
     var icon: String {
         switch self {
         case .accueil: return "clock"
         case .activites: return "figure.run"
         case .sante: return "heart.fill"
         case .nutrition: return "fork.knife"
-        case .programme: return "calendar"
+        case .sommeil: return "bed.double.fill"
         case .statistiques: return "chart.bar.fill"
         }
     }
@@ -107,7 +111,7 @@ struct PulseShellView: View {
         case .activites: ActivitiesView()
         case .sante: HealthView()
         case .nutrition: NutritionView(addTrigger: nutritionAddTrigger)
-        case .programme: ProgrammeView()
+        case .sommeil: SommeilView()
         case .statistiques: DashboardView()
         }
     }
@@ -140,6 +144,13 @@ private struct NutritionFab: View {
 struct PulseTabBar: View {
     @Binding var selection: PulseTab
 
+    /// Hauteur du bandeau de boutons (hors safe-area du bas, que le fond couvre
+    /// via `ignoresSafeArea`). Exposée pour que chaque `ScrollView` d'écran
+    /// puisse réserver cette hauteur — cf. `pulseTabBarClearance()`.
+    static let barHeight: CGFloat = 54
+    static let topPadding: CGFloat = 6
+    static var contentHeight: CGFloat { barHeight + topPadding }
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(PulseTab.allCases) { tab in
@@ -150,8 +161,8 @@ struct PulseTabBar: View {
                 )
             }
         }
-        .frame(height: 54)
-        .padding(.top, 6)
+        .frame(height: Self.barHeight)
+        .padding(.top, Self.topPadding)
         .background(
             Color.pulseSurface
                 .overlay(alignment: .top) {
@@ -192,6 +203,25 @@ struct PulseTabBar: View {
             configuration.label
                 .scaleEffect(configuration.isPressed ? 0.9 : 1)
                 .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+        }
+    }
+}
+
+// MARK: - Dégagement de la barre d'onglets
+//
+// La barre d'onglets vit en `safeAreaInset(.bottom)` sur le ZStack de la
+// coquille, **hors** des `NavigationStack` de chaque écran. Or un
+// `NavigationStack` **ne relaie pas** à son `ScrollView` l'inset de safe-area
+// ajouté par un ancêtre situé au-dessus de lui : le contenu défilé passe donc
+// sous la barre en fin de course (vérifié au simulateur). On réserve la
+// hauteur de la barre **à l'intérieur** de la pile, directement sur le
+// `ScrollView`, où l'inset est bien pris en compte.
+extension View {
+    /// À poser sur le `ScrollView` racine d'un écran (dans son `NavigationStack`)
+    /// pour que sa dernière ligne dégage la barre d'onglets de la coquille.
+    func pulseTabBarClearance() -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: PulseTabBar.contentHeight)
         }
     }
 }

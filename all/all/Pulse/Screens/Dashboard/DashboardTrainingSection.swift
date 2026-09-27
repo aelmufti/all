@@ -230,19 +230,19 @@ private struct DashboardRecordsCard: View {
             DashboardCardHeader("Records de la période")
             VStack(spacing: 0) {
                 if let r = records.longestSession {
-                    DashboardRecordRow(name: "Séance la plus longue", value: dashboardFormatHM(Int(r.value)), caption: r.date.map(dashboardLongDate))
+                    DashboardRecordRow(name: "Séance la plus longue", value: dashboardFormatHM(Int(r.value)), caption: r.date.map(dashboardRecordDate))
                 }
                 if let r = records.longestDistance {
-                    DashboardRecordRow(name: "Plus longue sortie", value: String(format: "%.1f km", r.value / 1000), caption: r.date.map(dashboardLongDate))
+                    DashboardRecordRow(name: "Plus longue sortie", value: String(format: "%.1f km", r.value / 1000), caption: r.date.map(dashboardRecordDate))
                 }
                 if let r = records.bestPace {
-                    DashboardRecordRow(name: "Meilleure allure", value: dashboardFormatPace(secPerKm: r.value), caption: r.date.map(dashboardLongDate))
+                    DashboardRecordRow(name: "Meilleure allure", value: dashboardFormatPace(secPerKm: r.value), caption: r.date.map(dashboardRecordDate))
                 }
                 if let r = records.heaviestWeek {
                     DashboardRecordRow(name: "Semaine la plus chargée", value: dashboardFormatHM(Int(r.value)), caption: r.label)
                 }
                 if let r = records.maxHr {
-                    DashboardRecordRow(name: "FC max relevée", value: "\(Int(r.value)) bpm", caption: r.date.map(dashboardLongDate))
+                    DashboardRecordRow(name: "FC max relevée", value: "\(Int(r.value)) bpm", caption: r.date.map(dashboardRecordDate))
                 }
                 if records.longestSession == nil && records.longestDistance == nil && records.bestPace == nil
                     && records.heaviestWeek == nil && records.maxHr == nil {

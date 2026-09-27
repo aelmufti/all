@@ -443,3 +443,101 @@ premier-plan).
 - Aucun commit (CLAUDE.md : committer seulement sur demande). Delta non commité :
   scaffold + BLE/ + GFDI/ + Spool/ + Pulse*/ + tests. `all/build/` est un artefact,
   à ne pas committer.
+
+## 2026-09-27 — Synchro calendrier téléphone → montre (implémentée, non testée device)
+
+Besoin utilisateur : « synchroniser le calendrier du téléphone sur la montre ».
+Découverte clé : **la montre *tire*** (elle émet un `CalendarServiceRequest` protobuf,
+service 1 du message `Smart`, pendant une session GFDI) — pas de push. Le code avait
+déjà un stub « OK / zéro événement » (`cannedProtobufResponse` case 1) hérité de
+`ProtobufAck`. Remplacé par une vraie réponse.
+
+Décisions utilisateur : **coder maintenant** (devance l'ordre §8, assumé) + **adopter
+swift-protobuf** (⇒ décision « pas de swift-protobuf » du CLAUDE.md **révisée**, l. 91).
+Réseau autorisé explicitement pour : `brew install protobuf swift-protobuf` + package SPM.
+
+Livré :
+- `all/proto/calendar.proto` (sous-ensemble minimal, numéros de champ = upstream) →
+  `all/GFDI/calendar.pb.swift` (généré, `option swift_prefix = GCal`).
+- Package SPM **SwiftProtobuf 1.38.1** ajouté au `.pbxproj` (targets `all` + `allTests`)
+  — chirurgie manuelle (objectVersion 77, groupes synchronisés).
+- `all/GFDI/CalendarSync.swift` : `CalendarResponder` (pur, testé) + `EventKitCalendarSource`
+  (EventKit, `.shared`). Filtre fenêtre/all-day/plafond `maxEvents*2` + troncatures = portage
+  Gadgetbridge. **Dates en secondes Unix** (pas epoch Garmin).
+- Câblage `GarminSession.handleProtobufRequest` (service 1 + inner 1 → `calendarResponse`).
+- Toggle `PulseConfig.calendarSyncEnabled` (défaut off) + UI section « Calendrier »
+  dans `BLEDiagnosticView` (invite EventKit à l'activation). `Info.plist` :
+  `NSCalendarsFullAccessUsageDescription`.
+- Tests `allTests/CalendarSyncTests.swift` (9, verts) + `GarminProtocolTests` toujours verts.
+  Build simulateur **OK**.
+
+Divergence iOS assumée (documentée dans `CalendarSync.swift`) : all-day **sans** décalage
+UTC→local (EventKit donne déjà minuit local, contrairement à Android). À revoir si la montre
+affiche les all-day décalés du fuseau après test device.
+
+### Prochaine étape — exige le matériel (Venu 2 + iPhone réel)
+- Déployer sur device, activer le toggle (accorder l'accès calendrier), connecter la montre,
+  vérifier que les événements remontent (log `CalendarService : fenêtre …` + affichage montre).
+- Rappel caveat premier-plan : la montre ne récupère le calendrier que l'app ouverte + connectée.
+
+### Non fait
+- Aucun commit (delta calendrier non commité). `all/build/` = artefact, ne pas committer.
+
+### 2026-09-27 (suite) — Test device RÉUSSI + confidentialité logs
+
+**Validé de bout en bout** sur Venu 2 fw 19.05 + iPhone (iOS 26.7) : la montre demande,
+on répond depuis EventKit, l'événement s'affiche dans le glance Agenda.
+
+Découverte terrain (déclencheur) : la montre **ne demande le calendrier qu'à l'ouverture
+du glance/widget « Agenda »** sur la montre — purement réactif, rien au handshake.
+La requête observée (`PROTOBUF_REQUEST service=1`) porte une fenêtre = **prochaines 24 h
+seulement**, `max_events=16`, `include_all_day=1`. Donc pour tester : avoir un événement
+**dans les 24 h à venir**, puis rouvrir le glance. Séquence confirmée dans les logs :
+`service=27` (auth) → au glance : `service=1` → `CalendarService : … source=1, envoyés=1`.
+(Aussi vu `service=2` = http_service : la montre fait tirer l'éphéméride GPS via le
+companion — non traité, sans rapport.)
+
+Confidentialité : à la demande de l'utilisateur, **les titres/lieux ne sont jamais
+journalisés en clair** — le hexdump de la réponse calendrier (service 1) est masqué
+(`GarminSession` l. ~938), les diagnostics ne logguent que des **compteurs**
+(`source=`/`envoyés=`). Les niveaux de log montés en `.notice` pour le debug ont été
+**remis en `.info`** ; le masquage reste.
+
+⚠️ Le build **installé sur le device** pendant le debug avait les logs en `.notice` :
+reconstruire/réinstaller avant toute livraison pour repartir de `.info`.
+
+macOS 27 : le `log` CLI **ne streame pas** un iPhone connecté (pas de `--device`) et
+`devicectl` n'a pas de sous-commande console → lecture des logs device via **Console.app**
+(penser « Action → Inclure les messages d'information » pour voir les `.info`).
+
+### 2026-09-27 (suite) — Reco heure de coucher + refonte navigation
+
+**Fait (compile OK des deux côtés ; PAS encore testé à l'exécution).**
+
+Nouvelle fonctionnalité « à quelle heure te coucher pour aller un peu mieux » :
+- **Serveur Pulse** (`custom-connect/server/src/stats/stats.controller.ts`) : nouvel
+  endpoint `GET /api/stats/sleep-recommendation?days=N`. Logique = heure de lever
+  habituelle − (durée cible + éveil nocturne habituel), à heure de lever constante.
+  Durée cible = objectif 7 h par défaut ; relevée vers la tranche de durée au plus
+  faible stress du lendemain **si** lien significatif (mêmes tranches `SLEEP_BUCKETS`
+  et seuil `|t|>2` que `sleep-insights`). Renvoie `status:'insufficient'` sous 3 nuits.
+- **App** : modèle `DashboardSleepRecommendation` (DashboardModels), fetch ajouté au
+  `load()` parallèle de `DashboardViewModel`, carte `DashboardSleepRecommendationCard`
+  (DashboardSleepSection.swift, `internal` pour réutilisation).
+
+**Refonte navigation (écart ASSUMÉ vs miroir web 1-1)** — demandé par l'utilisateur :
+- `PulseTab` : onglet **Programme → Sommeil** (icône `bed.double.fill`). Nouvel écran
+  `Screens/Sommeil/SommeilView.swift` : reco en tête + sous-vues Tendance/Dette/
+  Régularité réutilisées de `DashboardSleepSection` (réutilise `DashboardViewModel`).
+- **Programme déplacé dans Paramètres** (`SettingsProgrammeSection`, ouvre `ProgrammeView`
+  en feuille). `ProgrammeView` passé en style feuille (titre nav + `SheetCloseButton`,
+  titre 24pt en contenu retiré).
+- ⇒ Le natif ne mirroite plus la barre web à l'identique. Le front Angular n'a PAS été
+  touché (l'endpoint serveur est dispo mais pas encore affiché côté web).
+
+### Non fait / à valider
+- **Exécution non testée** : vérifier le rendu de l'endpoint contre la vraie base
+  (données perso → demande d'autorisation) et l'app sur device (cf. reco de test device).
+- Extra requête `sleep-recommendation` aussi émise par l'onglet Stats (réutilise le même
+  VM) — inoffensif ; la carte n'y est pas affichée pour l'instant.
+- Rien de commité.

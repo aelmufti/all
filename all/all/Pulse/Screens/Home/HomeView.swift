@@ -138,6 +138,7 @@ struct HomeView: View {
                 // SCSS `:host{padding-bottom:16px}` — marge basse de toute la page.
                 .padding(.bottom, 16)
             }
+            .pulseTabBarClearance()
             .background(Color.pulseBackground)
         }
     }

@@ -119,9 +119,13 @@ struct NutritionView: View {
             }
             .padding(.horizontal, PulseSpacing.lg)
             .padding(.top, PulseSpacing.lg)
-            // Espace pour ne pas laisser le FAB recouvrir la dernière carte.
+            // Espace pour ne pas laisser le FAB recouvrir la dernière carte
+            // (le FAB flotte au-dessus de la barre, plus haut que le clearance).
             .padding(.bottom, PulseSpacing.xxl)
         }
+        // Réserve la hauteur de la barre d'onglets pour que la dernière carte
+        // ne passe pas dessous en fin de défilement (cf. pulseTabBarClearance).
+        .pulseTabBarClearance()
     }
 }
 
@@ -139,7 +143,10 @@ private struct NutritionDayHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-        HStack(alignment: .center, spacing: PulseSpacing.md) {
+        // Titre aligné en haut (`.top`) : la pastille de date fait 40pt de haut ;
+        // en `.center` le titre était centré dans cette ligne et retombait plus
+        // bas que sur les écrans sans pastille. Titre à la même hauteur partout.
+        HStack(alignment: .top, spacing: PulseSpacing.md) {
             Text("Nutrition")
                 .font(.system(size: 24, weight: .semibold))
                 .tracking(-0.2)

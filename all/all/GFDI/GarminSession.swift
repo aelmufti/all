@@ -172,10 +172,16 @@ final class GarminSession: ObservableObject {
     /// un traînard (cf. `handleFileTransferData`), pas une erreur.
     private var currentDownload: FileTransferReassembler?
 
-    init(communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil) {
+    /// Source du calendrier téléphone → montre (cf. `CalendarSync.swift`).
+    /// `nil` = pas de synchro calendrier (tests, ou construction sans EventKit) :
+    /// la requête calendrier de la montre reçoit alors la réponse vide historique.
+    private let calendarSource: CalendarEventSource?
+
+    init(communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil, calendarSource: CalendarEventSource? = nil) {
         self.communicator = communicator
         self.spoolStore = spoolStore
         self.uploader = uploader
+        self.calendarSource = calendarSource
         communicator.onGfdiFrame = { [weak self] frame in self?.handle(frame) }
         communicator.onGfdiChannelReady = { [weak self] in self?.onGfdiChannelReady() }
     }
@@ -909,7 +915,17 @@ final class GarminSession: ObservableObject {
         log.info("Protobuf #\(requestId, privacy: .public) accusé \(known ? "KEPT" : "DISCARDED", privacy: .public) : \(ackFrame.gfdiHexDump, privacy: .public)")
         send(ackFrame, taskName: "protobuf ack")
 
-        guard known, let response = Self.cannedProtobufResponse(service: service, inner: Self.protobufInnerField(messageBytes)) else {
+        let inner = Self.protobufInnerField(messageBytes)
+        // Service calendrier (1) + calendar_request (1) : réponse dynamique
+        // construite depuis EventKit (cf. CalendarSync.swift), au lieu du stub
+        // vide historique. Les autres services gardent leur réponse codée en dur.
+        let response: Data?
+        if service == 1, inner == 1 {
+            response = calendarResponse(requestBytes: messageBytes)
+        } else {
+            response = Self.cannedProtobufResponse(service: service, inner: inner)
+        }
+        guard known, let response else {
             return
         }
         var responseWriter = GarminByteWriter()
@@ -919,8 +935,52 @@ final class GarminSession: ObservableObject {
         responseWriter.writeUInt32LE(UInt32(response.count)) // protobufDataLength
         responseWriter.writeBytes(response)
         let responseFrame = GfdiFrame.build(messageType: MessageType.protobufResponse, payload: responseWriter.data)
-        log.info("Protobuf #\(requestId, privacy: .public) réponse canée (\(response.count, privacy: .public) o) : \(responseFrame.gfdiHexDump, privacy: .public)")
+        // Le service calendrier (1) transporte des titres/lieux d'événements : on
+        // ne dump JAMAIS ses octets (ni la trame) en clair. Compteur de taille
+        // seulement. Les réponses canées des autres services ne contiennent aucune
+        // donnée personnelle → hexdump conservé pour le debug protocole.
+        if service == 1 {
+            log.info("Protobuf #\(requestId, privacy: .public) réponse calendrier envoyée (\(response.count, privacy: .public) o, contenu masqué)")
+        } else {
+            log.info("Protobuf #\(requestId, privacy: .public) réponse canée (\(response.count, privacy: .public) o) : \(responseFrame.gfdiHexDump, privacy: .public)")
+        }
         send(responseFrame, taskName: "protobuf response")
+    }
+
+    /// Construit la réponse au `CalendarServiceRequest` de la montre depuis la
+    /// source calendrier injectée. Retombe sur la réponse vide (statut OK) si la
+    /// synchro est désactivée, l'accès non accordé, la source absente, ou le
+    /// message illisible — jamais d'erreur propagée sur le chemin GFDI.
+    private func calendarResponse(requestBytes: Data) -> Data {
+        guard let calendarSource else {
+            log.info("CalendarService : demande reçue mais aucune source injectée → réponse vide")
+            return CalendarResponder.emptyOK
+        }
+        guard calendarSource.isReady else {
+            // Distingue les deux causes non sensibles pour le debug.
+            log.info("""
+                CalendarService : demande reçue mais source non prête \
+                (toggle=\(PulseConfig.calendarSyncEnabled, privacy: .public)) → réponse vide
+                """)
+            return CalendarResponder.emptyOK
+        }
+        guard let smart = try? GCalSmart(serializedBytes: requestBytes),
+              smart.calendarService.hasCalendarRequest else {
+            log.info("CalendarService : message illisible / sans calendar_request → réponse vide")
+            return CalendarResponder.emptyOK
+        }
+        let request = smart.calendarService.calendarRequest
+        let from = Date(timeIntervalSince1970: TimeInterval(request.begin))
+        let to = Date(timeIntervalSince1970: TimeInterval(request.end))
+        let source = calendarSource.events(from: from, to: to)
+        let watchEvents = CalendarResponder.watchEvents(for: request, events: source)
+        // Compteurs uniquement — aucun titre/lieu (données perso) journalisé.
+        log.info("""
+            CalendarService : fenêtre \(request.begin, privacy: .public)–\(request.end, privacy: .public), \
+            maxEvents=\(request.maxEvents, privacy: .public), source=\(source.count, privacy: .public), \
+            envoyés=\(watchEvents.count, privacy: .public)
+            """)
+        return CalendarResponder.responseData(from: watchEvents)
     }
 
     private func handleProtobufStatus(_ rest: Data, originalType: UInt16) {

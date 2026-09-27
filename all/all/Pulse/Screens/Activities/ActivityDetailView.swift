@@ -125,6 +125,7 @@ struct ActivityDetailView: View {
                     .padding(.bottom, PulseSpacing.lg)
                 }
             }
+            .pulseTabBarClearance()
         }
     }
 
