@@ -105,16 +105,20 @@ final class PulseAPIClient {
     ///     fournisseur d'URL évite d'y toucher du tout depuis les tests de ce
     ///     fichier, sans changer le comportement par défaut de `.shared`.
     ///   - localBackend: répondant local « Pulse embarqué » (cf. en-tête de
-    ///     fichier). Par défaut `StubLocalPulseBackend` (rien n'est encore
-    ///     porté — incrément L0). Injectable pour les tests et pour un futur
-    ///     backend réel (L1+, `docs/stockage-local.md`).
+    ///     fichier). Par défaut `LocalPulseBackendFactory.make()` —
+    ///     `RealLocalPulseBackend` (SQLite local, `Local/LocalPulseBackend.swift`)
+    ///     si `LocalDb` s'ouvre, sinon repli sur `StubLocalPulseBackend`
+    ///     (incrément L1, `docs/stockage-local.md` — routes `wellness/days`/
+    ///     `wellness/dates` seulement ; le reste lève encore
+    ///     `LocalPulseUnavailableError`, à faire en L2/L3). Injectable pour
+    ///     les tests.
     ///   - modeProvider: même raison d'être que `baseURLProvider` — relu à
     ///     chaque appel, jamais capturé, injectable en test pour ne pas muter
     ///     le singleton global `StorageModeStore`.
     init(
         session: URLSession = PulseAPIClient.makeDefaultSession(),
         baseURLProvider: @escaping () -> URL? = { PulseConfig.baseURL },
-        localBackend: LocalPulseBackend = StubLocalPulseBackend(),
+        localBackend: LocalPulseBackend = LocalPulseBackendFactory.make(),
         modeProvider: @escaping () -> StorageMode = { StorageModeStore.current }
     ) {
         self.session = session
@@ -442,13 +446,12 @@ struct LocalPulseUnavailableError: Error, LocalizedError {
     var errorDescription: String? { "Pas encore disponible en mode Téléphone" }
 }
 
-/// Implémentation par défaut pour cet incrément (L0) : aucune donnée locale
-/// n'existe encore — le décodeur FIT + la base SQLite arrivent à l'incrément
-/// L1 (`docs/stockage-local.md`). Échoue systématiquement avec un message
-/// clair plutôt que de renvoyer un JSON vide trompeur ou de planter.
-/// Remplacée par un vrai portage de `custom-connect/server/src` dans un
-/// incrément ultérieur — `PulseAPIClient.init(localBackend:)` reste le seul
-/// point d'injection à toucher pour ça.
+/// Implémentation de repli — utilisée pour toute route que
+/// `RealLocalPulseBackend` ne sert pas encore (`Local/LocalPulseBackend.swift`,
+/// incrément L1, `docs/stockage-local.md`), et directement comme backend par
+/// défaut si `LocalDb` n'a pas pu s'ouvrir (`LocalPulseBackendFactory.make`).
+/// Échoue systématiquement avec un message clair plutôt que de renvoyer un
+/// JSON vide trompeur ou de planter.
 struct StubLocalPulseBackend: LocalPulseBackend {
     func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data {
         throw LocalPulseUnavailableError()
