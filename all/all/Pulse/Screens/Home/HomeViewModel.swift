@@ -155,23 +155,14 @@ final class HomeViewModel {
             // par un canal séparé (`api/live/hr`, temps réel) de l'historique du
             // jour (`api/wellness/day`, alimenté par ingestion `.fit` par lots).
             async let liveTask: Void = refreshLive()
-            var day = try await dayTask
+            let day = try await dayTask
             let activityList = try await activitiesTask
             self.activities = activityList.items
             await liveTask
 
-            // Repli sur le dernier jour AVEC données — SAUF si la FC live est
-            // joignable : dans ce cas on reste sur aujourd'hui (le direct
-            // alimente le bpm, les panneaux se rempliront à la prochaine
-            // ingestion). Sinon, au passage de minuit, on afficherait « périmé »
-            // (jour n-1) alors qu'on mesure en direct à l'instant même.
-            if !day.hasData && !isLiveNow {
-                let recent: [HomeDaySummaryDate] = try await client.get(
-                    "api/wellness/days", query: ["limit": "1"])
-                if let latest = recent.last?.date, latest != today {
-                    day = try await client.get("api/wellness/day/\(latest)")
-                }
-            }
+            // Toujours le jour du calendrier, même vide : après minuit le
+            // nouveau jour n'existe côté Pulse qu'à l'ingestion du premier
+            // `.fit` qui le couvre — les panneaux se remplissent alors.
             self.day = day
             state = .loaded
 

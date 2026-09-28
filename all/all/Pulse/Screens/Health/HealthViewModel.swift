@@ -74,13 +74,13 @@ final class HealthViewModel {
                 "api/wellness/days",
                 query: ["limit": "30", "days": "30"]
             )
-            let dates: [String] = try await client.get("api/wellness/dates")
             days30 = days
-            let latest = days.last?.date ?? dates.last
-            if let latest {
-                date = latest
-                maxDate = latest
-            }
+            // Toujours le jour du calendrier, même vide : après minuit le
+            // nouveau jour n'existe côté Pulse qu'à l'ingestion du premier
+            // `.fit` qui le couvre — l'écran se remplit alors.
+            let today = Self.todayKey()
+            date = today
+            maxDate = today
             await loadDayDetails()
             await loadWeight()
         } catch {
@@ -95,8 +95,7 @@ final class HealthViewModel {
     // MARK: - Navigation de jour
 
     var isLastDay: Bool {
-        guard let last = days30.last?.date else { return false }
-        return date >= last
+        date >= maxDate
     }
 
     func shiftDay(by delta: Int) async {
@@ -415,8 +414,8 @@ final class HealthViewModel {
     }
 
     /// Déclenché au changement de jour local (`refreshesAtDayChange`) : si
-    /// l'utilisateur est sur le dernier jour connu, recharge — `load()` re-cale
-    /// la date sur le jour le plus récent (le nouveau, dès qu'il a des données).
+    /// l'utilisateur est sur le dernier jour, recharge — `load()` re-cale la
+    /// date sur aujourd'hui (même encore vide).
     func reloadForNewDay() async {
         if isLastDay { await load() }
     }
