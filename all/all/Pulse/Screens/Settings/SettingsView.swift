@@ -23,6 +23,15 @@
 //  rien exposer qui puisse entrer en collision avec les autres écrans
 //  (`Screens/Home`, `Screens/Health`…) compilés dans la même cible.
 //
+//  Stockage (incrément L0, `docs/stockage-local.md`) : `SettingsStorageSection`
+//  est la vraie colonne vertébrale de l'écran depuis cet incrément — en mode
+//  Téléphone, TOUT ce qui dépend d'un serveur (source de synchro Pulse, statut,
+//  Programme, profil, compte/déconnexion) n'a plus de sens et disparaît ;
+//  seuls Stockage, Apparence et l'accès à la Montre (diagnostic BLE local)
+//  restent joignables — cf. `SettingsWatchOnlySection` et
+//  `SettingsViewModel.load()` (court-circuite le chargement réseau dans ce
+//  mode, pour ne jamais coincer l'utilisateur derrière un `ErrorView`).
+//
 
 import SwiftUI
 import UIKit
@@ -34,6 +43,7 @@ struct SettingsView: View {
     @State private var showStatus = false
     @State private var showWatch = false
     @State private var showProgramme = false
+    @State private var storageMode = StorageModeStore.shared
 
     var body: some View {
         NavigationStack {
@@ -44,6 +54,12 @@ struct SettingsView: View {
         }
         .task {
             await viewModel.load()
+        }
+        // Basculer le mode de stockage change radicalement ce que cet écran a
+        // de sens à charger (cf. `SettingsViewModel.load()`) — recharge à
+        // chaque changement, pas seulement à l'ouverture de la feuille.
+        .onChange(of: storageMode.mode) { _, _ in
+            Task { await viewModel.load() }
         }
         .sheet(isPresented: $showStatus) { StatusView() }
         .sheet(isPresented: $showWatch) { WatchSectionView() }
@@ -61,17 +77,88 @@ struct SettingsView: View {
             }
         case .loaded:
             Form {
+                SettingsStorageSection()
                 SettingsAppearanceSection()
-                SettingsProgrammeSection(onOpen: { showProgramme = true })
-                SettingsSyncSourceSection(
-                    viewModel: viewModel,
-                    onStatus: { showStatus = true },
-                    onWatch: { showWatch = true }
-                )
-                SettingsStatusSection(viewModel: viewModel)
-                SettingsProfileSection(viewModel: viewModel)
-                SettingsApplicationSection(viewModel: viewModel, username: auth.username)
+                if storageMode.mode == .phone {
+                    SettingsWatchOnlySection(onWatch: { showWatch = true })
+                } else {
+                    SettingsProgrammeSection(onOpen: { showProgramme = true })
+                    SettingsSyncSourceSection(
+                        viewModel: viewModel,
+                        onStatus: { showStatus = true },
+                        onWatch: { showWatch = true }
+                    )
+                    SettingsStatusSection(viewModel: viewModel)
+                    SettingsProfileSection(viewModel: viewModel)
+                    SettingsApplicationSection(viewModel: viewModel, username: auth.username)
+                }
             }
+        }
+    }
+}
+
+// MARK: - Stockage (où vivent les données — cf. `StorageModeStore`)
+//
+// Distinct de « Mode de connectivité » ci-dessous (`SettingsSyncSourceSection`,
+// qui dit QUI COLLECTE sur la montre, réglage serveur `api/sync/source`) : ce
+// réglage-ci dit OÙ VIVENT LES DONNÉES de l'app, purement local
+// (`StorageModeStore`, aucun appel réseau pour le lire/l'écrire).
+
+private struct SettingsStorageSection: View {
+    @State private var store = StorageModeStore.shared
+
+    var body: some View {
+        Section {
+            Picker("Stockage", selection: modeBinding) {
+                ForEach(StorageMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Stockage")
+        } footer: {
+            Text(Self.footnote(for: store.mode))
+        }
+    }
+
+    private var modeBinding: Binding<StorageMode> {
+        Binding(get: { store.mode }, set: { store.mode = $0 })
+    }
+
+    private static func footnote(for mode: StorageMode) -> String {
+        switch mode {
+        case .pulse:
+            return "Pulse : chaque synchro est envoyée au serveur — comportement historique."
+        case .phone:
+            return "Téléphone : rien n'est envoyé à Pulse, tout reste sur l'iPhone. La montre est archivée dès l'enregistrement local (pas d'attente d'un accusé serveur)."
+        case .both:
+            return "Les deux : envoyé à Pulse ET gardé sur l'iPhone. L'app lit Pulse et se replie automatiquement sur le téléphone si Pulse est injoignable."
+        }
+    }
+}
+
+// MARK: - Montre (accès direct en mode Téléphone)
+//
+// En mode Téléphone, `SettingsSyncSourceSection` (bloc « Mode de connectivité »,
+// entièrement server-only : source de synchro, statut, token) n'a plus de
+// sens — mais l'accès à « Collecteur (Montre) » (diagnostic BLE, temps réel),
+// lui, ne dépend d'aucun serveur : on le garde seul, sans tout le reste du bloc.
+
+private struct SettingsWatchOnlySection: View {
+    let onWatch: () -> Void
+
+    var body: some View {
+        Section {
+            Button(action: onWatch) {
+                SettingsNavRow(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "Collecteur (Montre)",
+                    subtitle: "Diagnostic BLE, temps réel"
+                )
+            }
+        } header: {
+            Text("Montre")
         }
     }
 }

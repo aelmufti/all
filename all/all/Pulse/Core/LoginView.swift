@@ -12,6 +12,12 @@
 //  targeter aucune requête (`.notConfigured`), donc pas de login possible :
 //  elle doit rester accessible avant même la première tentative.
 //
+//  « Utiliser sans serveur » (incrément L0, `docs/stockage-local.md`) : un
+//  utilisateur sans Pulse (pas d'adresse, pas de compte) doit pouvoir entrer
+//  quand même — pose `StorageModeStore.shared.mode = .phone`, ce qui fait
+//  disparaître cette porte au profit de la coquille (`ContentView` observe
+//  `storageMode`, cf. son en-tête). Réversible depuis Réglages > Stockage.
+//
 import SwiftUI
 
 struct LoginView: View {
@@ -76,6 +82,13 @@ struct LoginView: View {
                     .disabled(!canSubmit || isSubmitting)
                     .padding(.top, PulseSpacing.xs)
                 }
+
+                Button("Utiliser sans serveur") {
+                    StorageModeStore.shared.mode = .phone
+                }
+                .font(.footnote)
+                .foregroundStyle(Color.pulseTextSecondary)
+                .padding(.bottom, PulseSpacing.lg)
             }
             .padding(PulseSpacing.lg)
         }

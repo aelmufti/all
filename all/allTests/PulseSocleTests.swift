@@ -71,6 +71,29 @@ private func stubbedClient(baseURL: URL? = testBaseURL) -> PulseAPIClient {
     PulseAPIClient(session: makeStubSession(), baseURLProvider: { baseURL })
 }
 
+// MARK: - Backend local factice (routage Stockage, incrément L0)
+
+/// Backend local factice — enregistre chaque appel, ne touche jamais le
+/// réseau ni le disque. Jamais `StubLocalPulseBackend` (celui-ci répond avec
+/// un `Data` fixé ou jette l'erreur fixée à la construction) — sauf le test
+/// dédié à `StubLocalPulseBackend` lui-même, plus bas.
+private final class RecordingLocalPulseBackend: LocalPulseBackend {
+    private(set) var calls: [(method: String, path: String, query: [String: String], body: Data?)] = []
+    var responseData = Data("{}".utf8)
+
+    func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data {
+        calls.append((method, path, query, body))
+        return responseData
+    }
+}
+
+/// Client stubé avec routage explicite (`modeProvider` fixé, jamais
+/// `StorageModeStore.current` — même raison que `baseURLProvider`, cf.
+/// en-tête du fichier).
+private func routedClient(mode: StorageMode, localBackend: LocalPulseBackend, baseURL: URL? = testBaseURL) -> PulseAPIClient {
+    PulseAPIClient(session: makeStubSession(), baseURLProvider: { baseURL }, localBackend: localBackend, modeProvider: { mode })
+}
+
 /// `URLSession` convertit parfois `httpBody` en `httpBodyStream` avant de le
 /// remettre au `URLProtocol` (comportement interne connu, indépendant de ce
 /// qu'on a posé sur la requête) — on gère les deux cas pour lire le corps
@@ -290,5 +313,107 @@ struct PulseSocleTests {
         }
         await store.logout()
         #expect(store.username == nil)
+    }
+
+    // MARK: - Routage Stockage (incrément L0, `docs/stockage-local.md`)
+
+    @Test func phoneModeRoutesDirectlyToLocalBackendWithoutTouchingTheNetwork() async throws {
+        let local = RecordingLocalPulseBackend()
+        local.responseData = healthFixtureJSON
+        let client = routedClient(mode: .phone, localBackend: local)
+        StubURLProtocol.handler = { _ in
+            Issue.record("Ne doit jamais toucher le réseau en mode Téléphone")
+            throw URLError(.unsupportedURL)
+        }
+
+        let fixture: HealthFixture = try await client.get("api/wellness/day/2026-09-23")
+
+        #expect(fixture == HealthFixture(restingHr: 52, steps: 8342, date: "2026-09-23"))
+        #expect(local.calls.count == 1)
+        #expect(local.calls.first?.method == "GET")
+        #expect(local.calls.first?.path == "api/wellness/day/2026-09-23")
+    }
+
+    @Test func pulseModeNeverCallsTheLocalBackendEvenOnServerError() async throws {
+        let local = RecordingLocalPulseBackend()
+        let client = routedClient(mode: .pulse, localBackend: local)
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 500, body: Data("boom".utf8))
+        }
+
+        do {
+            let _: HealthFixture = try await client.get("api/wellness/day/2026-09-23")
+            Issue.record("Devait jeter .http")
+        } catch let error as PulseAPIError {
+            guard case .http(let status, _) = error else {
+                Issue.record("Attendu .http, obtenu \(error)")
+                return
+            }
+            #expect(status == 500)
+        }
+        #expect(local.calls.isEmpty, "pulse ne doit jamais replier sur le backend local")
+    }
+
+    @Test func bothModeFallsBackToLocalBackendOnTransportErrorOnly() async throws {
+        let local = RecordingLocalPulseBackend()
+        local.responseData = healthFixtureJSON
+        let client = routedClient(mode: .both, localBackend: local)
+        StubURLProtocol.handler = { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let fixture: HealthFixture = try await client.get("api/wellness/day/2026-09-23")
+
+        #expect(fixture == HealthFixture(restingHr: 52, steps: 8342, date: "2026-09-23"))
+        #expect(local.calls.count == 1)
+    }
+
+    @Test func bothModeDoesNotFallBackOnHTTPErrorStatus() async throws {
+        let local = RecordingLocalPulseBackend()
+        let client = routedClient(mode: .both, localBackend: local)
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 500, body: Data("boom".utf8))
+        }
+
+        do {
+            let _: HealthFixture = try await client.get("api/wellness/day/2026-09-23")
+            Issue.record("Devait jeter .http, sans repli local — un 5xx n'est pas une erreur de transport")
+        } catch let error as PulseAPIError {
+            guard case .http(let status, _) = error else {
+                Issue.record("Attendu .http, obtenu \(error)")
+                return
+            }
+            #expect(status == 500)
+        }
+        #expect(local.calls.isEmpty)
+    }
+
+    @Test func bothModeDoesNotFallBackOnUnauthorized() async throws {
+        let local = RecordingLocalPulseBackend()
+        let client = routedClient(mode: .both, localBackend: local)
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 401, body: Data("{}".utf8))
+        }
+
+        do {
+            let _: HealthFixture = try await client.get("api/wellness/day/2026-09-23")
+            Issue.record("Devait jeter .unauthorized, sans repli local")
+        } catch let error as PulseAPIError {
+            guard case .unauthorized = error else {
+                Issue.record("Attendu .unauthorized, obtenu \(error)")
+                return
+            }
+        }
+        #expect(local.calls.isEmpty)
+    }
+
+    @Test func stubLocalBackendThrowsTheDedicatedNotAvailableMessage() {
+        let backend = StubLocalPulseBackend()
+        do {
+            _ = try backend.handle(method: "GET", path: "api/wellness/day/2026-09-23", query: [:], body: nil)
+            Issue.record("Devait jeter LocalPulseUnavailableError")
+        } catch {
+            #expect(error.localizedDescription == "Pas encore disponible en mode Téléphone")
+        }
     }
 }

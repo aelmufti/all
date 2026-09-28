@@ -63,6 +63,16 @@ enum PulseTab: String, CaseIterable, Identifiable {
         case .statistiques: return "chart.bar.fill"
         }
     }
+
+    /// Onglets « hors montre » (incrément L0, `docs/stockage-local.md`) :
+    /// masqués en mode Téléphone, portés dans des incréments ultérieurs
+    /// (le backend local n'a rien à leur servir, cf. `PulseAPIClient`). Seule
+    /// la Nutrition est un onglet primaire à ce jour — Programme/Poids sont
+    /// respectivement dans Réglages et sur l'écran Santé (cf. `HealthView`).
+    func isAvailable(in mode: StorageMode) -> Bool {
+        guard self == .nutrition else { return true }
+        return mode != .phone
+    }
 }
 
 struct PulseShellView: View {
@@ -73,10 +83,19 @@ struct PulseShellView: View {
     /// Incrémenté à chaque appui sur le FAB « + » (onglet Nutrition) — poussé à
     /// `NutritionView` qui ouvre alors sa feuille d'ajout.
     @State private var nutritionAddTrigger = 0
+    /// Observé pour masquer les onglets hors montre en mode Téléphone (cf.
+    /// `PulseTab.isAvailable(in:)`) et pour re-rendre dès qu'il change.
+    @State private var storageMode = StorageModeStore.shared
+
+    /// Onglets réellement affichés dans la barre pour le mode courant — cf.
+    /// `PulseTab.isAvailable(in:)`.
+    private var visibleTabs: [PulseTab] {
+        PulseTab.allCases.filter { $0.isAvailable(in: storageMode.mode) }
+    }
 
     var body: some View {
         ZStack {
-            ForEach(PulseTab.allCases) { candidate in
+            ForEach(visibleTabs) { candidate in
                 if visited.contains(candidate) {
                     screen(for: candidate)
                         .opacity(candidate == tab ? 1 : 0)
@@ -97,10 +116,16 @@ struct PulseShellView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            PulseTabBar(selection: $tab)
+            PulseTabBar(selection: $tab, tabs: visibleTabs)
         }
         .onChange(of: tab) { _, newTab in
             visited.insert(newTab)
+        }
+        // Bascule de mode alors qu'un onglet désormais masqué est sélectionné
+        // (ex. Nutrition puis passage en Téléphone depuis Réglages) : replie
+        // sur Accueil, toujours disponible quel que soit le mode.
+        .onChange(of: storageMode.mode) { _, _ in
+            if !visibleTabs.contains(tab) { tab = .accueil }
         }
     }
 
@@ -143,6 +168,11 @@ private struct NutritionFab: View {
 /// `--text-dim`, léger « scale » à l'appui.
 struct PulseTabBar: View {
     @Binding var selection: PulseTab
+    /// Onglets à afficher — `PulseTab.allCases` par défaut (comportement
+    /// historique, cf. `#Preview` de ce fichier) ; `PulseShellView` passe
+    /// `visibleTabs` (masque Nutrition en mode Téléphone, cf.
+    /// `PulseTab.isAvailable(in:)`).
+    var tabs: [PulseTab] = PulseTab.allCases
 
     /// Hauteur du bandeau de boutons (hors safe-area du bas, que le fond couvre
     /// via `ignoresSafeArea`). Exposée pour que chaque `ScrollView` d'écran
@@ -153,7 +183,7 @@ struct PulseTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(PulseTab.allCases) { tab in
+            ForEach(tabs) { tab in
                 TabBarButton(
                     tab: tab,
                     isSelected: selection == tab,

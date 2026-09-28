@@ -14,11 +14,16 @@
 //  plutôt que de bloquer tout l'écran — un exercice pratique de la même règle
 //  que `IntensityDayCardComponent` côté Angular (au mieux, jamais bloquant).
 //
+//  Poids masqué en mode Téléphone (incrément L0, `docs/stockage-local.md`,
+//  « hors montre… masqués ») : la saisie du poids vit côté Pulse
+//  (`api/weight`), pas sur la montre — le backend local ne la sert pas.
+//
 
 import SwiftUI
 
 struct HealthView: View {
     @State private var viewModel = HealthViewModel()
+    @State private var storageMode = StorageModeStore.shared
 
     var body: some View {
         NavigationStack {
@@ -55,7 +60,9 @@ struct HealthView: View {
                 MetricTabPicker(viewModel: viewModel)
                 HealthMetricChartCard(viewModel: viewModel, day: day)
                 IntensityCard(intensity: viewModel.intensity, failed: viewModel.intensityFailed)
-                WeightCard(viewModel: viewModel)
+                if storageMode.mode != .phone {
+                    WeightCard(viewModel: viewModel)
+                }
             }
             .padding(PulseSpacing.lg)
         }

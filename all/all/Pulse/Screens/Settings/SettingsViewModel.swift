@@ -70,6 +70,19 @@ final class SettingsViewModel {
 
     func load() async {
         state = .loading
+        // Mode Téléphone (incrément L0, `docs/stockage-local.md`) : rien de ce
+        // que cet écran charge (source de synchro, statut, profil) n'a de sens
+        // sans serveur — tout passerait de toute façon par le backend local
+        // stub et échouerait (`LocalPulseUnavailableError`), affichant
+        // `ErrorView` en boucle et coinçant l'utilisateur SANS accès au
+        // sélecteur de Stockage pour revenir en arrière. On court-circuite :
+        // l'écran passe directement à `.loaded`, `SettingsView` n'affiche
+        // alors que les sections qui ne dépendent pas de ces données
+        // (Stockage, Apparence, Montre).
+        guard StorageModeStore.current != .phone else {
+            state = .loaded
+            return
+        }
         do {
             async let sourceResult: SettingsSyncSource = client.get("api/sync/source")
             async let statusResult: SettingsSyncStatus = client.get("api/sync/status")

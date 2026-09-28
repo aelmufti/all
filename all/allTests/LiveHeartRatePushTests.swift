@@ -179,4 +179,45 @@ struct PulseLiveHrPusherTests {
 
         #expect(transport.sent.isEmpty)
     }
+
+    /// Mode Téléphone (incrément L0, `docs/stockage-local.md`, « pas de push
+    /// live HR en Téléphone ») : court-circuite AVANT même de regarder
+    /// `PulseConfig` — `modeProvider` injecté, jamais `StorageModeStore.shared`
+    /// (pas besoin de muter le singleton global pour ce test).
+    @Test func doesNothingInPhoneModeEvenWhenPulseConfigIsSet() throws {
+        let previousBaseURL = PulseConfig.baseURL
+        let previousToken = PulseConfig.ingestToken
+        defer {
+            PulseConfig.baseURL = previousBaseURL
+            PulseConfig.ingestToken = previousToken
+        }
+        PulseConfig.baseURL = URL(string: "https://pulse.example.ts.net")
+        PulseConfig.ingestToken = "s3cr3t"
+
+        let transport = RecordingLiveHrPushTransport()
+        let pusher = PulseLiveHrPusher(transport: transport, modeProvider: { .phone })
+
+        pusher.push(LiveHeartRate.Reading(enabled: true, broadcasting: true, heartRate: 60, measuredAt: Date(), stale: false, hint: nil))
+
+        #expect(transport.sent.isEmpty)
+    }
+
+    /// `both` reste actif (Pulse en primaire) — seul `phone` court-circuite.
+    @Test func stillPushesInBothMode() throws {
+        let previousBaseURL = PulseConfig.baseURL
+        let previousToken = PulseConfig.ingestToken
+        defer {
+            PulseConfig.baseURL = previousBaseURL
+            PulseConfig.ingestToken = previousToken
+        }
+        PulseConfig.baseURL = URL(string: "https://pulse.example.ts.net")
+        PulseConfig.ingestToken = "s3cr3t"
+
+        let transport = RecordingLiveHrPushTransport()
+        let pusher = PulseLiveHrPusher(transport: transport, modeProvider: { .both })
+
+        pusher.push(LiveHeartRate.Reading(enabled: true, broadcasting: true, heartRate: 60, measuredAt: Date(), stale: false, hint: nil))
+
+        #expect(transport.sent.count == 1)
+    }
 }

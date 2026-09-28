@@ -159,8 +159,11 @@ final class BLEManager: NSObject, ObservableObject {
     /// Une seule `URLSession` (foreground, `.default`) pour la durée de vie de
     /// l'app, partagée entre les `GarminSession` successives — cf.
     /// `Sync/PulseUploader.swift` (émission active, autorisation utilisateur
-    /// 2026-09-22).
-    private let pulseUploader: SpoolUploading = PulseSpoolUploader()
+    /// 2026-09-22). Enveloppé dans `RoutingSpoolUploader` (incrément L0,
+    /// `docs/stockage-local.md`) : en mode Téléphone, aucune requête ne part
+    /// jamais vers `URLSessionPulseUploadTransport` — la livraison est locale
+    /// (`RoutingSpoolUploader.upload` court-circuite avant `PulseSpoolUploader`).
+    private let pulseUploader: SpoolUploading = RoutingSpoolUploader(pulseUploader: PulseSpoolUploader())
 
     /// Pousseur de FC live vers Pulse (incrément Live-1b, `Sync/LiveHeartRatePush.swift`)
     /// — même raison d'être partagée que `pulseUploader` : une seule `URLSession`

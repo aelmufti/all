@@ -14,6 +14,13 @@
 //  `// TODO(écran …)` là-bas pour le point de branchement de chaque agent
 //  suivant.
 //
+//  Mode Téléphone (incrément L0, `docs/stockage-local.md`) : la porte de
+//  login est **court-circuitée** — un utilisateur sans Pulse doit pouvoir
+//  entrer sans jamais s'authentifier contre un serveur. `storageMode` est
+//  observé en plus de `auth` : dès que le mode passe à `.phone` (Réglages, ou
+//  le lien « Utiliser sans serveur » de `LoginView`), la coquille s'affiche
+//  immédiatement, qu'`AuthStore` ait une session ou non.
+//
 
 import SwiftUI
 
@@ -23,10 +30,13 @@ struct ContentView: View {
     /// l'en-tête Accueil, cf. `HomeView.swift`) — `ThemeStore` est un
     /// singleton partagé, pas un état propre à cette vue.
     @State private var theme = ThemeStore.shared
+    /// Observé pour re-rendre au changement de mode de stockage — cf.
+    /// en-tête de fichier.
+    @State private var storageMode = StorageModeStore.shared
 
     var body: some View {
         Group {
-            if auth.username != nil {
+            if storageMode.mode == .phone || auth.username != nil {
                 PulseShellView()
             } else if auth.isChecking {
                 // Vérification de la session persistée (cookie déjà posé
@@ -43,6 +53,13 @@ struct ContentView: View {
         // résolvent correctement, cf. commentaire d'en-tête de `ThemeStore`.
         .preferredColorScheme(theme.colorScheme)
         .task {
+            // Mode Téléphone : pas de session à vérifier, la coquille
+            // s'affiche déjà (condition ci-dessus) — inutile d'appeler
+            // `api/auth/me` (qui échouerait de toute façon sans `baseURL`).
+            guard storageMode.mode != .phone else {
+                auth.isChecking = false
+                return
+            }
             _ = await auth.check()
         }
     }

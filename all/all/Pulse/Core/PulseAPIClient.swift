@@ -17,6 +17,20 @@
 //  comportement par défaut d'une session `.default`), pour que ce soit vrai
 //  aussi si quelqu'un durcit la config plus tard (ex. désactivation du cache).
 //
+//  Routage « Stockage » (incrément L0, `docs/stockage-local.md`) : chaque
+//  appel passe par `routedData`, qui consulte `StorageModeStore.current` (via
+//  `modeProvider`, relu à CHAQUE appel — jamais capturé) pour décider serveur
+//  ou `LocalPulseBackend` :
+//   - `pulse` : serveur, comme avant cet incrément — jamais le backend local.
+//   - `phone` : backend local directement, AUCUNE requête serveur construite
+//     (pas même besoin de `baseURL`).
+//   - `both`  : tente le serveur ; replie sur le backend local **seulement**
+//     sur une erreur de transport (`PulseAPIError.transport` — DNS/TLS/offline/
+//     timeout, PAS un code HTTP même 5xx, PAS 401) — cf. `docs/stockage-local.md`,
+//     « erreur de transport seulement, pas 4xx/401 ».
+//  Le backend local répond aux mêmes routes avec le même JSON (mêmes modèles
+//  `Decodable`) : les écrans ne changent jamais selon le mode.
+//
 
 import Foundation
 import os
@@ -69,6 +83,8 @@ final class PulseAPIClient {
 
     private let session: URLSession
     private let baseURLProvider: () -> URL?
+    private let localBackend: LocalPulseBackend
+    private let modeProvider: () -> StorageMode
 
     /// - Parameters:
     ///   - session: session HTTP à utiliser. Par défaut, une session dédiée
@@ -88,12 +104,23 @@ final class PulseAPIClient {
     ///     suite) : une vraie course a été observée en pratique. Injecter le
     ///     fournisseur d'URL évite d'y toucher du tout depuis les tests de ce
     ///     fichier, sans changer le comportement par défaut de `.shared`.
+    ///   - localBackend: répondant local « Pulse embarqué » (cf. en-tête de
+    ///     fichier). Par défaut `StubLocalPulseBackend` (rien n'est encore
+    ///     porté — incrément L0). Injectable pour les tests et pour un futur
+    ///     backend réel (L1+, `docs/stockage-local.md`).
+    ///   - modeProvider: même raison d'être que `baseURLProvider` — relu à
+    ///     chaque appel, jamais capturé, injectable en test pour ne pas muter
+    ///     le singleton global `StorageModeStore`.
     init(
         session: URLSession = PulseAPIClient.makeDefaultSession(),
-        baseURLProvider: @escaping () -> URL? = { PulseConfig.baseURL }
+        baseURLProvider: @escaping () -> URL? = { PulseConfig.baseURL },
+        localBackend: LocalPulseBackend = StubLocalPulseBackend(),
+        modeProvider: @escaping () -> StorageMode = { StorageModeStore.current }
     ) {
         self.session = session
         self.baseURLProvider = baseURLProvider
+        self.localBackend = localBackend
+        self.modeProvider = modeProvider
     }
 
     private static func makeDefaultSession() -> URLSession {
@@ -108,44 +135,73 @@ final class PulseAPIClient {
     /// `GET path?query`. `path` est relatif à `PulseConfig.baseURL` (ex.
     /// `"api/wellness/day/2026-09-23"`).
     func get<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
-        var request = try makeRequest(path: path, method: "GET", query: query)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await perform(request)
-        return try decode(data, path: path, status: response.statusCode)
+        let (data, status) = try await routedData(method: "GET", path: path, query: query, bodyData: nil)
+        return try decode(data, path: path, status: status)
     }
 
     /// `POST path` avec un corps `Encodable`.
     func post<Body: Encodable, T: Decodable>(_ path: String, body: Body) async throws -> T {
-        var request = try makeRequest(path: path, method: "POST", query: [:])
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request = try attach(body: body, to: request)
-        let (data, response) = try await perform(request)
-        return try decode(data, path: path, status: response.statusCode)
+        let bodyData = try encodeBody(body)
+        let (data, status) = try await routedData(method: "POST", path: path, query: [:], bodyData: bodyData)
+        return try decode(data, path: path, status: status)
     }
 
     /// `POST path` sans corps (ex. `api/auth/logout`).
     func post<T: Decodable>(_ path: String) async throws -> T {
-        var request = try makeRequest(path: path, method: "POST", query: [:])
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await perform(request)
-        return try decode(data, path: path, status: response.statusCode)
+        let (data, status) = try await routedData(method: "POST", path: path, query: [:], bodyData: nil)
+        return try decode(data, path: path, status: status)
     }
 
     /// `PUT path` avec un corps `Encodable`.
     func put<Body: Encodable, T: Decodable>(_ path: String, body: Body) async throws -> T {
-        var request = try makeRequest(path: path, method: "PUT", query: [:])
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request = try attach(body: body, to: request)
-        let (data, response) = try await perform(request)
-        return try decode(data, path: path, status: response.statusCode)
+        let bodyData = try encodeBody(body)
+        let (data, status) = try await routedData(method: "PUT", path: path, query: [:], bodyData: bodyData)
+        return try decode(data, path: path, status: status)
     }
 
     /// `DELETE path`. Pas de corps de réponse exploité par le socle (les
     /// endpoints de suppression de Pulse renvoient un petit accusé JSON, mais
-    /// aucun écran n'en a besoin pour l'instant) — seul le statut HTTP compte.
+    /// aucun écran n'en a besoin pour l'instant) — seul le statut HTTP compte
+    /// côté serveur (le backend local, lui, n'a pas de statut : `routedData`
+    /// gère les deux cas).
     func delete(_ path: String) async throws {
-        let request = try makeRequest(path: path, method: "DELETE", query: [:])
-        _ = try await perform(request)
+        _ = try await routedData(method: "DELETE", path: path, query: [:], bodyData: nil)
+    }
+
+    // MARK: - Routage Stockage (serveur vs backend local)
+
+    /// Point d'entrée unique de routage — cf. en-tête de fichier. Renvoie le
+    /// corps brut (JSON) à décoder par l'appelant, plus le code HTTP quand la
+    /// réponse vient du serveur (`nil` depuis le backend local, qui n'en a
+    /// pas — `decode` s'en sert seulement pour un message de diagnostic).
+    private func routedData(method: String, path: String, query: [String: String], bodyData: Data?) async throws -> (Data, Int?) {
+        switch modeProvider() {
+        case .phone:
+            return (try localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+        case .pulse:
+            return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+        case .both:
+            do {
+                return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+            } catch PulseAPIError.transport(_) {
+                // Repli local — erreur de transport SEULEMENT (DNS/TLS/offline/
+                // timeout), jamais sur un code HTTP (même 5xx) ni sur 401 : ceux-là
+                // remontent tels quels, cf. en-tête de fichier et `docs/stockage-local.md`.
+                return (try localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+            }
+        }
+    }
+
+    /// Exécute réellement contre Pulse — construit la requête, y attache le
+    /// corps s'il y en a un, l'envoie, renvoie le corps brut 2xx + le statut.
+    private func serverData(method: String, path: String, query: [String: String], bodyData: Data?) async throws -> (Data, Int?) {
+        var request = try makeRequest(path: path, method: method, query: query)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let bodyData {
+            request = attach(bodyData: bodyData, to: request)
+        }
+        let (data, response) = try await perform(request)
+        return (data, response.statusCode)
     }
 
     // MARK: - Construction de requête
@@ -157,15 +213,22 @@ final class PulseAPIClient {
         return request
     }
 
-    private func attach<Body: Encodable>(body: Body, to request: URLRequest) throws -> URLRequest {
+    private func attach(bodyData: Data, to request: URLRequest) -> URLRequest {
         var request = request
+        request.httpBody = bodyData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return request
+    }
+
+    /// Encode un corps `Encodable` en `Data` — utilisé à la fois par le
+    /// chemin serveur et le backend local (même corps envoyé aux deux,
+    /// cf. `LocalPulseBackend`).
+    private func encodeBody<Body: Encodable>(_ body: Body) throws -> Data {
         do {
-            request.httpBody = try Self.encoder.encode(body)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            return try Self.encoder.encode(body)
         } catch {
             throw PulseAPIError.decoding(error)
         }
-        return request
     }
 
     private func resolve(_ path: String, query: [String: String]) throws -> URL {
@@ -214,7 +277,7 @@ final class PulseAPIClient {
         return (data, http)
     }
 
-    private func decode<T: Decodable>(_ data: Data, path: String, status: Int) throws -> T {
+    private func decode<T: Decodable>(_ data: Data, path: String, status: Int?) throws -> T {
         // Chemin normal.
         do {
             return try Self.decoder.decode(T.self, from: data)
@@ -262,13 +325,16 @@ final class PulseAPIClient {
     }
 
     /// Construit le détail affiché : la clé/type/chemin fautifs (placés **en
-    /// tête**, donc lisibles même si le message est long) + le code HTTP, et —
-    /// pour un corps qui n'est pas du JSON du tout — un aperçu taille/début/fin.
-    private static func decodeFailureDetail(_ error: Error, data: Data, status: Int, note: String) -> String {
+    /// tête**, donc lisibles même si le message est long) + le code HTTP (ou
+    /// « backend local » si la réponse ne vient pas du serveur, cf.
+    /// `routedData`), et — pour un corps qui n'est pas du JSON du tout — un
+    /// aperçu taille/début/fin.
+    private static func decodeFailureDetail(_ error: Error, data: Data, status: Int?, note: String) -> String {
+        let statusSuffix = status.map { "[HTTP \($0)]" } ?? "[backend local]"
         guard let decodingError = error as? DecodingError else {
-            return "\(note) — \(error) [HTTP \(status)]"
+            return "\(note) — \(error) \(statusSuffix)"
         }
-        var detail = "\(note) — \(describe(decodingError)) [HTTP \(status)]"
+        var detail = "\(note) — \(describe(decodingError)) \(statusSuffix)"
         if case .dataCorrupted = decodingError {
             func snippet(_ slice: Data) -> String {
                 (String(data: slice, encoding: .utf8) ?? "\(slice.count) o non-UTF8")
@@ -350,5 +416,38 @@ extension PulseAPIError: LocalizedError {
         case .transport:
             return "Pulse est inatteignable."
         }
+    }
+}
+
+// MARK: - Backend local « Pulse embarqué » (mode Téléphone/Les deux)
+
+/// Répondant local — cf. en-tête de fichier et `docs/stockage-local.md`.
+/// Traite une requête EXACTEMENT comme le ferait le serveur pour la même
+/// route (même méthode/chemin/query/corps), et renvoie le même JSON brut —
+/// `PulseAPIClient` le décode ensuite avec le même `decoder` que la réponse
+/// serveur, donc les modèles `Decodable` des écrans ne savent jamais d'où
+/// vient la réponse. Pas `async` : le futur portage réel (L1+, SQLite système)
+/// est local et rapide — si ça change, `async throws` s'ajoutera alors.
+protocol LocalPulseBackend {
+    func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data
+}
+
+/// Erreur dédiée du backend local — message stable et testé
+/// (`localizedDescription`), montrable tel quel tant qu'aucun écran ne le
+/// spécialise.
+struct LocalPulseUnavailableError: Error, LocalizedError {
+    var errorDescription: String? { "Pas encore disponible en mode Téléphone" }
+}
+
+/// Implémentation par défaut pour cet incrément (L0) : aucune donnée locale
+/// n'existe encore — le décodeur FIT + la base SQLite arrivent à l'incrément
+/// L1 (`docs/stockage-local.md`). Échoue systématiquement avec un message
+/// clair plutôt que de renvoyer un JSON vide trompeur ou de planter.
+/// Remplacée par un vrai portage de `custom-connect/server/src` dans un
+/// incrément ultérieur — `PulseAPIClient.init(localBackend:)` reste le seul
+/// point d'injection à toucher pour ça.
+struct StubLocalPulseBackend: LocalPulseBackend {
+    func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data {
+        throw LocalPulseUnavailableError()
     }
 }

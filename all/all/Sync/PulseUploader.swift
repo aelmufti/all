@@ -224,3 +224,42 @@ final class PulseSpoolUploader: SpoolUploading {
         }
     }
 }
+
+/// Couture de routage entre `GarminSession` et `PulseSpoolUploader` — posée au
+/// niveau `BLEManager.pulseUploader` (cf. `docs/stockage-local.md`, incrément
+/// L0). Décide, à **chaque appel** (jamais un mode figé à l'init — l'utilisateur
+/// peut changer de réglage en cours de session, cf. `StorageModeStore`), si le
+/// fichier part réellement vers Pulse ou si la livraison est **locale** :
+///
+///  - `phone` : aucune requête réseau. Le fichier est déclaré `.delivered`
+///    tout de suite — même issue qu'un 2xx de Pulse, ce qui fait exactement ce
+///    que `GarminSession.handleUploadOutcome` ferait après un accusé serveur :
+///    `SpoolStore.markDelivered` puis `archivePendingDeliveries()` (archivage
+///    montre). C'est la décision actée dans `docs/stockage-local.md` :
+///    « archivage montre en mode Téléphone : dès l'écriture locale ». Le
+///    fichier lui-même **reste** dans le Spool (rien ne le purge à ce stade —
+///    l'ingestion locale réelle, qui le lira, arrive à l'incrément L1) : seul
+///    l'état passe à `delivered`/`archived`, comme dans le contrat Pulse.
+///  - `pulse`/`both` : délègue tel quel à l'uploader interne (comportement
+///    inchangé) — en `both`, c'est le fichier `.fit` qui part vers Pulse
+///    (la charge lourde) ; la lecture des écrans, elle, sait replier sur le
+///    local (`PulseAPIClient`), mais l'upload ne duplique jamais le fichier
+///    localement en plus de l'envoyer — le Spool local EST déjà la copie locale.
+final class RoutingSpoolUploader: SpoolUploading {
+    private let pulseUploader: SpoolUploading
+    private let mode: () -> StorageMode
+
+    init(pulseUploader: SpoolUploading, mode: @escaping () -> StorageMode = { StorageModeStore.current }) {
+        self.pulseUploader = pulseUploader
+        self.mode = mode
+    }
+
+    func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void) {
+        switch mode() {
+        case .phone:
+            completion(.delivered)
+        case .pulse, .both:
+            pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename, completion: completion)
+        }
+    }
+}

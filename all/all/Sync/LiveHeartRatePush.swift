@@ -161,14 +161,27 @@ protocol LiveHrPushing {
 /// d'une session live). No-op silencieux si l'un des deux manque — pas
 /// d'erreur remontée, cohérent avec la nature jetable du live (rien à garder
 /// ni à signaler, l'UI Pulse restera simplement en silence côté serveur).
+///
+/// Mode Téléphone (incrément L0, `docs/stockage-local.md`) : « pas de push
+/// live HR en Téléphone » — pas de serveur à qui pousser un échantillon
+/// jetable. `modeProvider` (relu à chaque appel, jamais capturé — même raison
+/// que `StorageModeStore.current`) court-circuite avant même de regarder
+/// `PulseConfig` ; le mode `both` continue de pousser (Pulse reste joignable
+/// en primaire).
 final class PulseLiveHrPusher: LiveHrPushing {
     private let transport: LiveHrPushTransport
+    private let modeProvider: () -> StorageMode
 
-    init(transport: LiveHrPushTransport = URLSessionLiveHrPushTransport()) {
+    init(
+        transport: LiveHrPushTransport = URLSessionLiveHrPushTransport(),
+        modeProvider: @escaping () -> StorageMode = { StorageModeStore.current }
+    ) {
         self.transport = transport
+        self.modeProvider = modeProvider
     }
 
     func push(_ reading: LiveHeartRate.Reading) {
+        guard modeProvider() != .phone else { return }
         guard let baseURL = PulseConfig.baseURL, let token = PulseConfig.ingestToken, !token.isEmpty else {
             return
         }

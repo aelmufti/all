@@ -109,6 +109,8 @@ Détail : `CADRAGE.md` (annexe) et `garmin-bridge/docs/context-garmin-bridge.md`
 - Répondre à **`CURRENT_TIME_REQUEST`** en secondes epoch Garmin (**Unix − 631065600**).
 - **Redémarrer la montre** si le lien s'établit mais la poignée de main n'aboutit pas.
 - **Ne pas parser le FIT** sur le collecteur : Pulse le fait, dédup par hash.
+  *Exception : mode Stockage `Téléphone`/`Les deux` — l'app parse le FIT et calcule
+  en local (« Pulse embarqué »). Révisé le 2026-09-29, cf. `all/docs/stockage-local.md`.*
 - **`GdiSettingsService` (champ 42)** ne répond jamais applicativement sur Venu 2 fw
   19.05 : ne pas le porter.
 
