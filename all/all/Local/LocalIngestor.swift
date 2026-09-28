@@ -87,4 +87,43 @@ enum LocalIngestor {
             return ingest(fileURL: url, hash: hash, fileName: fileName, into: db)
         }
     }
+
+    // MARK: - Câblage (incrément L2, `docs/stockage-local.md`)
+    //
+    // `ingestAll` existait déjà (L1) mais n'était appelée nulle part — la
+    // base locale restait vide même en mode Téléphone/Les deux tant que
+    // personne ne rejouait le spool. Deux points d'appel (cf. rapport
+    // d'incrément) : lancement (`ContentView.task`) et fin de traversée BLE
+    // (`GarminSession.advanceDownloadQueue`, transition vers `.done`).
+    //
+    // Ouvre sa PROPRE `SpoolStore`/`LocalDb` à chaque appel plutôt que de
+    // réutiliser une instance vivante passée par l'appelant : `SpoolStore.entries`
+    // est un dictionnaire **mutable**, lu/écrit sur le main actor ailleurs
+    // dans l'app (`GarminSession`) — le lire depuis une tâche détachée en
+    // même temps qu'une mutation main-actor serait une course. Une deuxième
+    // instance indépendante relit `journal.json` (petit fichier, coût
+    // négligeable) et élimine le problème plutôt que de le gérer. Ouvrir une
+    // deuxième connexion SQLite vers le même fichier `LocalDb` est sûr
+    // (`PRAGMA journal_mode = WAL`, cf. `SQLiteDatabase.init`).
+    //
+    // Toujours hors main actor (IO fichier + hachage SHA-256 + SQLite) via
+    // `Task.detached` — jamais attendue par l'appelant (fire-and-forget,
+    // comme un rafraîchissement en arrière-plan ; les écrans relisent la
+    // base au prochain `load()`, pas besoin de signal de fin ici).
+    static func ingestIfNeeded() {
+        guard StorageModeStore.current != .pulse else { return }
+        Task.detached(priority: .utility) {
+            guard let spool = try? SpoolStore(), let db = try? LocalDb() else {
+                log.error("ingestIfNeeded: SpoolStore/LocalDb indisponible, ingestion sautée")
+                return
+            }
+            let results = ingestAll(from: spool, into: db)
+            let errors = results.filter { if case .error = $0.kind { return true }; return false }
+            if errors.isEmpty {
+                log.info("ingestIfNeeded: \(results.count, privacy: .public) entrée(s) du spool rejouée(s), 0 erreur")
+            } else {
+                log.error("ingestIfNeeded: \(errors.count, privacy: .public)/\(results.count, privacy: .public) entrée(s) en erreur")
+            }
+        }
+    }
 }

@@ -90,6 +90,10 @@ final class LocalDb {
       phases TEXT,
       file_hash TEXT
     );
+    CREATE TABLE IF NOT EXISTS body_battery_state (
+      date TEXT PRIMARY KEY,
+      start_value REAL NOT NULL
+    );
     """
 
     // MARK: - Dédup (`imported_files`) — même principe que Pulse : hash du
@@ -298,6 +302,324 @@ final class LocalDb {
     private static func localOffsetSeconds(forDate date: String) -> Double {
         let noon = dayStartUnixUTC(date) + 12 * 3600
         return Double(TimeZone.current.secondsFromGMT(for: Date(timeIntervalSince1970: noon)))
+    }
+
+    // MARK: - `GET wellness/day/:date` (incrément L2, cf. `RealLocalPulseBackend`)
+    //
+    // Miroir de `WellnessController.day` + ses aides privées
+    // (`samplesBetween`, `counterSeries`, `watchSleep`, `pivotSeries`,
+    // `bodyBatteryStart`) — même requêtage, même bornage temporel. Divergence
+    // assumée : le décalage horaire vient de `localOffsetSeconds` (fuseau du
+    // téléphone), pas de `DISPLAY_TZ` (un seul fuseau pertinent ici, cf.
+    // `days(limit:)` ci-dessus, déjà sur ce principe).
+
+    struct DayDetail {
+        let date: String
+        let restingHr: Double?
+        let bmrKcal: Double?
+        let steps: Double?
+        let activeCalories: Double?
+        let distanceM: Double?
+        let hr: [LocalSample]
+        let stress: [LocalSample]
+        let spo2: [LocalSample]
+        let respiration: [LocalSample]
+        let bodyBatteryPivot: [LocalSample]
+        let counterSeries: [CounterPoint]
+        let sleepSegments: [SleepInterval]
+        let sleepMain: SleepMain?
+        let sleepStages: [SleepStage]
+        let sleepScore: Double?
+    }
+
+    struct CounterPoint {
+        let minute: Int
+        let steps: Double
+        let activeCalories: Double
+    }
+
+    struct SleepInterval {
+        let from: Double
+        let to: Double
+    }
+
+    struct SleepStage {
+        let from: Double
+        let to: Double
+        /// "deep" | "light" | "rem" | "awake"
+        let stage: String
+    }
+
+    struct SleepMain {
+        let from: Double
+        let to: Double
+        let durationS: Double
+    }
+
+    private struct SleepNight {
+        let segments: [SleepInterval]
+        let main: SleepMain?
+        let stages: [SleepStage]
+        let score: Double?
+    }
+
+    private struct WatchSleepResult {
+        /// Union des segments "endormi" de TOUTES les nuits couvertes par la
+        /// plage interrogée (peut être 0, 1 ou 2 nuits pour la fenêtre ±12h
+        /// utilisée par `dayDetail`/`pivotSeries`) — sert à `asleepAt` du
+        /// simulateur pivot, indépendamment de la nuit "du jour" affichée.
+        let segments: [SleepInterval]
+        let byDate: [String: SleepNight]
+    }
+
+    /// Assemble la réponse complète de `GET wellness/day/:date` —
+    /// `RealLocalPulseBackend` n'a plus qu'à la sérialiser en JSON.
+    func dayDetail(date: String) throws -> DayDetail {
+        let t0 = Self.dayStartUnixUTC(date)
+        let t1 = t0 + 86400
+        let offset = Self.localOffsetSeconds(forDate: date)
+
+        var restingHr: Double?
+        var bmrKcal: Double?
+        try db.run("SELECT resting_hr, bmr_kcal FROM wellness_days WHERE date = ?", [.text(date)]) { r in
+            restingHr = r.double(0)
+            bmrKcal = r.double(1)
+        }
+
+        var steps: Double?
+        var activeCalories: Double?
+        var distanceM: Double?
+        try db.run(
+            "SELECT SUM(steps), SUM(active_calories), SUM(distance_m) FROM wellness_counters WHERE date = ?",
+            [.text(date)]) { r in
+            steps = r.double(0)
+            activeCalories = r.double(1)
+            distanceM = r.double(2)
+        }
+
+        let hr = try samplesBetween(metric: "hr", t0Local: t0, t1Local: t1, offsetSeconds: offset)
+        let stress = try samplesBetween(metric: "stress", t0Local: t0, t1Local: t1, offsetSeconds: offset)
+        let spo2 = try samplesBetween(metric: "spo2", t0Local: t0, t1Local: t1, offsetSeconds: offset)
+        let respiration = try samplesBetween(metric: "respiration", t0Local: t0, t1Local: t1, offsetSeconds: offset)
+        let counterSeriesRows = try counterSeries(t0Local: t0, t1Local: t1, offsetSeconds: offset)
+
+        // Fenêtre ±12h — mêmes bornes que `WellnessController.day` : une nuit
+        // peut chevaucher minuit dans les deux sens.
+        let sleep = try watchSleep(rangeStart: t0 - 12 * 3600, rangeEnd: t1 + 12 * 3600, offsetSeconds: offset)
+        let nightSleep = sleep.byDate[date]
+        let daySegments = sleep.segments.filter { $0.to > t0 && $0.from < t1 }
+
+        let bbStart = try bodyBatteryStart(date: date)
+        let bodyBatteryPivot = try pivotSeries(date: date, start: bbStart)
+
+        return DayDetail(
+            date: date, restingHr: restingHr, bmrKcal: bmrKcal,
+            steps: steps, activeCalories: activeCalories, distanceM: distanceM,
+            hr: hr, stress: stress, spo2: spo2, respiration: respiration,
+            bodyBatteryPivot: bodyBatteryPivot, counterSeries: counterSeriesRows,
+            sleepSegments: daySegments, sleepMain: nightSleep?.main, sleepStages: nightSleep?.stages ?? [],
+            sleepScore: nightSleep?.score)
+    }
+
+    /// Miroir de `samplesBetween` (TS) — bornes en repère UTC (soustrait
+    /// l'offset), résultat republié en repère "affichage" (ré-ajoute
+    /// l'offset), comme le serveur.
+    func samplesBetween(metric: String, t0Local: Double, t1Local: Double, offsetSeconds: Double) throws -> [LocalSample] {
+        var out: [LocalSample] = []
+        try db.run(
+            "SELECT ts, value FROM wellness_samples WHERE metric = ? AND ts >= ? AND ts < ? ORDER BY ts ASC",
+            [.text(metric), .double(t0Local - offsetSeconds), .double(t1Local - offsetSeconds)]) { r in
+            guard let ts = r.double(0), let value = r.double(1) else { return }
+            out.append(LocalSample(ts: ts + offsetSeconds, value: value))
+        }
+        return out
+    }
+
+    private static let counterResetLagS: Double = 90
+
+    /// Miroir de `counterSeries` (TS) — reconstruit une série minute par
+    /// minute de pas/calories cumulés, en fusionnant les compteurs par type
+    /// d'activité (max courant, jamais de décroissance — cf. commentaire de
+    /// `storeWellness` sur `wellness_counter_samples`).
+    func counterSeries(t0Local: Double, t1Local: Double, offsetSeconds: Double) throws -> [CounterPoint] {
+        struct Row {
+            let ts: Double
+            let activityType: String
+            let steps: Double?
+            let activeCalories: Double?
+        }
+        var rows: [Row] = []
+        try db.run(
+            """
+            SELECT ts, activity_type, steps, active_calories
+            FROM wellness_counter_samples WHERE ts >= ? AND ts < ? ORDER BY ts ASC
+            """,
+            [.double(t0Local - offsetSeconds + Self.counterResetLagS), .double(t1Local - offsetSeconds + Self.counterResetLagS)]) { r in
+            guard let ts = r.double(0), let type = r.text(1) else { return }
+            rows.append(Row(ts: ts, activityType: type, steps: r.double(2), activeCalories: r.double(3)))
+        }
+
+        var steps: [String: Double] = [:]
+        var calories: [String: Double] = [:]
+        func total(_ map: [String: Double]) -> Double { map.values.reduce(0, +) }
+
+        var points: [CounterPoint] = []
+        for row in rows {
+            if let s = row.steps { steps[row.activityType] = s }
+            if let c = row.activeCalories { calories[row.activityType] = c }
+            let minute = min(Int(((row.ts + offsetSeconds - t0Local) / 60).rounded()), 1440)
+            let point = CounterPoint(minute: minute, steps: total(steps), activeCalories: total(calories))
+            if let last = points.last, last.minute == minute {
+                points[points.count - 1] = point
+            } else {
+                points.append(point)
+            }
+        }
+        return points
+    }
+
+    /// Miroir de `watchSleep` (TS) — nuits stockées dont la fin tombe dans la
+    /// plage, phases décodées depuis `wellness_sleep.phases` (JSON écrit par
+    /// `storeSleep`), décalées au fuseau d'affichage.
+    private func watchSleep(rangeStart: Double, rangeEnd: Double, offsetSeconds: Double) throws -> WatchSleepResult {
+        struct Row {
+            let date: String
+            let startTs: Double
+            let endTs: Double
+            let sleepS: Double
+            let score: Double?
+            let phases: String
+        }
+        var rows: [Row] = []
+        try db.run(
+            """
+            SELECT date, start_ts, end_ts, deep_s + light_s + rem_s, score, phases
+            FROM wellness_sleep WHERE end_ts >= ? AND end_ts < ? ORDER BY start_ts ASC
+            """,
+            [.double(rangeStart - offsetSeconds), .double(rangeEnd - offsetSeconds)]) { r in
+            guard let date = r.text(0), let startTs = r.double(1), let endTs = r.double(2),
+                  let sleepS = r.double(3), let phases = r.text(5) else { return }
+            rows.append(Row(date: date, startTs: startTs, endTs: endTs, sleepS: sleepS, score: r.double(4), phases: phases))
+        }
+
+        var byDate: [String: SleepNight] = [:]
+        var allSegments: [SleepInterval] = []
+        for row in rows {
+            let stages = Self.decodePhases(row.phases).map {
+                SleepStage(from: $0.from + offsetSeconds, to: $0.to + offsetSeconds, stage: $0.stage)
+            }
+            let asleep = stages.filter { $0.stage != "awake" }.map { SleepInterval(from: $0.from, to: $0.to) }
+            byDate[row.date] = SleepNight(
+                segments: asleep,
+                main: SleepMain(from: row.startTs + offsetSeconds, to: row.endTs + offsetSeconds, durationS: row.sleepS),
+                stages: stages,
+                score: row.score)
+            allSegments.append(contentsOf: asleep)
+        }
+        return WatchSleepResult(segments: allSegments, byDate: byDate)
+    }
+
+    /// Décode le JSON écrit par `LocalDb.encodePhases` (`storeSleep`) —
+    /// réutilise `FitSleepPhase` plutôt qu'un type dédié.
+    private static func decodePhases(_ json: String) -> [FitSleepPhase] {
+        guard let data = json.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return [] }
+        return array.compactMap { dict in
+            guard let from = dict["from"] as? Double, let to = dict["to"] as? Double,
+                  let stage = dict["stage"] as? String else { return nil }
+            return FitSleepPhase(from: from, to: to, stage: stage)
+        }
+    }
+
+    /// Miroir de `pivotSeries` (TS) — `activities`/`meals` toujours vides ici
+    /// (pas de table `activities`/`food_log` locale en L2, cf. en-tête de
+    /// `BodyBattery.swift`).
+    func pivotSeries(date: String, start: Double) throws -> [LocalSample] {
+        let t0 = Self.dayStartUnixUTC(date)
+        let t1 = t0 + 86400
+        let offset = Self.localOffsetSeconds(forDate: date)
+        let stress = try samplesBetween(metric: "stress", t0Local: t0, t1Local: t1, offsetSeconds: offset)
+        guard !stress.isEmpty else { return [] }
+        let sleep = try watchSleep(rangeStart: t0 - 12 * 3600, rangeEnd: t1 + 12 * 3600, offsetSeconds: offset)
+        var params = BodyBattery.defaultParams
+        params.start = start
+        let sleepIntervals = sleep.segments.map { BBSleepInterval(from: $0.from, to: $0.to) }
+        return BodyBattery.simulatePivot(stress: stress, sleep: sleepIntervals, activities: [], params: params, meals: [])
+    }
+
+    private static let maxBodyBatteryChainDays = 400
+
+    /// Miroir de `bodyBatteryStart` (TS) — chaîne le pivot jour après jour
+    /// depuis le dernier `body_battery_state` connu (ou depuis le premier
+    /// échantillon de stress) jusqu'à `date`, en cache chaque étape. Coûteux
+    /// la première fois qu'une date lointaine est demandée (jusqu'à
+    /// `maxBodyBatteryChainDays` simulations), gratuit ensuite.
+    func bodyBatteryStart(date: String) throws -> Double {
+        if let cached = try bodyBatteryStateValue(date: date) { return cached }
+
+        var cursor: String
+        var value: Double
+        if let previous = try bodyBatteryStatePrevious(before: date) {
+            cursor = previous.date
+            value = previous.value
+        } else {
+            guard let firstTs = try minStressTimestamp() else { return BodyBattery.defaultParams.start }
+            let offset = Self.localOffsetSeconds(forDate: date)
+            cursor = FitWellnessExtractor.isoDate(firstTs + offset)
+            if cursor >= date { return BodyBattery.defaultParams.start }
+            value = BodyBattery.defaultParams.start
+        }
+
+        try setBodyBatteryState(date: cursor, value: value)
+        var iterations = 0
+        while cursor < date && iterations < Self.maxBodyBatteryChainDays {
+            let series = try pivotSeries(date: cursor, start: value)
+            if let last = series.last { value = last.value }
+            cursor = Self.shiftDate(cursor, byDays: 1)
+            try setBodyBatteryState(date: cursor, value: value)
+            iterations += 1
+        }
+        return value
+    }
+
+    private func bodyBatteryStateValue(date: String) throws -> Double? {
+        var value: Double?
+        try db.run("SELECT start_value FROM body_battery_state WHERE date = ?", [.text(date)]) { r in
+            value = r.double(0)
+        }
+        return value
+    }
+
+    private func bodyBatteryStatePrevious(before date: String) throws -> (date: String, value: Double)? {
+        var result: (date: String, value: Double)?
+        try db.run(
+            "SELECT date, start_value FROM body_battery_state WHERE date < ? ORDER BY date DESC LIMIT 1",
+            [.text(date)]) { r in
+            if let d = r.text(0), let v = r.double(1) { result = (d, v) }
+        }
+        return result
+    }
+
+    private func minStressTimestamp() throws -> Double? {
+        var ts: Double?
+        try db.run("SELECT MIN(ts) FROM wellness_samples WHERE metric = 'stress'") { r in
+            ts = r.double(0)
+        }
+        return ts
+    }
+
+    private func setBodyBatteryState(date: String, value: Double) throws {
+        try db.run(
+            """
+            INSERT INTO body_battery_state (date, start_value) VALUES (?, ?)
+            ON CONFLICT(date) DO UPDATE SET start_value = excluded.start_value
+            """,
+            [.text(date), .double(value)])
+    }
+
+    private static func shiftDate(_ date: String, byDays days: Int) -> String {
+        FitWellnessExtractor.isoDate(dayStartUnixUTC(date) + Double(days) * 86400)
     }
 }
 

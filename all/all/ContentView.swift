@@ -53,6 +53,14 @@ struct ContentView: View {
         // résolvent correctement, cf. commentaire d'en-tête de `ThemeStore`.
         .preferredColorScheme(theme.colorScheme)
         .task {
+            // Repeuple la base locale « Pulse embarqué » au lancement, si le
+            // mode Stockage en a l'usage (phone/both) — incrément L2, cf.
+            // `docs/stockage-local.md`. `ingestIfNeeded` vérifie elle-même le
+            // mode et ne fait rien en `pulse`. Fire-and-forget (hors main
+            // actor dans son implémentation, cf. `LocalIngestor.swift`) : ne
+            // bloque jamais l'affichage de la coquille.
+            LocalIngestor.ingestIfNeeded()
+
             // Mode Téléphone : pas de session à vérifier, la coquille
             // s'affiche déjà (condition ci-dessus) — inutile d'appeler
             // `api/auth/me` (qui échouerait de toute façon sans `baseURL`).

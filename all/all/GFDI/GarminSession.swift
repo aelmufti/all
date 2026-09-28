@@ -621,6 +621,16 @@ final class GarminSession: ObservableObject {
         guard !downloadQueue.isEmpty else {
             syncState = .done
             log.info("syncNewFiles terminé : file de traversée épuisée")
+            // Repeuple la base locale « Pulse embarqué » à la fin de CHAQUE
+            // traversée BLE (mode Téléphone/Les deux — incrément L2, cf.
+            // `docs/stockage-local.md`). `ingestIfNeeded` vérifie elle-même le
+            // mode Stockage et ouvre sa propre `SpoolStore`/`LocalDb` (jamais
+            // celles d'ici) : voir son commentaire d'en-tête pour pourquoi
+            // (course évitée sur `SpoolStore.entries`, mutable et manipulé sur
+            // le main actor). Seam retenu faute d'un point de fin de
+            // traversée plus canonique ; à revalider si un futur incrément en
+            // introduit un (cf. rapport d'incrément L2).
+            LocalIngestor.ingestIfNeeded()
             // Slot désormais libre : rejouer une re-list différée (FILTER reçu
             // pendant qu'un transfert l'occupait, cf. `requestDirectoryListing`).
             // `requestDirectoryListing` remet le drapeau à false → pas de boucle.

@@ -271,9 +271,12 @@ struct RealLocalPulseBackendTests {
         #expect(day1.steps == 9650)
         #expect(day1.bodyBatteryHigh == nil) // non implémenté en L1, cf. rapport
 
-        // Une route pas encore portée (L2/L3) échoue proprement, pas de crash.
+        // `wellness/day/:date` : portée à L2, cf. `LocalDayDetailTests.swift`
+        // pour la couverture détaillée. Ici, juste vérifier qu'une route
+        // encore non portée (L3+, ex. sommeil détaillé) échoue toujours
+        // proprement, pas de crash.
         #expect(throws: LocalPulseUnavailableError.self) {
-            try backend.handle(method: "GET", path: "api/wellness/day/2024-07-02", query: [:], body: nil)
+            try backend.handle(method: "GET", path: "api/wellness/sleep-export/2024-07-02", query: [:], body: nil)
         }
     }
 }

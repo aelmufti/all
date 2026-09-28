@@ -32,7 +32,7 @@ SQLite calquées sur celles de Pulse → contrôleurs).
 |---|---|---|
 | **L0 ✅** | Réglage de mode ; livraison locale (archivage) en Téléphone ; routage `PulseAPIClient` + backend local stub ; login contourné et écrans hors montre masqués en Téléphone ; pas de push live HR en Téléphone | device : mode Téléphone → synchro → archivage sans réseau |
 | **L1 ✅** | Décodeur FIT maison (`all/Local/Fit/`) + base SQLite système (`all/Local/Db/`) + ingestion (`LocalIngestor`, dédup hash) ; backend local sert `wellness/dates` + `wellness/days` | 13 tests vs sortie `@garmin/fitsdk` sur les `.fit` d'exemple |
-| L2 | **Reste de L1** : `wellness/day/:date` (dont `bodyBatteryPivot`) ; câblage `LocalIngestor.ingestAll` dans le flux BLE / ouverture app ; routes `intensity` + live HR local ; écrans Maintenant + Santé en mode Téléphone | écrans en mode Téléphone |
-| L3 | Sommeil + Activités | |
+| **L2 ✅** | `wellness/day/:date` (+ `bodyBatteryPivot` porté & recoupé vs TS) ; ingestion câblée (lancement + fin de traversée BLE) ; Maintenant + Santé lisibles en Téléphone. **Reportés** : `intensity` local + live HR local (dégradent proprement) ; `api/activities` = stub vide | 16 tests + build device |
+| L3 | Sommeil (écran + validation sur vraie nuit) + Activités (tables, extracteur record/session/lap/GPS, `api/activities` + `:id`) | |
 | L4 | Stats / Dashboard | |
 | L5+ | Nutrition, Programme, Poids | |
