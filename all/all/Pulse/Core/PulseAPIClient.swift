@@ -183,10 +183,13 @@ final class PulseAPIClient {
         case .both:
             do {
                 return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
-            } catch PulseAPIError.transport(_) {
-                // Repli local — erreur de transport SEULEMENT (DNS/TLS/offline/
-                // timeout), jamais sur un code HTTP (même 5xx) ni sur 401 : ceux-là
-                // remontent tels quels, cf. en-tête de fichier et `docs/stockage-local.md`.
+            } catch PulseAPIError.transport(_), PulseAPIError.notConfigured {
+                // Repli local si Pulse est injoignable : erreur de transport
+                // (DNS/TLS/offline/timeout) OU aucune adresse Pulse configurée
+                // (`.notConfigured` — « pas de Pulse du tout → tout local »,
+                // décision 2026-09-29). Jamais sur un code HTTP (même 5xx) ni
+                // sur 401 : ceux-là veulent dire que Pulse a répondu, donc ils
+                // remontent tels quels — cf. en-tête et `docs/stockage-local.md`.
                 return (try localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
             }
         }

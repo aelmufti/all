@@ -11,7 +11,8 @@ Décisions utilisateur (2026-09-29) :
 - **Archivage montre** en mode Téléphone : **dès l'écriture locale** (le fichier du
   spool vaut livraison). En Pulse/Les deux : inchangé (après 2xx Pulse).
 - **Les deux** : les écrans lisent **Pulse, repli local** si Pulse est injoignable
-  (erreur de transport seulement, pas 4xx/401).
+  — erreur de transport **ou** aucune adresse Pulse configurée (`.notConfigured` :
+  « pas de Pulse → tout local », décision 2026-09-29). Jamais sur 4xx/401/5xx.
 - **Historique** : la base locale est (ré)alimentée depuis le **spool** existant
   (tous les `.fit` depuis la 1re synchro de l'app). Pas de rapatriement depuis Pulse.
 - **Hors montre** (Nutrition, Programme, Poids) : **masqués** en mode Téléphone,
