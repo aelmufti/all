@@ -1,0 +1,62 @@
+bridge-connect (application « all »)
+Copyright (C) 2026 Ali El Mufti
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See LICENSE.
+
+
+DERIVED WORK
+------------
+
+This project is a derived work of Gadgetbridge, licensed under the AGPL-3.0.
+
+    Gadgetbridge
+    Copyright (C) 2015-2026 the Gadgetbridge contributors
+    https://codeberg.org/Freeyourgadget/Gadgetbridge
+
+The Garmin GFDI protocol implemented here is not original work: it was reverse
+engineered by the Gadgetbridge project. bridge-connect is a fresh Swift
+re-implementation of a minimal subset of that protocol for iOS (CoreBluetooth +
+WKWebView). It is a port, not a verbatim copy: no Gadgetbridge source file is
+carried into this repository. But the protocol logic it reproduces originates in
+Gadgetbridge, so the AGPL-3.0 applies to this program as a whole.
+
+    garmin-bridge (also AGPL-3.0, a JVM/BlueZ port of the same Gadgetbridge
+    subset) was used as the reference specification while porting to Swift.
+
+The parts whose behaviour derives from Gadgetbridge / garmin-bridge include, in
+this repository:
+
+    all/all/GFDI/        GFDI framing, COBS, CRC-16, message acks, file transfer
+                         reassembly, the handshake and sync traversal, calendar
+                         sync (CommunicatorV2, GarminSession, Cobs, Crc16,
+                         GfdiFrame, GfdiTransport, FileTransferReassembler,
+                         RealtimeSession, RealtimeDecoders, ...)
+
+The FIT decoder (all/all/Local/Fit/) is an independent Swift implementation of
+the public FIT binary format. FIT global-message and field numbers were
+cross-referenced against Garmin's FIT SDK profile during development; no Garmin
+SDK code is bundled in this application.
+
+
+THIRD-PARTY COMPONENTS
+----------------------
+
+  swift-protobuf              Apache License 2.0 (GPL/AGPL-compatible)
+                              used for a minimal calendar .proto (all/proto/)
+
+  Open Food Facts             queried at runtime for nutrition search / barcode
+                              (world.openfoodfacts.org, search.openfoodfacts.org)
+                              only in "Téléphone" storage mode, user-triggered.
+                              Open Food Facts data is licensed under the ODbL.
+
+
+NOT AFFILIATED WITH GARMIN
+--------------------------
+
+This project is independent and is not affiliated with, authorised, sponsored or
+endorsed by Garmin Ltd. or its subsidiaries. "Garmin", "Venu" and related marks
+are trademarks of their respective owners and are used here only to describe
+interoperability.
