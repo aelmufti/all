@@ -251,7 +251,7 @@ struct LocalIngestorTests {
 // MARK: - `RealLocalPulseBackend` (routes `wellness/days`/`wellness/dates`)
 
 struct RealLocalPulseBackendTests {
-    @Test func serveDatesAndDaysAfterIngestion() throws {
+    @Test func serveDatesAndDaysAfterIngestion() async throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("local-pulse-backend-tests-\(UUID().uuidString).sqlite").path
         let db = try LocalDb(path: path)
@@ -261,11 +261,11 @@ struct RealLocalPulseBackendTests {
 
         let backend = RealLocalPulseBackend(db: db)
 
-        let datesData = try backend.handle(method: "GET", path: "api/wellness/dates", query: [:], body: nil)
+        let datesData = try await backend.handle(method: "GET", path: "api/wellness/dates", query: [:], body: nil)
         let dates = try PulseAPIClient.decoder.decode([String].self, from: datesData)
         #expect(dates == ["2024-07-02", "2024-07-03"])
 
-        let daysData = try backend.handle(method: "GET", path: "api/wellness/days", query: ["limit": "30"], body: nil)
+        let daysData = try await backend.handle(method: "GET", path: "api/wellness/days", query: ["limit": "30"], body: nil)
         let days = try PulseAPIClient.decoder.decode([WellnessDayRow].self, from: daysData)
         let day1 = try #require(days.first { $0.date == "2024-07-02" })
         #expect(day1.restingHr == 48)
@@ -277,8 +277,8 @@ struct RealLocalPulseBackendTests {
         // pour la couverture détaillée. Ici, juste vérifier qu'une route
         // encore non portée (L3+, ex. sommeil détaillé) échoue toujours
         // proprement, pas de crash.
-        #expect(throws: LocalPulseUnavailableError.self) {
-            try backend.handle(method: "GET", path: "api/wellness/sleep-export/2024-07-02", query: [:], body: nil)
+        await #expect(throws: LocalPulseUnavailableError.self) {
+            try await backend.handle(method: "GET", path: "api/wellness/sleep-export/2024-07-02", query: [:], body: nil)
         }
     }
 }

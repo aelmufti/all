@@ -185,7 +185,7 @@ struct ActivityIngestThenServeTests {
     /// api/activities/:id` (détail) → décodage par le décodeur RÉEL de l'app
     /// (`PulseAPIClient.decoder`) dans les modèles RÉELS de l'écran
     /// (`ActivityListResponse`/`ActivityDetail`, `ActivityModels.swift`).
-    @Test func ingestActivityThenServeListAndDetailDecodableByRealAppModels() throws {
+    @Test func ingestActivityThenServeListAndDetailDecodableByRealAppModels() async throws {
         let spoolRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("l3-activity-spool-\(UUID().uuidString)", isDirectory: true)
         let spool = try SpoolStore(root: spoolRoot)
@@ -204,7 +204,7 @@ struct ActivityIngestThenServeTests {
 
         let backend = RealLocalPulseBackend(db: db, spool: spool)
 
-        let listData = try backend.handle(method: "GET", path: "api/activities", query: [:], body: nil)
+        let listData = try await backend.handle(method: "GET", path: "api/activities", query: [:], body: nil)
         let list = try PulseAPIClient.decoder.decode(ActivityListResponse.self, from: listData)
         #expect(list.total == 1)
         let item = try #require(list.items.first)
@@ -212,7 +212,7 @@ struct ActivityIngestThenServeTests {
         #expect(item.durationS == 1960.173)
         #expect(item.distanceM == 4636.4)
 
-        let detailData = try backend.handle(method: "GET", path: "api/activities/\(item.id)", query: [:], body: nil)
+        let detailData = try await backend.handle(method: "GET", path: "api/activities/\(item.id)", query: [:], body: nil)
         let detail = try PulseAPIClient.decoder.decode(ActivityDetail.self, from: detailData)
         #expect(detail.id == item.id)
         #expect(detail.sport == "running")
@@ -233,7 +233,7 @@ struct ActivityIngestThenServeTests {
     /// contient bien des séries nommées décodables — complète la couverture
     /// running ci-dessus sur un chemin différent (`sets` au lieu de
     /// `laps`/`splits`).
-    @Test func strengthActivityDetailExposesNamedSets() throws {
+    @Test func strengthActivityDetailExposesNamedSets() async throws {
         let spoolRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("l3-activity-spool-\(UUID().uuidString)", isDirectory: true)
         let spool = try SpoolStore(root: spoolRoot)
@@ -247,12 +247,12 @@ struct ActivityIngestThenServeTests {
         #expect(LocalIngestor.ingest(fileURL: url, hash: hash, fileName: "strength.fit", into: db).kind == .activity)
 
         let backend = RealLocalPulseBackend(db: db, spool: spool)
-        let listData = try backend.handle(method: "GET", path: "api/activities", query: [:], body: nil)
+        let listData = try await backend.handle(method: "GET", path: "api/activities", query: [:], body: nil)
         let list = try PulseAPIClient.decoder.decode(ActivityListResponse.self, from: listData)
         let item = try #require(list.items.first)
         #expect(item.subSport == "strengthTraining")
 
-        let detailData = try backend.handle(method: "GET", path: "api/activities/\(item.id)", query: [:], body: nil)
+        let detailData = try await backend.handle(method: "GET", path: "api/activities/\(item.id)", query: [:], body: nil)
         let detail = try PulseAPIClient.decoder.decode(ActivityDetail.self, from: detailData)
         #expect(detail.sets.count == 17)
         #expect(detail.sets.first?.category == "tricepsExtension")
@@ -285,25 +285,25 @@ struct ActivityBackendEdgeCaseTests {
         return try LocalDb(path: path)
     }
 
-    @Test func emptyDbProducesEmptyList() throws {
+    @Test func emptyDbProducesEmptyList() async throws {
         let backend = RealLocalPulseBackend(db: try makeDb())
-        let data = try backend.handle(method: "GET", path: "api/activities", query: [:], body: nil)
+        let data = try await backend.handle(method: "GET", path: "api/activities", query: [:], body: nil)
         let list = try PulseAPIClient.decoder.decode(ActivityListResponse.self, from: data)
         #expect(list.total == 0)
         #expect(list.items.isEmpty)
     }
 
-    @Test func unknownIdFailsCleanly() throws {
+    @Test func unknownIdFailsCleanly() async throws {
         let backend = RealLocalPulseBackend(db: try makeDb())
-        #expect(throws: LocalActivityNotFoundError.self) {
-            try backend.handle(method: "GET", path: "api/activities/999", query: [:], body: nil)
+        await #expect(throws: LocalActivityNotFoundError.self) {
+            try await backend.handle(method: "GET", path: "api/activities/999", query: [:], body: nil)
         }
     }
 
-    @Test func nonNumericIdFailsCleanly() throws {
+    @Test func nonNumericIdFailsCleanly() async throws {
         let backend = RealLocalPulseBackend(db: try makeDb())
-        #expect(throws: LocalActivityNotFoundError.self) {
-            try backend.handle(method: "GET", path: "api/activities/not-an-id", query: [:], body: nil)
+        await #expect(throws: LocalActivityNotFoundError.self) {
+            try await backend.handle(method: "GET", path: "api/activities/not-an-id", query: [:], body: nil)
         }
     }
 
@@ -311,7 +311,7 @@ struct ActivityBackendEdgeCaseTests {
     /// brut introuvable) — miroir de la branche `!fs.existsSync(filePath)`
     /// côté serveur (`activities.controller.ts`) : résumé seul, `track: []`,
     /// `streams: null`, tout le reste vide.
-    @Test func missingRawFileFallsBackToSummaryOnly() throws {
+    @Test func missingRawFileFallsBackToSummaryOnly() async throws {
         let db = try makeDb()
         let messages = try ActivitySample.messages(ActivitySample.strength)
         let summary = FitActivityExtractor.extractSummary(messages: messages)
@@ -319,7 +319,7 @@ struct ActivityBackendEdgeCaseTests {
         let id = try db.storeActivity(summary, hash: hash, fileName: "strength.fit")
 
         let backend = RealLocalPulseBackend(db: db) // pas de spool → fichier introuvable
-        let data = try backend.handle(method: "GET", path: "api/activities/\(id)", query: [:], body: nil)
+        let data = try await backend.handle(method: "GET", path: "api/activities/\(id)", query: [:], body: nil)
         let detail = try PulseAPIClient.decoder.decode(ActivityDetail.self, from: data)
 
         #expect(detail.sport == "training")
@@ -357,7 +357,7 @@ struct SommeilRouteCoverageTests {
     /// nuit. Ce test-ci confirme seulement que le bloc `sleep` du JSON EST
     /// bien présent et décodable (vide, en l'absence de nuit) — pas que son
     /// contenu est correct sur une vraie nuit. Toujours vrai après L3.
-    @Test func sommeilViewModelRoutesAllRespond() throws {
+    @Test func sommeilViewModelRoutesAllRespond() async throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("l3-sommeil-coverage-\(UUID().uuidString).sqlite").path
         let db = try LocalDb(path: path)
@@ -367,16 +367,16 @@ struct SommeilRouteCoverageTests {
 
         let backend = RealLocalPulseBackend(db: db)
 
-        let datesData = try backend.handle(method: "GET", path: "api/wellness/dates", query: [:], body: nil)
+        let datesData = try await backend.handle(method: "GET", path: "api/wellness/dates", query: [:], body: nil)
         let dates = try PulseAPIClient.decoder.decode([String].self, from: datesData)
         #expect(!dates.isEmpty)
 
-        let daysData = try backend.handle(
+        let daysData = try await backend.handle(
             method: "GET", path: "api/wellness/days", query: ["limit": "30", "days": "30"], body: nil)
         let days = try PulseAPIClient.decoder.decode([WellnessDayRow].self, from: daysData)
         #expect(!days.isEmpty)
 
-        let dayData = try backend.handle(
+        let dayData = try await backend.handle(
             method: "GET", path: "api/wellness/day/\(dates[0])", query: [:], body: nil)
         let day = try PulseAPIClient.decoder.decode(WellnessDayDetail.self, from: dayData)
         #expect(day.date == dates[0])
@@ -387,8 +387,8 @@ struct SommeilRouteCoverageTests {
         // `stats/sleep-recommendation` : jamais servie localement (`try?`
         // côté `SommeilViewModel`) — `RealLocalPulseBackend` doit échouer
         // proprement, pas planter, sur cette route non portée.
-        #expect(throws: LocalPulseUnavailableError.self) {
-            try backend.handle(method: "GET", path: "api/stats/sleep-recommendation", query: ["days": "30"], body: nil)
+        await #expect(throws: LocalPulseUnavailableError.self) {
+            try await backend.handle(method: "GET", path: "api/stats/sleep-recommendation", query: ["days": "30"], body: nil)
         }
     }
 }

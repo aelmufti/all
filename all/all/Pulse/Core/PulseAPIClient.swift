@@ -181,7 +181,7 @@ final class PulseAPIClient {
     private func routedData(method: String, path: String, query: [String: String], bodyData: Data?) async throws -> (Data, Int?) {
         switch modeProvider() {
         case .phone:
-            return (try localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+            return (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
         case .pulse:
             return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
         case .both:
@@ -194,7 +194,7 @@ final class PulseAPIClient {
                 // décision 2026-09-29). Jamais sur un code HTTP (même 5xx) ni
                 // sur 401 : ceux-là veulent dire que Pulse a répondu, donc ils
                 // remontent tels quels — cf. en-tête et `docs/stockage-local.md`.
-                return (try localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+                return (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
             }
         }
     }
@@ -433,10 +433,13 @@ extension PulseAPIError: LocalizedError {
 /// route (même méthode/chemin/query/corps), et renvoie le même JSON brut —
 /// `PulseAPIClient` le décode ensuite avec le même `decoder` que la réponse
 /// serveur, donc les modèles `Decodable` des écrans ne savent jamais d'où
-/// vient la réponse. Pas `async` : le futur portage réel (L1+, SQLite système)
-/// est local et rapide — si ça change, `async throws` s'ajoutera alors.
+/// vient la réponse. `async` depuis l'incrément L5-Nutrition : les deux
+/// routes Open Food Facts (`nutrition/search`, `nutrition/barcode/:code`)
+/// sont le seul réseau autorisé en mode Téléphone (cf. CLAUDE.md) et
+/// `await`-ent `URLSession` ; toutes les autres routes restent synchrones en
+/// interne (SQLite local), `async` ne change rien pour elles.
 protocol LocalPulseBackend {
-    func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data
+    func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data
 }
 
 /// Erreur dédiée du backend local — message stable et testé
@@ -453,7 +456,7 @@ struct LocalPulseUnavailableError: Error, LocalizedError {
 /// Échoue systématiquement avec un message clair plutôt que de renvoyer un
 /// JSON vide trompeur ou de planter.
 struct StubLocalPulseBackend: LocalPulseBackend {
-    func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data {
+    func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data {
         throw LocalPulseUnavailableError()
     }
 }

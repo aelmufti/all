@@ -81,7 +81,7 @@ private final class RecordingLocalPulseBackend: LocalPulseBackend {
     private(set) var calls: [(method: String, path: String, query: [String: String], body: Data?)] = []
     var responseData = Data("{}".utf8)
 
-    func handle(method: String, path: String, query: [String: String], body: Data?) throws -> Data {
+    func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data {
         calls.append((method, path, query, body))
         return responseData
     }
@@ -407,10 +407,10 @@ struct PulseSocleTests {
         #expect(local.calls.isEmpty)
     }
 
-    @Test func stubLocalBackendThrowsTheDedicatedNotAvailableMessage() {
+    @Test func stubLocalBackendThrowsTheDedicatedNotAvailableMessage() async {
         let backend = StubLocalPulseBackend()
         do {
-            _ = try backend.handle(method: "GET", path: "api/wellness/day/2026-09-23", query: [:], body: nil)
+            _ = try await backend.handle(method: "GET", path: "api/wellness/day/2026-09-23", query: [:], body: nil)
             Issue.record("Devait jeter LocalPulseUnavailableError")
         } catch {
             #expect(error.localizedDescription == "Pas encore disponible en mode Téléphone")

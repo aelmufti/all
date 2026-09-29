@@ -232,12 +232,12 @@ struct LocalDayDetailTests {
     /// `Pulse/Screens/Health/HealthModels.swift`) — valide la FORME JSON en
     /// plus des valeurs (un champ manquant/mal typé ferait échouer le
     /// décodage, pas juste une assertion de valeur).
-    @Test func backendServesDayDetailDecodableByRealAppModel() throws {
+    @Test func backendServesDayDetailDecodableByRealAppModel() async throws {
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
 
-        let data = try backend.handle(method: "GET", path: "api/wellness/day/2024-07-02", query: [:], body: nil)
+        let data = try await backend.handle(method: "GET", path: "api/wellness/day/2024-07-02", query: [:], body: nil)
         let detail = try PulseAPIClient.decoder.decode(WellnessDayDetail.self, from: data)
 
         #expect(detail.date == "2024-07-02")
@@ -263,12 +263,12 @@ struct LocalDayDetailTests {
     /// cf. `HomeModels.swift`) : les `ts` de `hr`/`stress`/`spo2`/`respiration`
     /// sont toujours des entiers "purs" (epoch + décalage entiers), donc
     /// décodables dans les deux représentations.
-    @Test func backendServesDayDetailDecodableByHomeModel() throws {
+    @Test func backendServesDayDetailDecodableByHomeModel() async throws {
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
 
-        let data = try backend.handle(method: "GET", path: "api/wellness/day/2024-07-02", query: [:], body: nil)
+        let data = try await backend.handle(method: "GET", path: "api/wellness/day/2024-07-02", query: [:], body: nil)
         let detail = try PulseAPIClient.decoder.decode(HomeDayDetail.self, from: data)
 
         #expect(detail.date == "2024-07-02")
@@ -280,10 +280,10 @@ struct LocalDayDetailTests {
     /// lequel `HomeViewModel.load()` échouerait tout l'écran (elle attend
     /// cette route dans le même bloc `try` que `wellness/day`, pas en
     /// "best-effort").
-    @Test func backendServesEmptyActivityList() throws {
+    @Test func backendServesEmptyActivityList() async throws {
         let db = try makeDb()
         let backend = RealLocalPulseBackend(db: db)
-        let data = try backend.handle(method: "GET", path: "api/activities", query: ["limit": "40"], body: nil)
+        let data = try await backend.handle(method: "GET", path: "api/activities", query: ["limit": "40"], body: nil)
         let list = try PulseAPIClient.decoder.decode(HomeActivityListResponse.self, from: data)
         #expect(list.total == 0)
         #expect(list.items.isEmpty)
@@ -292,11 +292,11 @@ struct LocalDayDetailTests {
     /// Une date malformée (pas `YYYY-MM-DD`) échoue proprement plutôt que de
     /// planter la base — miroir dégradé du `BadRequestException` serveur
     /// (pas de code HTTP côté backend local, cf. `PulseAPIClient.routedData`).
-    @Test func malformedDateThrowsCleanly() throws {
+    @Test func malformedDateThrowsCleanly() async throws {
         let db = try makeDb()
         let backend = RealLocalPulseBackend(db: db)
-        #expect(throws: LocalPulseUnavailableError.self) {
-            try backend.handle(method: "GET", path: "api/wellness/day/not-a-date", query: [:], body: nil)
+        await #expect(throws: LocalPulseUnavailableError.self) {
+            try await backend.handle(method: "GET", path: "api/wellness/day/not-a-date", query: [:], body: nil)
         }
     }
 }

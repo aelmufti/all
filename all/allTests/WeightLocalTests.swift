@@ -23,30 +23,30 @@ struct WeightLocalTests {
         return RealLocalPulseBackend(db: db)
     }
 
-    private func post(_ backend: RealLocalPulseBackend, date: String?, kg: Double) throws -> WeightSaveResult {
+    private func post(_ backend: RealLocalPulseBackend, date: String?, kg: Double) async throws -> WeightSaveResult {
         var payload: [String: Any] = ["kg": kg]
         if let date { payload["date"] = date }
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let data = try backend.handle(method: "POST", path: "api/weight", query: [:], body: body)
+        let data = try await backend.handle(method: "POST", path: "api/weight", query: [:], body: body)
         return try PulseAPIClient.decoder.decode(WeightSaveResult.self, from: data)
     }
 
-    private func getWeight(_ backend: RealLocalPulseBackend) throws -> WeightData {
-        let data = try backend.handle(method: "GET", path: "api/weight", query: ["days": "3660"], body: nil)
+    private func getWeight(_ backend: RealLocalPulseBackend) async throws -> WeightData {
+        let data = try await backend.handle(method: "GET", path: "api/weight", query: ["days": "3660"], body: nil)
         return try PulseAPIClient.decoder.decode(WeightData.self, from: data)
     }
 
     /// POST une pesée puis GET — vérifie la forme JSON réelle (décodage dans
     /// `WeightData`, comme le ferait `HealthViewModel.loadWeight`) et les
     /// valeurs `current`/`entries`/`series`.
-    @Test func postThenGetReflectsSingleEntry() throws {
+    @Test func postThenGetReflectsSingleEntry() async throws {
         let backend = try makeBackend()
 
-        let saved = try post(backend, date: "2026-09-20", kg: 70.4)
+        let saved = try await post(backend, date: "2026-09-20", kg: 70.4)
         #expect(saved.date == "2026-09-20")
         #expect(saved.kg == 70.4)
 
-        let weight = try getWeight(backend)
+        let weight = try await getWeight(backend)
         #expect(weight.current == 70.4)
         #expect(weight.currentDate == "2026-09-20")
         #expect(weight.deltaKg == nil) // une seule entrée : pas de delta (miroir `rows.length > 1`)
@@ -63,12 +63,12 @@ struct WeightLocalTests {
     /// Deuxième pesée à une date ultérieure : `current`/`currentDate` suivent
     /// la plus récente, `deltaKg` = (dernière - première) de la fenêtre,
     /// arrondi à 0,1 — miroir exact de `WeightController.list`.
-    @Test func secondEntryUpdatesCurrentAndDelta() throws {
+    @Test func secondEntryUpdatesCurrentAndDelta() async throws {
         let backend = try makeBackend()
-        _ = try post(backend, date: "2026-09-20", kg: 70.4)
-        _ = try post(backend, date: "2026-09-25", kg: 69.1)
+        _ = try await post(backend, date: "2026-09-20", kg: 70.4)
+        _ = try await post(backend, date: "2026-09-25", kg: 69.1)
 
-        let weight = try getWeight(backend)
+        let weight = try await getWeight(backend)
         #expect(weight.current == 69.1)
         #expect(weight.currentDate == "2026-09-25")
         #expect(weight.entries == 2)
@@ -79,12 +79,12 @@ struct WeightLocalTests {
 
     /// Re-POST sur la MÊME date : upsert (`ON CONFLICT(date) DO UPDATE`), pas
     /// une deuxième ligne — `entries` doit rester à 1.
-    @Test func postOnSameDateUpserts() throws {
+    @Test func postOnSameDateUpserts() async throws {
         let backend = try makeBackend()
-        _ = try post(backend, date: "2026-09-20", kg: 70.4)
-        _ = try post(backend, date: "2026-09-20", kg: 71.2)
+        _ = try await post(backend, date: "2026-09-20", kg: 70.4)
+        _ = try await post(backend, date: "2026-09-20", kg: 71.2)
 
-        let weight = try getWeight(backend)
+        let weight = try await getWeight(backend)
         #expect(weight.entries == 1)
         #expect(weight.current == 71.2)
     }
@@ -93,9 +93,9 @@ struct WeightLocalTests {
     /// (`todayDateKey`, miroir `todayKey()` TS) — vérifié via le format
     /// `YYYY-MM-DD` plutôt qu'une valeur figée (le test tournerait n'importe
     /// quel jour).
-    @Test func postWithoutDateDefaultsToToday() throws {
+    @Test func postWithoutDateDefaultsToToday() async throws {
         let backend = try makeBackend()
-        let saved = try post(backend, date: nil, kg: 80)
+        let saved = try await post(backend, date: nil, kg: 80)
         #expect(saved.date.count == 10)
         #expect(saved.date.contains("-"))
     }
@@ -105,15 +105,15 @@ struct WeightLocalTests {
     /// plus aucune — la clé n'est PAS remise à zéro, miroir de `syncProfile`
     /// TS qui ne touche rien si `!latest`, cf. `LocalDb.syncWeightProfile`) ;
     /// vérifié séparément ci-dessous avec une pesée restante.
-    @Test func deleteRemovesEntry() throws {
+    @Test func deleteRemovesEntry() async throws {
         let backend = try makeBackend()
-        _ = try post(backend, date: "2026-09-20", kg: 70.4)
+        _ = try await post(backend, date: "2026-09-20", kg: 70.4)
 
-        let deleteData = try backend.handle(method: "DELETE", path: "api/weight/2026-09-20", query: [:], body: nil)
+        let deleteData = try await backend.handle(method: "DELETE", path: "api/weight/2026-09-20", query: [:], body: nil)
         let ok = try JSONSerialization.jsonObject(with: deleteData) as? [String: Bool]
         #expect(ok?["ok"] == true)
 
-        let weight = try getWeight(backend)
+        let weight = try await getWeight(backend)
         #expect(weight.entries == 0)
         #expect(weight.current == nil)
         #expect(weight.series.isEmpty)
@@ -122,43 +122,43 @@ struct WeightLocalTests {
     /// `settings.weightKg` (lu directement via `LocalDb.settingValue`) suit la
     /// dernière pesée restante après une suppression — vérifie
     /// `syncWeightProfile` au-delà de la seule réponse HTTP `api/weight`.
-    @Test func deleteResyncsSettingsToRemainingLatest() throws {
+    @Test func deleteResyncsSettingsToRemainingLatest() async throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("weight-local-tests-\(UUID().uuidString).sqlite").path
         let db = try LocalDb(path: path)
         let backend = RealLocalPulseBackend(db: db)
 
-        _ = try post(backend, date: "2026-09-20", kg: 70.4)
-        _ = try post(backend, date: "2026-09-25", kg: 69.0)
+        _ = try await post(backend, date: "2026-09-20", kg: 70.4)
+        _ = try await post(backend, date: "2026-09-25", kg: 69.0)
         #expect(try db.settingValue(key: "weightKg") == "69")
 
-        _ = try backend.handle(method: "DELETE", path: "api/weight/2026-09-25", query: [:], body: nil)
+        _ = try await backend.handle(method: "DELETE", path: "api/weight/2026-09-25", query: [:], body: nil)
         #expect(try db.settingValue(key: "weightKg") == "70.4")
     }
 
     /// `kg` hors bornes [25, 300] (miroir `MIN_KG`/`MAX_KG` TS) : la requête
     /// lève, rien n'est écrit.
-    @Test func outOfRangeKgThrows() throws {
+    @Test func outOfRangeKgThrows() async throws {
         let backend = try makeBackend()
-        #expect(throws: (any Error).self) {
-            _ = try self.post(backend, date: "2026-09-20", kg: 400)
+        await #expect(throws: (any Error).self) {
+            _ = try await self.post(backend, date: "2026-09-20", kg: 400)
         }
-        #expect(throws: (any Error).self) {
-            _ = try self.post(backend, date: "2026-09-20", kg: 10)
+        await #expect(throws: (any Error).self) {
+            _ = try await self.post(backend, date: "2026-09-20", kg: 10)
         }
-        let weight = try getWeight(backend)
+        let weight = try await getWeight(backend)
         #expect(weight.entries == 0)
     }
 
     /// Date malformée sur `POST`/`DELETE` : lève proprement (pas de crash),
     /// miroir dégradé du `BadRequestException` côté serveur.
-    @Test func malformedDateThrowsCleanly() throws {
+    @Test func malformedDateThrowsCleanly() async throws {
         let backend = try makeBackend()
-        #expect(throws: (any Error).self) {
-            _ = try self.post(backend, date: "20-09-2026", kg: 70)
+        await #expect(throws: (any Error).self) {
+            _ = try await self.post(backend, date: "20-09-2026", kg: 70)
         }
-        #expect(throws: (any Error).self) {
-            _ = try backend.handle(method: "DELETE", path: "api/weight/not-a-date", query: [:], body: nil)
+        await #expect(throws: (any Error).self) {
+            _ = try await backend.handle(method: "DELETE", path: "api/weight/not-a-date", query: [:], body: nil)
         }
     }
 }

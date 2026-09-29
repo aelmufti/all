@@ -45,6 +45,7 @@ final class LocalDb {
     init(path: String) throws {
         db = try SQLiteDatabase(path: path)
         try db.execute(Self.schema)
+        try seedFoodsIfNeeded()
     }
 
     private static let schema = """
@@ -131,6 +132,36 @@ final class LocalDb {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS foods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      barcode TEXT UNIQUE,
+      name TEXT NOT NULL,
+      kcal REAL,
+      protein REAL,
+      carbs REAL,
+      fiber REAL,
+      fat REAL,
+      unit_label TEXT,
+      unit_grams REAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS food_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      food_id INTEGER,
+      name TEXT NOT NULL,
+      grams REAL NOT NULL,
+      kcal REAL,
+      protein REAL,
+      carbs REAL,
+      fiber REAL,
+      fat REAL,
+      unit_label TEXT,
+      unit_qty REAL,
+      ts INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_food_log_date ON food_log(date);
     """
 
     // MARK: - Dédup (`imported_files`) — même principe que Pulse : hash du
@@ -901,6 +932,404 @@ final class LocalDb {
         try db.run(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
             [.text(key), .text(value)])
+    }
+
+    // MARK: - Nutrition (incrément L5-Nutrition, miroir `nutrition.controller.ts`)
+    //
+    // `foods`/`food_log` — schéma EXACT de `db.service.ts` (`SCHEMA`, lignes
+    // ~88-118, y compris `idx_food_log_date`). Semée au premier ouverture
+    // (table `foods` vide) depuis `Self.seedFoods`, port intégral de
+    // `nutrition/seed-foods.ts` (~95 aliments). Divergence assumée vs serveur :
+    // le serveur reseed en fonction d'une version (`SEED_VERSION`/
+    // `foodsSeedVersion`, pour ajouter de nouveaux aliments à un catalogue déjà
+    // peuplé sans dupliquer) — non reproduit ici, la sédition locale se fait
+    // une seule fois (base vide) ; suffisant pour cet incrément, à revisiter
+    // si `seed-foods.ts` gagne des entrées après la première synchro d'un
+    // utilisateur donné.
+
+    private struct SeedFood {
+        let name: String
+        let kcal: Double
+        let protein: Double
+        let carbs: Double
+        let fiber: Double
+        let fat: Double
+        let unitLabel: String?
+        let unitGrams: Double?
+    }
+
+    private func seedFoodsIfNeeded() throws {
+        var count = 0
+        try db.run("SELECT COUNT(*) FROM foods") { r in count = Int(r.double(0) ?? 0) }
+        guard count == 0 else { return }
+        try db.transaction {
+            for f in Self.seedFoods {
+                try db.run(
+                    """
+                    INSERT INTO foods (name, kcal, protein, carbs, fiber, fat, unit_label, unit_grams)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [.text(f.name), .double(f.kcal), .double(f.protein), .double(f.carbs), .double(f.fiber), .double(f.fat),
+                     sqliteOptionalText(f.unitLabel), sqliteOptional(f.unitGrams)])
+            }
+        }
+    }
+
+    // Port intégral de `SEED_FOODS` (`nutrition/seed-foods.ts`).
+    private static let seedFoods: [SeedFood] = [
+        SeedFood(name: "Skyr nature", kcal: 63, protein: 11, carbs: 4, fiber: 0, fat: 0.2, unitLabel: "pot", unitGrams: 150),
+        SeedFood(name: "Fromage blanc 0%", kcal: 47, protein: 8, carbs: 4, fiber: 0, fat: 0.2, unitLabel: "pot", unitGrams: 100),
+        SeedFood(name: "Yaourt grec nature", kcal: 97, protein: 9, carbs: 4, fiber: 0, fat: 5, unitLabel: "pot", unitGrams: 150),
+        SeedFood(name: "Yaourt nature", kcal: 61, protein: 3.5, carbs: 5, fiber: 0, fat: 3.3, unitLabel: "pot", unitGrams: 125),
+        SeedFood(name: "Cottage cheese", kcal: 98, protein: 11, carbs: 3.4, fiber: 0, fat: 4.3, unitLabel: "pot", unitGrams: 100),
+        SeedFood(name: "Blanc d'œuf", kcal: 52, protein: 11, carbs: 0.7, fiber: 0, fat: 0.2, unitLabel: "blanc", unitGrams: 33),
+        SeedFood(name: "Œuf entier", kcal: 143, protein: 13, carbs: 1.1, fiber: 0, fat: 10, unitLabel: "œuf", unitGrams: 55),
+        SeedFood(name: "Lait demi-écrémé", kcal: 47, protein: 3.3, carbs: 4.8, fiber: 0, fat: 1.6, unitLabel: "verre", unitGrams: 200),
+        SeedFood(name: "Mozzarella", kcal: 280, protein: 22, carbs: 2.2, fiber: 0, fat: 21, unitLabel: "boule", unitGrams: 125),
+        SeedFood(name: "Parmesan", kcal: 392, protein: 36, carbs: 3.2, fiber: 0, fat: 25, unitLabel: "c. à soupe", unitGrams: 10),
+        SeedFood(name: "Emmental", kcal: 380, protein: 28, carbs: 0.5, fiber: 0, fat: 29, unitLabel: "tranche", unitGrams: 20),
+        SeedFood(name: "Whey (poudre)", kcal: 400, protein: 80, carbs: 8, fiber: 0, fat: 6, unitLabel: "dose", unitGrams: 30),
+        SeedFood(name: "Blanc de poulet", kcal: 165, protein: 31, carbs: 0, fiber: 0, fat: 3.6, unitLabel: "filet", unitGrams: 150),
+        SeedFood(name: "Escalope de dinde", kcal: 135, protein: 29, carbs: 0, fiber: 0, fat: 1.5, unitLabel: "escalope", unitGrams: 120),
+        SeedFood(name: "Steak haché 5%", kcal: 137, protein: 21, carbs: 0, fiber: 0, fat: 5, unitLabel: "steak", unitGrams: 125),
+        SeedFood(name: "Jambon blanc", kcal: 107, protein: 18, carbs: 1, fiber: 0, fat: 3, unitLabel: "tranche", unitGrams: 40),
+        SeedFood(name: "Thon au naturel", kcal: 116, protein: 26, carbs: 0, fiber: 0, fat: 1, unitLabel: "boîte", unitGrams: 112),
+        SeedFood(name: "Saumon", kcal: 208, protein: 20, carbs: 0, fiber: 0, fat: 13, unitLabel: "pavé", unitGrams: 130),
+        SeedFood(name: "Cabillaud", kcal: 82, protein: 18, carbs: 0, fiber: 0, fat: 0.7, unitLabel: "filet", unitGrams: 130),
+        SeedFood(name: "Crevettes", kcal: 99, protein: 24, carbs: 0.2, fiber: 0, fat: 0.3, unitLabel: "crevette", unitGrams: 8),
+        SeedFood(name: "Sardines", kcal: 208, protein: 25, carbs: 0, fiber: 0, fat: 11, unitLabel: "boîte", unitGrams: 100),
+        SeedFood(name: "Tofu", kcal: 144, protein: 16, carbs: 3, fiber: 2, fat: 8, unitLabel: "portion", unitGrams: 100),
+        SeedFood(name: "Lentilles cuites", kcal: 116, protein: 9, carbs: 20, fiber: 8, fat: 0.4, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Pois chiches cuits", kcal: 164, protein: 9, carbs: 27, fiber: 8, fat: 2.6, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Haricots rouges cuits", kcal: 127, protein: 9, carbs: 22, fiber: 6, fat: 0.5, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Riz blanc cuit", kcal: 130, protein: 2.7, carbs: 28, fiber: 0.4, fat: 0.3, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Riz complet cuit", kcal: 111, protein: 2.6, carbs: 23, fiber: 1.8, fat: 0.9, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Pâtes cuites", kcal: 158, protein: 6, carbs: 31, fiber: 1.8, fat: 0.9, unitLabel: "portion", unitGrams: 180),
+        SeedFood(name: "Quinoa cuit", kcal: 120, protein: 4.4, carbs: 21, fiber: 2.8, fat: 1.9, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Flocons d'avoine", kcal: 389, protein: 17, carbs: 66, fiber: 10, fat: 7, unitLabel: "portion", unitGrams: 40),
+        SeedFood(name: "Pain complet", kcal: 247, protein: 13, carbs: 41, fiber: 7, fat: 3.4, unitLabel: "tranche", unitGrams: 35),
+        SeedFood(name: "Pain blanc", kcal: 265, protein: 9, carbs: 49, fiber: 2.7, fat: 3.2, unitLabel: "tranche", unitGrams: 30),
+        SeedFood(name: "Patate douce cuite", kcal: 90, protein: 2, carbs: 21, fiber: 3.3, fat: 0.1, unitLabel: "pièce", unitGrams: 150),
+        SeedFood(name: "Pomme de terre cuite", kcal: 87, protein: 2, carbs: 20, fiber: 1.8, fat: 0.1, unitLabel: "pièce", unitGrams: 150),
+        SeedFood(name: "Banane", kcal: 89, protein: 1.1, carbs: 23, fiber: 2.6, fat: 0.3, unitLabel: "pièce", unitGrams: 120),
+        SeedFood(name: "Pomme", kcal: 52, protein: 0.3, carbs: 14, fiber: 2.4, fat: 0.2, unitLabel: "pièce", unitGrams: 180),
+        SeedFood(name: "Orange", kcal: 47, protein: 0.9, carbs: 12, fiber: 2.4, fat: 0.1, unitLabel: "pièce", unitGrams: 150),
+        SeedFood(name: "Fraises", kcal: 32, protein: 0.7, carbs: 8, fiber: 2, fat: 0.3, unitLabel: "fraise", unitGrams: 12),
+        SeedFood(name: "Myrtilles", kcal: 57, protein: 0.7, carbs: 14, fiber: 2.4, fat: 0.3, unitLabel: "poignée", unitGrams: 25),
+        SeedFood(name: "Avocat", kcal: 160, protein: 2, carbs: 9, fiber: 7, fat: 15, unitLabel: "pièce", unitGrams: 150),
+        SeedFood(name: "Brocoli cuit", kcal: 35, protein: 2.4, carbs: 7, fiber: 3.3, fat: 0.4, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Épinards", kcal: 23, protein: 2.9, carbs: 3.6, fiber: 2.2, fat: 0.4, unitLabel: "poignée", unitGrams: 30),
+        SeedFood(name: "Carotte", kcal: 41, protein: 0.9, carbs: 10, fiber: 2.8, fat: 0.2, unitLabel: "pièce", unitGrams: 80),
+        SeedFood(name: "Tomate", kcal: 18, protein: 0.9, carbs: 3.9, fiber: 1.2, fat: 0.2, unitLabel: "pièce", unitGrams: 120),
+        SeedFood(name: "Amandes", kcal: 579, protein: 21, carbs: 22, fiber: 12, fat: 50, unitLabel: "poignée", unitGrams: 25),
+        SeedFood(name: "Noix", kcal: 654, protein: 15, carbs: 14, fiber: 7, fat: 65, unitLabel: "poignée", unitGrams: 25),
+        SeedFood(name: "Cacahuètes", kcal: 567, protein: 26, carbs: 16, fiber: 8, fat: 49, unitLabel: "poignée", unitGrams: 30),
+        SeedFood(name: "Beurre de cacahuète", kcal: 588, protein: 25, carbs: 20, fiber: 6, fat: 50, unitLabel: "c. à soupe", unitGrams: 16),
+        SeedFood(name: "Huile d'olive", kcal: 884, protein: 0, carbs: 0, fiber: 0, fat: 100, unitLabel: "c. à soupe", unitGrams: 10),
+        SeedFood(name: "Chocolat noir 70%", kcal: 546, protein: 8, carbs: 46, fiber: 11, fat: 31, unitLabel: "carré", unitGrams: 10),
+        SeedFood(name: "Miel", kcal: 304, protein: 0.3, carbs: 82, fiber: 0.2, fat: 0, unitLabel: "c. à café", unitGrams: 7),
+        SeedFood(name: "Barre protéinée", kcal: 350, protein: 33, carbs: 35, fiber: 5, fat: 10, unitLabel: "barre", unitGrams: 60),
+        SeedFood(name: "Compote de pomme sans sucre", kcal: 42, protein: 0.2, carbs: 10, fiber: 1, fat: 0.1, unitLabel: "gourde", unitGrams: 90),
+        SeedFood(name: "Galette de riz", kcal: 387, protein: 8, carbs: 82, fiber: 4, fat: 3, unitLabel: "galette", unitGrams: 9),
+        SeedFood(name: "Houmous", kcal: 177, protein: 8, carbs: 20, fiber: 6, fat: 8, unitLabel: "c. à soupe", unitGrams: 30),
+        SeedFood(name: "Edamame", kcal: 121, protein: 12, carbs: 9, fiber: 5, fat: 5, unitLabel: "portion", unitGrams: 80),
+        SeedFood(name: "Kiwi", kcal: 61, protein: 1.1, carbs: 15, fiber: 3, fat: 0.5, unitLabel: "pièce", unitGrams: 75),
+        SeedFood(name: "Poire", kcal: 57, protein: 0.4, carbs: 15, fiber: 3.1, fat: 0.1, unitLabel: "pièce", unitGrams: 170),
+        SeedFood(name: "Clémentine", kcal: 47, protein: 0.9, carbs: 12, fiber: 1.7, fat: 0.2, unitLabel: "pièce", unitGrams: 75),
+        SeedFood(name: "Pêche", kcal: 39, protein: 0.9, carbs: 10, fiber: 1.5, fat: 0.3, unitLabel: "pièce", unitGrams: 150),
+        SeedFood(name: "Abricot", kcal: 48, protein: 1.4, carbs: 11, fiber: 2, fat: 0.4, unitLabel: "pièce", unitGrams: 35),
+        SeedFood(name: "Prune", kcal: 46, protein: 0.7, carbs: 11, fiber: 1.4, fat: 0.3, unitLabel: "pièce", unitGrams: 65),
+        SeedFood(name: "Mangue", kcal: 60, protein: 0.8, carbs: 15, fiber: 1.6, fat: 0.4, unitLabel: "pièce", unitGrams: 200),
+        SeedFood(name: "Ananas", kcal: 50, protein: 0.5, carbs: 13, fiber: 1.4, fat: 0.1, unitLabel: "tranche", unitGrams: 80),
+        SeedFood(name: "Pastèque", kcal: 30, protein: 0.6, carbs: 8, fiber: 0.4, fat: 0.2, unitLabel: "tranche", unitGrams: 200),
+        SeedFood(name: "Melon", kcal: 34, protein: 0.8, carbs: 8, fiber: 0.9, fat: 0.2, unitLabel: "tranche", unitGrams: 150),
+        SeedFood(name: "Raisin", kcal: 69, protein: 0.7, carbs: 18, fiber: 0.9, fat: 0.2, unitLabel: "poignée", unitGrams: 80),
+        SeedFood(name: "Framboises", kcal: 52, protein: 1.2, carbs: 12, fiber: 6.5, fat: 0.7, unitLabel: "poignée", unitGrams: 30),
+        SeedFood(name: "Datte", kcal: 282, protein: 2.5, carbs: 75, fiber: 8, fat: 0.4, unitLabel: "pièce", unitGrams: 8),
+        SeedFood(name: "Concombre", kcal: 15, protein: 0.7, carbs: 3.6, fiber: 0.5, fat: 0.1, unitLabel: "pièce", unitGrams: 300),
+        SeedFood(name: "Courgette", kcal: 17, protein: 1.2, carbs: 3.1, fiber: 1, fat: 0.3, unitLabel: "pièce", unitGrams: 200),
+        SeedFood(name: "Poivron", kcal: 26, protein: 1, carbs: 6, fiber: 2.1, fat: 0.3, unitLabel: "pièce", unitGrams: 150),
+        SeedFood(name: "Aubergine", kcal: 25, protein: 1, carbs: 6, fiber: 3, fat: 0.2, unitLabel: "pièce", unitGrams: 250),
+        SeedFood(name: "Oignon", kcal: 40, protein: 1.1, carbs: 9, fiber: 1.7, fat: 0.1, unitLabel: "pièce", unitGrams: 110),
+        SeedFood(name: "Champignon de Paris", kcal: 22, protein: 3.1, carbs: 3.3, fiber: 1, fat: 0.3, unitLabel: "pièce", unitGrams: 18),
+        SeedFood(name: "Salade verte", kcal: 15, protein: 1.4, carbs: 2.9, fiber: 1.3, fat: 0.2, unitLabel: "poignée", unitGrams: 30),
+        SeedFood(name: "Haricots verts cuits", kcal: 35, protein: 1.9, carbs: 7, fiber: 3.4, fat: 0.3, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Chou-fleur cuit", kcal: 25, protein: 1.9, carbs: 5, fiber: 2.3, fat: 0.3, unitLabel: "portion", unitGrams: 150),
+        SeedFood(name: "Petits pois cuits", kcal: 84, protein: 5.4, carbs: 16, fiber: 5.5, fat: 0.2, unitLabel: "portion", unitGrams: 100),
+        SeedFood(name: "Betterave cuite", kcal: 44, protein: 1.6, carbs: 10, fiber: 2, fat: 0.2, unitLabel: "pièce", unitGrams: 80),
+        SeedFood(name: "Noisettes", kcal: 628, protein: 15, carbs: 17, fiber: 10, fat: 61, unitLabel: "poignée", unitGrams: 25),
+        SeedFood(name: "Pistaches", kcal: 560, protein: 20, carbs: 28, fiber: 10, fat: 45, unitLabel: "poignée", unitGrams: 25),
+    ]
+
+    // MARK: - Nutrition — bibliothèque `foods`
+
+    struct FoodRow {
+        let id: Int
+        let barcode: String?
+        let name: String
+        let kcal: Double?
+        let protein: Double?
+        let carbs: Double?
+        let fiber: Double?
+        let fat: Double?
+        let unitLabel: String?
+        let unitGrams: Double?
+    }
+
+    private static let foodColumns = "id, barcode, name, kcal, protein, carbs, fiber, fat, unit_label, unit_grams"
+
+    private static func foodRow(from r: SQLiteRow) -> FoodRow {
+        FoodRow(
+            id: Int(r.double(0) ?? 0), barcode: r.text(1), name: r.text(2) ?? "",
+            kcal: r.double(3), protein: r.double(4), carbs: r.double(5), fiber: r.double(6), fat: r.double(7),
+            unitLabel: r.text(8), unitGrams: r.double(9))
+    }
+
+    /// Miroir de `NutritionController.foods` — `LIKE %terme%`, 20 résultats
+    /// max, triés par nom.
+    func searchFoods(query: String) throws -> [FoodRow] {
+        var out: [FoodRow] = []
+        try db.run(
+            "SELECT \(Self.foodColumns) FROM foods WHERE name LIKE ? ORDER BY name ASC LIMIT 20",
+            [.text("%\(query)%")]) { r in out.append(Self.foodRow(from: r)) }
+        return out
+    }
+
+    func food(id: Int) throws -> FoodRow? {
+        var result: FoodRow?
+        try db.run("SELECT \(Self.foodColumns) FROM foods WHERE id = ?", [.int(id)]) { r in result = Self.foodRow(from: r) }
+        return result
+    }
+
+    func food(barcode: String) throws -> FoodRow? {
+        var result: FoodRow?
+        try db.run("SELECT \(Self.foodColumns) FROM foods WHERE barcode = ?", [.text(barcode)]) { r in result = Self.foodRow(from: r) }
+        return result
+    }
+
+    /// Miroir de `NutritionController.createFood`.
+    @discardableResult
+    func insertFood(
+        barcode: String?, name: String, kcal: Double?, protein: Double?, carbs: Double?, fiber: Double?, fat: Double?,
+        unitLabel: String?, unitGrams: Double?
+    ) throws -> FoodRow {
+        try db.run(
+            """
+            INSERT INTO foods (barcode, name, kcal, protein, carbs, fiber, fat, unit_label, unit_grams)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [sqliteOptionalText(barcode), .text(name), sqliteOptional(kcal), sqliteOptional(protein), sqliteOptional(carbs),
+             sqliteOptional(fiber), sqliteOptional(fat), sqliteOptionalText(unitLabel), sqliteOptional(unitGrams)])
+        var id = 0
+        try db.run("SELECT last_insert_rowid()") { r in id = Int(r.double(0) ?? 0) }
+        guard let row = try food(id: id) else {
+            // Ne devrait jamais arriver (on vient d'insérer la ligne) — filet
+            // de sécurité plutôt qu'un force-unwrap.
+            throw LocalNutritionValidationError(reason: "Échec d'insertion d'aliment")
+        }
+        return row
+    }
+
+    /// Miroir de `NutritionController.updateFood`.
+    func updateFood(
+        id: Int, barcode: String?, name: String, kcal: Double?, protein: Double?, carbs: Double?, fiber: Double?, fat: Double?,
+        unitLabel: String?, unitGrams: Double?
+    ) throws -> FoodRow? {
+        try db.run(
+            """
+            UPDATE foods SET name = ?, barcode = ?, kcal = ?, protein = ?, carbs = ?, fiber = ?,
+                             fat = ?, unit_label = ?, unit_grams = ?
+            WHERE id = ?
+            """,
+            [.text(name), sqliteOptionalText(barcode), sqliteOptional(kcal), sqliteOptional(protein), sqliteOptional(carbs),
+             sqliteOptional(fiber), sqliteOptional(fat), sqliteOptionalText(unitLabel), sqliteOptional(unitGrams), .int(id)])
+        return try food(id: id)
+    }
+
+    // MARK: - Nutrition — journal `food_log`
+
+    struct FoodLogRow {
+        let id: Int
+        let date: String
+        let foodId: Int?
+        let name: String
+        let grams: Double
+        let kcal: Double?
+        let protein: Double?
+        let carbs: Double?
+        let fiber: Double?
+        let fat: Double?
+        let unitLabel: String?
+        let unitQty: Double?
+        let ts: Int?
+    }
+
+    private static func foodLogRow(from r: SQLiteRow) -> FoodLogRow {
+        FoodLogRow(
+            id: Int(r.double(0) ?? 0), date: r.text(1) ?? "", foodId: r.double(2).map(Int.init),
+            name: r.text(3) ?? "", grams: r.double(4) ?? 0,
+            kcal: r.double(5), protein: r.double(6), carbs: r.double(7), fiber: r.double(8), fat: r.double(9),
+            unitLabel: r.text(10), unitQty: r.double(11), ts: r.double(12).map(Int.init))
+    }
+
+    /// Miroir de la requête `food_log` de `NutritionController.day`
+    /// (`ORDER BY COALESCE(ts, 0) ASC, id ASC`).
+    func foodLog(date: String) throws -> [FoodLogRow] {
+        var out: [FoodLogRow] = []
+        try db.run(
+            """
+            SELECT id, date, food_id, name, grams, kcal, protein, carbs, fiber, fat, unit_label, unit_qty, ts
+            FROM food_log WHERE date = ? ORDER BY COALESCE(ts, 0) ASC, id ASC
+            """,
+            [.text(date)]) { r in out.append(Self.foodLogRow(from: r)) }
+        return out
+    }
+
+    /// Miroir de l'`INSERT` d'`addLog` (TS). Renvoie l'id auto-incrémenté.
+    @discardableResult
+    func insertLog(
+        date: String, foodId: Int?, name: String, grams: Double, kcal: Double?, protein: Double?, carbs: Double?,
+        fiber: Double?, fat: Double?, unitLabel: String?, unitQty: Double?, ts: Int
+    ) throws -> Int {
+        try db.run(
+            """
+            INSERT INTO food_log (date, food_id, name, grams, kcal, protein, carbs, fiber, fat, unit_label, unit_qty, ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [.text(date), sqliteOptional(foodId.map(Double.init)), .text(name), .double(grams),
+             sqliteOptional(kcal), sqliteOptional(protein), sqliteOptional(carbs), sqliteOptional(fiber), sqliteOptional(fat),
+             sqliteOptionalText(unitLabel), sqliteOptional(unitQty), .int(ts)])
+        var id = 0
+        try db.run("SELECT last_insert_rowid()") { r in id = Int(r.double(0) ?? 0) }
+        return id
+    }
+
+    /// Miroir de l'`UPDATE` d'`updateLog` (TS) — ne touche pas `date`/`food_id`
+    /// (le serveur non plus, cf. `NutritionController.updateLog`).
+    func updateLog(
+        id: Int, name: String, grams: Double, kcal: Double?, protein: Double?, carbs: Double?, fiber: Double?, fat: Double?,
+        unitLabel: String?, unitQty: Double?, ts: Int
+    ) throws {
+        try db.run(
+            """
+            UPDATE food_log SET name = ?, grams = ?, kcal = ?, protein = ?, carbs = ?, fiber = ?,
+                                 fat = ?, unit_label = ?, unit_qty = ?, ts = ?
+            WHERE id = ?
+            """,
+            [.text(name), .double(grams), sqliteOptional(kcal), sqliteOptional(protein), sqliteOptional(carbs),
+             sqliteOptional(fiber), sqliteOptional(fat), sqliteOptionalText(unitLabel), sqliteOptional(unitQty), .int(ts), .int(id)])
+    }
+
+    func deleteLog(id: Int) throws {
+        try db.run("DELETE FROM food_log WHERE id = ?", [.int(id)])
+    }
+
+    // MARK: - Nutrition — aliments fréquents
+
+    struct FrequentFoodRow {
+        let foodId: Int?
+        let name: String
+        let uses: Int
+        let grams: Double
+        let units: Double?
+        let unitLabel: String?
+        let unitGrams: Double?
+        let lastTs: Int?
+        let kcal: Double?
+        let protein: Double?
+        let carbs: Double?
+        let fiber: Double?
+        let fat: Double?
+    }
+
+    /// Miroir de `NutritionController.frequent` — regroupe `food_log` (grams
+    /// > 0) par `foodId` (ou nom en minuscules si pas de `foodId`), calcule
+    /// médiane de grammes/unités et repli pour-100 g (dernière valeur connue
+    /// dans le groupe), trie par nombre d'usages puis dernière utilisation.
+    func frequentFoods(limit: Int) throws -> [FrequentFoodRow] {
+        struct Row {
+            let name: String
+            let foodId: Int?
+            let grams: Double
+            let kcal: Double?
+            let protein: Double?
+            let carbs: Double?
+            let fiber: Double?
+            let fat: Double?
+            let unitLabel: String?
+            let unitQty: Double?
+            let ts: Int?
+        }
+        var rows: [Row] = []
+        try db.run(
+            """
+            SELECT name, food_id, grams, kcal, protein, carbs, fiber, fat, unit_label, unit_qty, ts
+            FROM food_log WHERE grams > 0 ORDER BY ts DESC
+            """) { r in
+            rows.append(Row(
+                name: r.text(0) ?? "", foodId: r.double(1).map(Int.init), grams: r.double(2) ?? 0,
+                kcal: r.double(3), protein: r.double(4), carbs: r.double(5), fiber: r.double(6), fat: r.double(7),
+                unitLabel: r.text(8), unitQty: r.double(9), ts: r.double(10).map(Int.init)))
+        }
+
+        // Regroupement en préservant l'ordre de PREMIÈRE apparition (miroir de
+        // l'itération d'un `Map` JS, insertion-order) — nécessaire pour un tri
+        // stable identique en cas d'égalité stricte (uses, lastTs).
+        var order: [String] = []
+        var groups: [String: [Row]] = [:]
+        for row in rows {
+            let key = row.foodId != nil ? "id:\(row.foodId!)" : "name:\(row.name.lowercased())"
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(row)
+        }
+
+        func median(_ values: [Double]) -> Double {
+            let sorted = values.sorted()
+            let mid = sorted.count / 2
+            if sorted.count % 2 == 1 { return sorted[mid] }
+            return ((sorted[mid - 1] + sorted[mid]) / 2).rounded()
+        }
+
+        func per100(_ entries: [Row], _ pick: (Row) -> Double?) -> Double? {
+            for e in entries {
+                if let v = pick(e), e.grams > 0 { return (v / e.grams * 100 * 10).rounded() / 10 }
+            }
+            return nil
+        }
+
+        var out: [FrequentFoodRow] = []
+        for key in order {
+            let entries = groups[key] ?? []
+            guard let latest = entries.first else { continue }
+            let food: FoodRow?
+            if let fid = latest.foodId { food = try self.food(id: fid) } else { food = nil }
+            let logged = entries.filter { ($0.unitQty ?? 0) > 0 }
+            let fromLog = logged.first
+            let unitLabel = food?.unitLabel ?? fromLog?.unitLabel
+            let unitGrams: Double?
+            if let g = food?.unitGrams {
+                unitGrams = g
+            } else if let fromLog, let qty = fromLog.unitQty, qty > 0 {
+                unitGrams = (fromLog.grams / qty * 10).rounded() / 10
+            } else {
+                unitGrams = nil
+            }
+            out.append(FrequentFoodRow(
+                foodId: latest.foodId, name: latest.name, uses: entries.count,
+                grams: median(entries.map { $0.grams }),
+                units: logged.isEmpty ? nil : median(logged.map { $0.unitQty! }),
+                unitLabel: unitLabel, unitGrams: unitGrams, lastTs: latest.ts,
+                kcal: food?.kcal ?? per100(entries) { $0.kcal },
+                protein: food?.protein ?? per100(entries) { $0.protein },
+                carbs: food?.carbs ?? per100(entries) { $0.carbs },
+                fiber: food?.fiber ?? per100(entries) { $0.fiber },
+                fat: food?.fat ?? per100(entries) { $0.fat }))
+        }
+        out.sort { a, b in
+            if a.uses != b.uses { return a.uses > b.uses }
+            return (a.lastTs ?? 0) > (b.lastTs ?? 0)
+        }
+        return Array(out.prefix(limit))
     }
 }
 
