@@ -1331,6 +1331,379 @@ final class LocalDb {
         }
         return Array(out.prefix(limit))
     }
+
+    // MARK: - Dashboard / Stats (incrément L4, miroir `stats.controller.ts`)
+    //
+    // Lecture seule — mêmes requêtes SQL que le contrôleur Nest, sur le MÊME
+    // moteur SQLite réel (`libsqlite3`, pas une réimplémentation) : les
+    // comparaisons `strftime`/affinité INTEGER-vs-TEXT du serveur se
+    // comportent donc IDENTIQUEMENT ici, portées quasi mot pour mot plutôt
+    // que réinterprétées. Le calcul (agrégats/corrélations/formatage) vit
+    // dans `Local/DashboardStats.swift`, qui appelle ces méthodes puis
+    // assemble le JSON — même séparation que `BodyBattery.swift` (logique
+    // pure) / `LocalDb` (accès données).
+
+    struct StatsRestingRow { let date: String; let value: Double }
+
+    /// Miroir de `dayRows` (`tabHealth`, TS).
+    func statsRestingHrSince(_ sinceDate: String) throws -> [StatsRestingRow] {
+        var out: [StatsRestingRow] = []
+        try db.run(
+            "SELECT date, resting_hr FROM wellness_days WHERE date >= ? AND resting_hr IS NOT NULL ORDER BY date ASC",
+            [.text(sinceDate)]) { r in
+            guard let date = r.text(0), let value = r.double(1) else { return }
+            out.append(StatsRestingRow(date: date, value: value))
+        }
+        return out
+    }
+
+    /// Miroir de `latestNight()` (TS).
+    func latestSleepNightDate() throws -> String? {
+        var date: String?
+        try db.run(
+            "SELECT MAX(date) AS date FROM wellness_sleep WHERE duration_s IS NOT NULL AND duration_s > 0") { r in
+            date = r.text(0)
+        }
+        return date
+    }
+
+    struct StatsSleepDebtRow {
+        let date: String
+        let deepS: Double
+        let lightS: Double
+        let remS: Double
+        let awakeS: Double
+        let score: Double?
+        let startTs: Double?
+    }
+
+    /// Miroir de la requête `rows` de `sleepDebt` (TS) — l'appelant fait le
+    /// `reverse()` (ordre DESC ici, comme côté serveur).
+    func statsSleepDebtRows(since: String, limit: Int) throws -> [StatsSleepDebtRow] {
+        var out: [StatsSleepDebtRow] = []
+        try db.run(
+            """
+            SELECT date, deep_s, light_s, rem_s, awake_s, score, start_ts
+            FROM wellness_sleep
+            WHERE duration_s IS NOT NULL AND duration_s > 0 AND date >= ?
+            ORDER BY date DESC LIMIT ?
+            """,
+            [.text(since), .int(limit)]) { r in
+            guard let date = r.text(0), let deepS = r.double(1), let lightS = r.double(2),
+                  let remS = r.double(3), let awakeS = r.double(4) else { return }
+            out.append(StatsSleepDebtRow(
+                date: date, deepS: deepS, lightS: lightS, remS: remS, awakeS: awakeS,
+                score: r.double(5), startTs: r.double(6)))
+        }
+        return out
+    }
+
+    struct StatsSleepInsightRow {
+        let date: String
+        let sleepS: Double
+        let deepS: Double
+        let lightS: Double
+        let remS: Double
+        let awakeS: Double
+        let startTs: Double
+        let endTs: Double
+        let phases: String
+        let avgStress: Double?
+    }
+
+    /// Miroir de la requête `rows` de `sleepInsights` (TS), sous-requête
+    /// `avgStress` incluse telle quelle (même moteur SQLite).
+    func statsSleepInsightRows(since: String, limit: Int) throws -> [StatsSleepInsightRow] {
+        var out: [StatsSleepInsightRow] = []
+        try db.run(
+            """
+            SELECT s.date, s.deep_s + s.light_s + s.rem_s AS sleepS,
+                   s.deep_s, s.light_s, s.rem_s, s.awake_s, s.start_ts, s.end_ts, s.phases,
+                   (SELECT AVG(value) FROM wellness_samples w
+                    WHERE w.metric = 'stress'
+                      AND w.ts >= strftime('%s', s.date || ' 00:00:00')
+                      AND w.ts < strftime('%s', s.date || ' 00:00:00') + 86400) AS avgStress
+            FROM wellness_sleep s
+            WHERE s.duration_s > 0 AND s.date >= ?
+            ORDER BY s.date DESC LIMIT ?
+            """,
+            [.text(since), .int(limit)]) { r in
+            guard let date = r.text(0), let sleepS = r.double(1), let deepS = r.double(2),
+                  let lightS = r.double(3), let remS = r.double(4), let awakeS = r.double(5),
+                  let startTs = r.double(6), let endTs = r.double(7), let phases = r.text(8) else { return }
+            out.append(StatsSleepInsightRow(
+                date: date, sleepS: sleepS, deepS: deepS, lightS: lightS, remS: remS, awakeS: awakeS,
+                startTs: startTs, endTs: endTs, phases: phases, avgStress: r.double(9)))
+        }
+        return out
+    }
+
+    /// Échantillons bruts (sans conversion d'offset) entre deux `ts` epoch —
+    /// utilisé par `spo2Arousal` (`DashboardStats.swift`), qui travaille en
+    /// `startTs`/`endTs` bruts de `wellness_sleep`, pas en repère "jour
+    /// affiché" comme `samplesBetween`.
+    func statsRawSamplesBetween(metric: String, from: Double, to: Double) throws -> [(ts: Double, value: Double)] {
+        var out: [(ts: Double, value: Double)] = []
+        try db.run(
+            "SELECT ts, value FROM wellness_samples WHERE metric = ? AND ts >= ? AND ts < ? ORDER BY ts ASC",
+            [.text(metric), .double(from), .double(to)]) { r in
+            guard let ts = r.double(0), let value = r.double(1) else { return }
+            out.append((ts, value))
+        }
+        return out
+    }
+
+    /// Miroir de la requête `rows` de `sleepRegularity` (TS).
+    func statsSleepStartEndRows(since: String, limit: Int) throws -> [(startTs: Double, endTs: Double)] {
+        var out: [(startTs: Double, endTs: Double)] = []
+        try db.run(
+            """
+            SELECT start_ts, end_ts FROM wellness_sleep
+            WHERE start_ts IS NOT NULL AND end_ts IS NOT NULL AND date >= ?
+            ORDER BY date DESC LIMIT ?
+            """,
+            [.text(since), .int(limit)]) { r in
+            guard let s = r.double(0), let e = r.double(1) else { return }
+            out.append((s, e))
+        }
+        return out
+    }
+
+    /// Miroir de la requête `nights` de `tabHealth` (TS).
+    func statsNightsSince(_ sinceDate: String) throws -> [(date: String, startTs: Double, endTs: Double, sleepS: Double)] {
+        var out: [(date: String, startTs: Double, endTs: Double, sleepS: Double)] = []
+        try db.run(
+            """
+            SELECT date, start_ts, end_ts, deep_s + light_s + rem_s AS sleepS
+            FROM wellness_sleep WHERE date >= ? ORDER BY date ASC
+            """,
+            [.text(sinceDate)]) { r in
+            guard let date = r.text(0), let s = r.double(1), let e = r.double(2), let sleepS = r.double(3) else { return }
+            out.append((date, s, e, sleepS))
+        }
+        return out
+    }
+
+    /// Miroir de `nightAvg` (TS) — bornes INCLUSIVES (`<=`), contrairement à
+    /// `samplesBetween` (`<`).
+    func statsNightAvg(metric: String, from: Double, to: Double) throws -> Double? {
+        var value: Double?
+        try db.run(
+            "SELECT AVG(value) FROM wellness_samples WHERE metric = ? AND ts >= ? AND ts <= ?",
+            [.text(metric), .double(from), .double(to)]) { r in value = r.double(0) }
+        return value
+    }
+
+    /// Miroir de `stressRow` (`tabHealth`, TS).
+    func statsAvgStressSince(tsFrom: Double) throws -> Double? {
+        var value: Double?
+        try db.run(
+            "SELECT AVG(value) FROM wellness_samples WHERE metric = 'stress' AND ts >= ?",
+            [.double(tsFrom)]) { r in value = r.double(0) }
+        return value
+    }
+
+    /// Miroir de `weights` (`tabHealth`, TS).
+    func statsWeightsSince(_ sinceDate: String) throws -> [(date: String, kg: Double)] {
+        var out: [(date: String, kg: Double)] = []
+        try db.run(
+            "SELECT date, kg FROM weight_log WHERE date >= ? ORDER BY date ASC",
+            [.text(sinceDate)]) { r in
+            guard let date = r.text(0), let kg = r.double(1) else { return }
+            out.append((date, kg))
+        }
+        return out
+    }
+
+    /// Miroir de `stressByDate` (`tabHealth`, TS).
+    func statsStressAvgByDate() throws -> [String: Double] {
+        var out: [String: Double] = [:]
+        try db.run(
+            "SELECT date(ts, 'unixepoch') AS date, AVG(value) AS avg FROM wellness_samples WHERE metric = 'stress' GROUP BY date"
+        ) { r in
+            guard let date = r.text(0), let avg = r.double(1) else { return }
+            out[date] = avg
+        }
+        return out
+    }
+
+    /// Miroir de `stepsByDate` (`tabHealth`, TS).
+    func statsStepsSumByDate() throws -> [String: Double] {
+        var out: [String: Double] = [:]
+        try db.run("SELECT date, SUM(steps) AS steps FROM wellness_counters GROUP BY date") { r in
+            guard let date = r.text(0), let steps = r.double(1) else { return }
+            out[date] = steps
+        }
+        return out
+    }
+
+    /// Miroir de `loadByDate` (`tabHealth`, TS).
+    func statsLoadByDate() throws -> [String: Double] {
+        var out: [String: Double] = [:]
+        try db.run(
+            """
+            SELECT date(start_time) AS date, SUM(duration_s * COALESCE(avg_hr, 100) / 100.0) AS load
+            FROM activities WHERE start_time IS NOT NULL GROUP BY date
+            """) { r in
+            guard let date = r.text(0), let load = r.double(1) else { return }
+            out[date] = load
+        }
+        return out
+    }
+
+    // MARK: - Dashboard / Stats — Entraînement (`tab-training`) — miroir
+    // PARTIEL, cf. en-tête de `DashboardStats.swift` : `zones` n'est jamais
+    // peuplé ici (pas de reparse `.fit` par activité), tout le reste (séances/
+    // charge/répartition/streak/records) vient de `activities`/
+    // `wellness_counters`, sans dépendre d'un moteur "programme" quelconque.
+
+    struct StatsActivityRow {
+        let sport: String?
+        let startTime: String
+        let durationS: Double?
+        let distanceM: Double?
+        let avgHr: Double?
+        let maxHr: Double?
+    }
+
+    /// Miroir de la requête `rows` de `tabTraining` (TS) — exclusion des
+    /// marches courtes déjà appliquée en SQL (même fragment que
+    /// `EXCLUDE_SHORT_WALKS_SQL`, constante donc sans risque d'injection).
+    func statsActivitiesSince(_ since: String) throws -> [StatsActivityRow] {
+        var out: [StatsActivityRow] = []
+        try db.run(
+            """
+            SELECT sport, start_time, duration_s, distance_m, avg_hr, max_hr
+            FROM activities
+            WHERE start_time IS NOT NULL AND start_time >= ?
+              AND NOT (sport = 'walking' AND (duration_s IS NULL OR duration_s < 1800))
+            ORDER BY start_time ASC
+            """,
+            [.text(since)]) { r in
+            guard let startTime = r.text(1) else { return }
+            out.append(StatsActivityRow(
+                sport: r.text(0), startTime: startTime, durationS: r.double(2),
+                distanceM: r.double(3), avgHr: r.double(4), maxHr: r.double(5)))
+        }
+        return out
+    }
+
+    /// Miroir de `previousTotal` (`tabTraining`, TS).
+    func statsActivityDurationSum(from: String, until: String) throws -> Double {
+        var total = 0.0
+        try db.run(
+            """
+            SELECT COALESCE(SUM(duration_s), 0) FROM activities
+            WHERE start_time IS NOT NULL AND start_time >= ? AND start_time < ?
+              AND NOT (sport = 'walking' AND (duration_s IS NULL OR duration_s < 1800))
+            """,
+            [.text(from), .text(until)]) { r in total = r.double(0) ?? 0 }
+        return total
+    }
+
+    /// Miroir de `wornDays` (`tabTraining`, TS).
+    func statsWornDaysSince(_ sinceDate: String) throws -> Int {
+        var count = 0
+        try db.run(
+            "SELECT COUNT(DISTINCT date) FROM wellness_counters WHERE date >= ?",
+            [.text(sinceDate)]) { r in count = Int(r.double(0) ?? 0) }
+        return count
+    }
+
+    /// Miroir de `activeKcal` (`tabTraining`, TS).
+    func statsActiveCaloriesSince(_ sinceDate: String) throws -> Double {
+        var total = 0.0
+        try db.run(
+            "SELECT COALESCE(SUM(active_calories), 0) FROM wellness_counters WHERE date >= ?",
+            [.text(sinceDate)]) { r in total = r.double(0) ?? 0 }
+        return total
+    }
+
+    /// Miroir de `allWeeks` (`tabTraining`, TS — calcul du streak) : même
+    /// fonction SQLite `strftime('%Y-%W', ...)`, même moteur, même résultat.
+    func statsAllWeeksActivityCounts() throws -> [(week: String, n: Int)] {
+        var out: [(week: String, n: Int)] = []
+        try db.run(
+            """
+            SELECT strftime('%Y-%W', start_time) AS week, COUNT(*) AS n FROM activities
+            WHERE start_time IS NOT NULL
+              AND NOT (sport = 'walking' AND (duration_s IS NULL OR duration_s < 1800))
+            GROUP BY week ORDER BY week ASC
+            """) { r in
+            guard let week = r.text(0) else { return }
+            out.append((week, Int(r.double(1) ?? 0)))
+        }
+        return out
+    }
+
+    // MARK: - Dashboard / Stats — Nutrition (`tab-nutrition`) — miroir
+    // INTÉGRAL : contrairement à `nutrition/day` (`targets`/`remaining`,
+    // dépendent de `target.ts`, non porté), `tab-nutrition` ne lit qu'un
+    // réglage brut (`settings.nutritionKcal`, jamais écrit localement ici →
+    // `nil`, même repli que le serveur sans cible configurée) — aucun moteur
+    // "cible"/"programme" à porter pour CET endpoint précis.
+
+    struct StatsFoodLogDailyRow {
+        let date: String
+        let kcal: Double?
+        let protein: Double?
+        let carbs: Double?
+        let fat: Double?
+        let entries: Int
+    }
+
+    /// Miroir de `logged` (`tabNutrition`, TS).
+    func statsFoodLogDailyTotals(since: String) throws -> [StatsFoodLogDailyRow] {
+        var out: [StatsFoodLogDailyRow] = []
+        try db.run(
+            """
+            SELECT date, SUM(kcal), SUM(protein), SUM(carbs), SUM(fat), COUNT(*)
+            FROM food_log WHERE date >= ? GROUP BY date ORDER BY date ASC
+            """,
+            [.text(since)]) { r in
+            guard let date = r.text(0) else { return }
+            out.append(StatsFoodLogDailyRow(
+                date: date, kcal: r.double(1), protein: r.double(2), carbs: r.double(3), fat: r.double(4),
+                entries: Int(r.double(5) ?? 0)))
+        }
+        return out
+    }
+
+    /// Miroir de `expenditure` (`tabNutrition`, TS) — valeurs déjà arrondies
+    /// (`Math.round`), comme côté serveur.
+    func statsExpenditureByDate(since: String) throws -> [String: Double] {
+        var out: [String: Double] = [:]
+        try db.run(
+            """
+            SELECT d.date, d.bmr_kcal,
+                   (SELECT SUM(active_calories) FROM wellness_counters c WHERE c.date = d.date)
+            FROM wellness_days d WHERE d.date >= ?
+            """,
+            [.text(since)]) { r in
+            guard let date = r.text(0) else { return }
+            let bmr = r.double(1) ?? 0
+            let active = r.double(2) ?? 0
+            out[date] = (bmr + active).rounded()
+        }
+        return out
+    }
+
+    struct StatsTopFoodRow { let name: String; let uses: Int; let kcal: Double?; let protein: Double? }
+
+    /// Miroir de `topFoods` (`tabNutrition`, TS).
+    func statsTopFoods(since: String, limit: Int) throws -> [StatsTopFoodRow] {
+        var out: [StatsTopFoodRow] = []
+        try db.run(
+            """
+            SELECT name, COUNT(*) AS uses, SUM(kcal) AS kcal, SUM(protein) AS protein
+            FROM food_log WHERE date >= ? GROUP BY name ORDER BY uses DESC, kcal DESC LIMIT ?
+            """,
+            [.text(since), .int(limit)]) { r in
+            guard let name = r.text(0) else { return }
+            out.append(StatsTopFoodRow(name: name, uses: Int(r.double(1) ?? 0), kcal: r.double(2), protein: r.double(3)))
+        }
+        return out
+    }
 }
 
 private func sqliteOptional(_ value: Double?) -> SQLiteValue {

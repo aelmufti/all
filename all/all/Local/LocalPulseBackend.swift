@@ -2,11 +2,18 @@
 //  LocalPulseBackend.swift
 //  all (bridge-connect)
 //
-//  Portage réel du backend local « Pulse embarqué » (incréments L1+L2+L3+L5,
-//  cf. `docs/stockage-local.md`) — remplace `StubLocalPulseBackend` (L0) pour
-//  les routes qu'il sait vraiment servir depuis `LocalDb`. Toute autre route
-//  continue de lever `LocalPulseUnavailableError` (`Pulse/Core/PulseAPIClient.swift`),
-//  à faire pour L4+ (sommeil détaillé/export, SpO2 report, nutrition, programme…).
+//  Portage réel du backend local « Pulse embarqué » (incréments
+//  L1+L2+L3+L4+L5, cf. `docs/stockage-local.md`) — remplace
+//  `StubLocalPulseBackend` (L0) pour les routes qu'il sait vraiment servir
+//  depuis `LocalDb`. Toute autre route continue de lever
+//  `LocalPulseUnavailableError` (`Pulse/Core/PulseAPIClient.swift`), à faire
+//  pour un incrément ultérieur (SpO2 report, programme…).
+//
+//  Portée L4 : `GET api/stats/tab-health`, `sleep-debt`, `sleep-insights`,
+//  `sleep-regularity`, `tab-training` (miroir partiel), `tab-nutrition` —
+//  calcul dans `Local/DashboardStats.swift` (portage de `stats.controller.ts`),
+//  câblage ici seulement. Cf. l'en-tête de ce fichier pour le détail des
+//  divergences assumées.
 //
 //  Portée L1 : `GET api/wellness/days`, `GET api/wellness/dates`.
 //
@@ -131,6 +138,33 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("GET", let r) where r.hasPrefix("wellness/day/"):
             let date = String(r.dropFirst("wellness/day/".count))
             return try encodeDayDetail(date: date)
+
+        // MARK: Dashboard / Stats (incrément L4, cf. `Local/DashboardStats.swift`)
+        //
+        // `stats/tab-health`/`stats/sleep-debt`/`stats/sleep-insights`/
+        // `stats/sleep-regularity`/`stats/tab-nutrition` : miroir fidèle.
+        // `stats/tab-training` : miroir partiel (`zones` toujours vide, cf.
+        // en-tête de `DashboardStats.swift`). `stats/sleep-recommendation`
+        // n'est PAS servi (best-effort côté `DashboardViewModel`, `try?`) :
+        // retombe sur le `default` ci-dessous, `LocalPulseUnavailableError`.
+
+        case ("GET", "stats/tab-health"):
+            return try DashboardStatsBackend.tabHealth(db: db, query: query)
+
+        case ("GET", "stats/tab-training"):
+            return try DashboardStatsBackend.tabTraining(db: db, query: query)
+
+        case ("GET", "stats/tab-nutrition"):
+            return try DashboardStatsBackend.tabNutrition(db: db, query: query)
+
+        case ("GET", "stats/sleep-debt"):
+            return try DashboardStatsBackend.sleepDebt(db: db, query: query)
+
+        case ("GET", "stats/sleep-insights"):
+            return try DashboardStatsBackend.sleepInsights(db: db, query: query)
+
+        case ("GET", "stats/sleep-regularity"):
+            return try DashboardStatsBackend.sleepRegularity(db: db, query: query)
 
         case ("GET", "weight"):
             return try encodeWeightList(query: query)
