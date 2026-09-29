@@ -1332,6 +1332,114 @@ final class LocalDb {
         return Array(out.prefix(limit))
     }
 
+    // MARK: - Nutrition — cibles (incrément L5-Nutrition-analytics, miroir des
+    // aides privées de `NutritionController` — `sessionsOn`/`watchOn`/
+    // `weightOn`/`intake`/`suggestions`/`timing`). Lecture seule ; le calcul
+    // vit dans `Local/NutritionTarget.swift`/`RealLocalPulseBackend`.
+
+    struct ActivitySessionRow {
+        let sport: String?
+        let subSport: String?
+        let durationS: Double?
+        let calories: Double?
+    }
+
+    /// Miroir de `sessionsOn` (TS) — activités dont `start_time` tombe dans le
+    /// jour calendaire `date` (fuseau de l'appareil, même convention que
+    /// `localOffsetSeconds`/`dayStartUnixUTC` déjà utilisés par `dayDetail`/`days`).
+    func activitySessions(date: String) throws -> [ActivitySessionRow] {
+        let offset = Self.localOffsetSeconds(forDate: date)
+        let from = Self.dayStartUnixUTC(date) - offset
+        let to = from + 86400
+        var out: [ActivitySessionRow] = []
+        try db.run(
+            """
+            SELECT sport, sub_sport, duration_s, calories FROM activities
+            WHERE start_time IS NOT NULL
+              AND strftime('%s', start_time) >= ?
+              AND strftime('%s', start_time) < ?
+            ORDER BY start_time ASC
+            """,
+            [.text(String(Int(from))), .text(String(Int(to)))]) { r in
+            out.append(ActivitySessionRow(sport: r.text(0), subSport: r.text(1), durationS: r.double(2), calories: r.double(3)))
+        }
+        return out
+    }
+
+    struct WatchDayRow {
+        let restingKcal: Double?
+        let activeKcal: Double?
+    }
+
+    /// Miroir de `watchOn` (TS) — `bmr_kcal` du jour + somme des
+    /// `active_calories` de `wellness_counters` pour ce même jour.
+    func watchDay(date: String) throws -> WatchDayRow {
+        var restingKcal: Double?
+        try db.run("SELECT bmr_kcal FROM wellness_days WHERE date = ?", [.text(date)]) { r in restingKcal = r.double(0) }
+        var activeKcal: Double?
+        try db.run("SELECT SUM(active_calories) FROM wellness_counters WHERE date = ?", [.text(date)]) { r in activeKcal = r.double(0) }
+        return WatchDayRow(restingKcal: restingKcal, activeKcal: activeKcal)
+    }
+
+    /// Miroir de la partie SQL de `weightOn` (TS) — le repli sur
+    /// `settings.weightKg` reste à la charge de l'appelant
+    /// (`RealLocalPulseBackend.profileOn`, comme `weightOn` TS retombe sur
+    /// `this.readWeight()`).
+    func weightOn(date: String) throws -> Double? {
+        var kg: Double?
+        try db.run("SELECT kg FROM weight_log WHERE date <= ? ORDER BY date DESC LIMIT 1", [.text(date)]) { r in kg = r.double(0) }
+        return kg
+    }
+
+    /// Miroir de la requête `intake` de `NutritionController.getWeekly` (TS).
+    func foodLogKcalByDate() throws -> [String: Double] {
+        var out: [String: Double] = [:]
+        try db.run("SELECT date, SUM(kcal) FROM food_log GROUP BY date") { r in
+            guard let date = r.text(0) else { return }
+            out[date] = r.double(1) ?? 0
+        }
+        return out
+    }
+
+    /// Miroir du `SELECT ... FROM foods WHERE kcal IS NOT NULL AND kcal > 0`
+    /// de `NutritionController.suggestions`.
+    func foodsWithPositiveKcal() throws -> [FoodRow] {
+        var out: [FoodRow] = []
+        try db.run("SELECT \(Self.foodColumns) FROM foods WHERE kcal IS NOT NULL AND kcal > 0") { r in
+            out.append(Self.foodRow(from: r))
+        }
+        return out
+    }
+
+    struct LastFoodLogRow {
+        let ts: Int
+        let kcal: Double?
+        let fat: Double?
+    }
+
+    /// Miroir de la requête `last` de `NutritionController.timing`.
+    func lastFoodLogWithTs(date: String) throws -> LastFoodLogRow? {
+        var result: LastFoodLogRow?
+        try db.run(
+            "SELECT ts, kcal, fat FROM food_log WHERE date = ? AND ts IS NOT NULL ORDER BY ts DESC LIMIT 1",
+            [.text(date)]) { r in
+            guard let ts = r.double(0) else { return }
+            result = LastFoodLogRow(ts: Int(ts), kcal: r.double(1), fat: r.double(2))
+        }
+        return result
+    }
+
+    /// Miroir de la sous-requête `stressRow` de `NutritionController.timing`
+    /// (fenêtre `[ts, ts+5400)`) — distincte de `statsAvgStressSince`/
+    /// `statsNightAvg` (bornes différentes, sections Dashboard).
+    func averageStressBetween(fromTs: Double, toTs: Double) throws -> Double? {
+        var value: Double?
+        try db.run(
+            "SELECT AVG(value) FROM wellness_samples WHERE metric = 'stress' AND ts >= ? AND ts < ?",
+            [.double(fromTs), .double(toTs)]) { r in value = r.double(0) }
+        return value
+    }
+
     // MARK: - Dashboard / Stats (incrément L4, miroir `stats.controller.ts`)
     //
     // Lecture seule — mêmes requêtes SQL que le contrôleur Nest, sur le MÊME

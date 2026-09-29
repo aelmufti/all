@@ -3,9 +3,9 @@
 //  all (bridge-connect)
 //
 //  Portage réel du backend local « Pulse embarqué » (incréments
-//  L1+L2+L3+L4+L5+L6, cf. `docs/stockage-local.md`) — remplace
-//  `StubLocalPulseBackend` (L0) pour les routes qu'il sait vraiment servir
-//  depuis `LocalDb`. Toute autre route continue de lever
+//  L1+L2+L3+L4+L5+L6+L5-Nutrition-analytics, cf. `docs/stockage-local.md`) —
+//  remplace `StubLocalPulseBackend` (L0) pour les routes qu'il sait vraiment
+//  servir depuis `LocalDb`. Toute autre route continue de lever
 //  `LocalPulseUnavailableError` (`Pulse/Core/PulseAPIClient.swift`), à faire
 //  pour un incrément ultérieur (SpO2 report, programme…).
 //
@@ -45,6 +45,16 @@
 //  assumée vs serveur : `weightKg` fourni par ce PUT est AUSSI répercuté dans
 //  `weight_log` du jour (le serveur ne le fait pas), cf. commentaire de
 //  section dédiée plus bas.
+//
+//  Portée L5-Nutrition-analytics : `GET api/nutrition/targets`, `.../weekly`,
+//  `.../timing/:date`, `.../suggestions/:date`, et les champs
+//  `targets`/`remaining`/`targetRanges` de `.../day/:date` — remplacent les
+//  STUBS neutres de l'incrément L5-Nutrition précédent, calculés désormais
+//  par le moteur réel (`Local/NutritionTarget.swift`, portage de
+//  `nutrition/target.ts`). Moteur PROGRAMME non porté (pas de table
+//  `programme_state` locale) : `targetRanges` retombe toujours sur les
+//  cibles manuelles (`manualRanges()`), `programme` reste toujours `nil` —
+//  cf. l'en-tête de `NutritionTarget.swift` et la section dédiée plus bas.
 //
 
 import Foundation
@@ -218,19 +228,19 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("DELETE", let r) where r.hasPrefix("nutrition/log/"):
             return try encodeNutritionLogDelete(idString: String(r.dropFirst("nutrition/log/".count)))
 
-        // Stubs neutres — targets/weekly/timing/suggestions non portés (cf.
-        // en-tête de section « Nutrition — stubs neutres »).
+        // Cibles calculées (incrément L5-Nutrition-analytics — cf. section
+        // dédiée plus bas et `Local/NutritionTarget.swift`).
         case ("GET", "nutrition/targets"):
-            return try encodeNutritionTargetsStub()
+            return try encodeNutritionTargets(query: query)
 
         case ("GET", "nutrition/weekly"):
-            return try encodeNutritionWeeklyStub()
+            return try encodeNutritionWeekly(query: query)
 
         case ("GET", let r) where r.hasPrefix("nutrition/timing/"):
-            return encodeNutritionTimingStub()
+            return try encodeNutritionTiming(date: String(r.dropFirst("nutrition/timing/".count)))
 
         case ("GET", let r) where r.hasPrefix("nutrition/suggestions/"):
-            return try encodeNutritionSuggestionsStub()
+            return try encodeNutritionSuggestions(date: String(r.dropFirst("nutrition/suggestions/".count)))
 
         // Réseau Open Food Facts — SEUL réseau autorisé en mode Téléphone
         // (cf. CLAUDE.md, autorisation explicite 2026-09-29).
@@ -467,21 +477,22 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         return nil
     }
 
-    // MARK: - Nutrition (incrément L5-Nutrition, miroir `NutritionController`
-    // — `nutrition.controller.ts`)
+    // MARK: - Nutrition (incrément L5-Nutrition + L5-Nutrition-analytics,
+    // miroir `NutritionController` — `nutrition.controller.ts`)
     //
-    // Portée FIDÈLE (aucun réseau) : `day/:date` (entrées + totaux — PAS les
-    // cibles, cf. plus bas), `frequent`, `foods` (recherche/création/édition
+    // Portée FIDÈLE (aucun réseau) : `day/:date` (entrées + totaux + cibles,
+    // cf. plus bas), `frequent`, `foods` (recherche/création/édition
     // bibliothèque), `log` (ajout/édition/suppression). Table `foods` semée
     // au premier ouverture depuis `LocalDb.seedFoods` (port de `seed-foods.ts`).
     //
-    // `targets`/`remaining`/`targetRanges`/`programme` de `day/:date` :
-    // TOUJOURS neutres (`null`) — le calcul de l'objectif du jour
-    // (`computeDayTarget`/`target.ts`, ~640 lignes, dépend du profil/de la
-    // montre/des séances) n'est PAS porté dans cet incrément, cf. section
-    // « stubs neutres » plus bas. Seul `proteinPerKg` reste fidèle (dépend
-    // seulement des totaux réels + `settings.weightKg`, déjà tenu à jour par
-    // L5-Poids, `LocalDb.syncWeightProfile`).
+    // `targets`/`remaining` de `day/:date` : calculés depuis le moteur réel
+    // (`Local/NutritionTarget.swift`, port de `target.ts`) — cf. `dayTarget`/
+    // `effectiveTargets` plus bas. `targetRanges` retombe sur `manualRanges()`
+    // (cibles manuelles min/max, `settings`) — JAMAIS un cadre de programme
+    // (`programmeFor`/`activeConstraints` côté TS) : le moteur programme n'est
+    // pas porté dans cet incrément (pas de table `programme_state` locale),
+    // cf. en-tête de `NutritionTarget.swift`. `programme` (nom du programme
+    // actif) reste donc toujours `nil`.
 
     private func encodeNutritionDay(date: String) throws -> Data {
         let range = NSRange(date.startIndex..<date.endIndex, in: date)
@@ -510,9 +521,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             fat: round1(sumFat), fiber: round1(sumFiber))
 
         // `proteinPerKg` — miroir de `weightKg && totals.protein ? round(...) :
-        // null` (TS) : seul champ de `day()` calculable sans le portage de
-        // `target.ts` (dépend juste des totaux réels + `settings.weightKg`,
-        // synchronisé par L5-Poids sur chaque écriture de pesée).
+        // null` (TS) : indépendant du moteur de cible (dépend juste des
+        // totaux réels + `settings.weightKg`, synchronisé par L5-Poids sur
+        // chaque écriture de pesée).
         let weightKg = (try db.settingValue(key: "weightKg")).flatMap(Double.init)
         let proteinPerKg: Double?
         if let weightKg, weightKg != 0, sumProtein != 0 {
@@ -521,10 +532,19 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             proteinPerKg = nil
         }
 
-        let neutralMacros = LocalNutritionMacrosDTO(kcal: nil, protein: nil, carbs: nil, fat: nil, fiber: nil)
+        let auto = try dayTarget(date: date)
+        let (targets, source) = try effectiveTargets(date: date, auto: auto)
+        let remaining = LocalNutritionMacrosDTO(
+            kcal: targets.kcal.map { round1($0 - sumKcal) },
+            protein: targets.protein.map { round1($0 - sumProtein) },
+            carbs: targets.carbs.map { round1($0 - sumCarbs) },
+            fat: targets.fat.map { round1($0 - sumFat) },
+            fiber: targets.fiber.map { round1($0 - sumFiber) })
+        let targetRanges = try manualRanges()
+
         let day = LocalNutritionDayDTO(
-            date: date, entries: entries, totals: totals, targets: neutralMacros,
-            targetRanges: nil, programme: nil, remaining: neutralMacros, proteinPerKg: proteinPerKg)
+            date: date, entries: entries, totals: totals, targets: targets, targetSource: source,
+            targetRanges: targetRanges, programme: nil, remaining: remaining, proteinPerKg: proteinPerKg)
         return try JSONEncoder().encode(day)
     }
 
@@ -678,56 +698,311 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         return (grams, nil, nil)
     }
 
-    // MARK: - Nutrition — stubs neutres (`targets`/`weekly`/`timing`/`suggestions`)
+    // MARK: - Nutrition — cibles calculées (incrément L5-Nutrition-analytics,
+    // miroir `target.ts` + les aides privées de `NutritionController` —
+    // `dayTarget`/`profileOn`/`watchOn`/`effectiveTargets`/`readMode`/
+    // `readTargets`/`readTargetMins`/`readTargetMaxes`/`readSettings`/
+    // `manualRanges`/`remainingFor`). Moteur pur dans
+    // `Local/NutritionTarget.swift` ; ici seulement la lecture des entrées
+    // locales (profil/montre/séances/settings/intake) et l'encodage JSON.
     //
-    // NON portés dans cet incrément : `target.ts` (~640 lignes, profil +
-    // montre + séances + programme) calcule l'objectif calorique/macros
-    // automatique dont dépendent `targets`, `weekly` (moyenne 7 j vs objectif)
-    // et indirectement `suggestions` (a besoin d'un reliquat). `timing`
-    // corrèle le dernier repas au stress ambiant — capteur de stress existe
-    // localement (`wellness_samples`) mais la fenêtre de calcul n'est pas
-    // portée non plus. Réponses ci-dessous : formes JSON MINIMALES qui
-    // décodent dans les modèles réels de l'écran (`NutritionTargetInfo`,
-    // `NutritionWeekly`, `NutritionTimingResponse`, `NutritionSuggestionsResponse`)
-    // sans jamais fabriquer de valeur — tout ce qui serait un résultat de
-    // calcul non fait est `null`/vide, jamais un `0` qui se ferait passer
-    // pour un vrai objectif. `NutritionView` gère déjà ces formes sans rendu
-    // trompeur : `status == "unavailable"` bascule la carte Objectif sur
-    // « — kcal » (branche déjà existante, utilisée aussi côté serveur quand
-    // le profil est incomplet) ; `suggestions.items == []` masque la carte
-    // Suggestions ; `timing.meal == nil` ne change rien (champ non lu par
-    // `NutritionView`, qui recalcule sa propre frise depuis `day.entries`).
-    // À faire dans un futur incrément dédié (« L5-Nutrition-analytics ») :
-    // portage de `target.ts`/`computeWeekly`/`timing`/`suggestions` réels.
+    // Moteur PROGRAMME non porté (cf. en-tête de `NutritionTarget.swift`) :
+    // `activeConstraints()`/`programmeFor()` n'existent pas ici — il n'y a pas
+    // de table `programme_state` locale, donc rien à lire. Conséquence :
+    // `computeMacros`/`computeDayTarget` sont TOUJOURS appelés sans
+    // contraintes (équivalent de `constraints: null` côté TS), et
+    // `targetRanges` (`day/:date`, `targets`) retombe TOUJOURS sur
+    // `manualRanges()` (cibles manuelles min/max), jamais un cadre de
+    // programme — cf. aussi le commentaire de section `day/:date` plus haut.
+    //
+    // Profil incomplet (`birthYear`/`sex`/`heightCm` manquants) : comportement
+    // HONNÊTE hérité tel quel du moteur (`NutritionTargetEngine.computeDayTarget`
+    // → `status: "unavailable"`, `missing: [...]`, toutes les cibles `nil`) —
+    // jamais un `0` ou une valeur fabriquée. `suggestions`/`weekly` héritent
+    // de cette honnêteté via `remaining`/`auto.targetKcal` restant `nil`.
 
-    private func encodeNutritionTargetsStub() throws -> Data {
-        try JSONEncoder().encode(LocalNutritionTargetsStubDTO())
+    /// Miroir de `dayTarget` (TS, privée).
+    private func dayTarget(date: String) throws -> NutritionEngineTargetResult {
+        let profile = try profileOn(date: date)
+        let watchRow = try db.watchDay(date: date)
+        let sessions = try db.activitySessions(date: date).map {
+            NutritionEngineSession(sport: $0.sport, subSport: $0.subSport, durationS: $0.durationS, calories: $0.calories)
+        }
+        let settings = try readSettings()
+        return NutritionTargetEngine.computeDayTarget(
+            date: date, profile: profile,
+            watch: NutritionEngineWatchDay(restingKcal: watchRow.restingKcal, activeKcal: watchRow.activeKcal),
+            sessions: sessions, settings: settings)
     }
 
-    /// `thresholdKcal` (seul champ non-optionnel sans repli honnête à `0`) =
-    /// `DEFAULT_TARGET_SETTINGS.weeklyAlertKcal` (target.ts) — la seule
-    /// valeur qui ne fabrique rien : c'est le SEUIL par défaut, pas un
-    /// résultat de calcul.
-    private func encodeNutritionWeeklyStub() throws -> Data {
-        try JSONEncoder().encode(LocalNutritionWeeklyStubDTO())
+    /// Miroir de `profileOn` (TS) — profil de base (`readProfile()`, mêmes
+    /// clés `settings` que L6) avec `weightKg` remplacé par la dernière pesée
+    /// connue AU PLUS TARD `date` (`LocalDb.weightOn`), repli sur
+    /// `settings.weightKg` si aucune pesée avant cette date.
+    private func profileOn(date: String) throws -> NutritionEngineProfile {
+        let base = try readProfile()
+        let weightOnDate = try db.weightOn(date: date) ?? base.weightKg
+        return NutritionEngineProfile(birthYear: base.birthYear, sex: base.sex, weightKg: weightOnDate, heightCm: base.heightCm)
     }
 
-    /// `{"meal": null}` — forme exacte que renvoie aussi le serveur quand
-    /// aucun repas n'a d'horodatage dans la fenêtre (`if (!last) return {meal:
-    /// null}`), donc pas seulement un stub dégradé : c'est un état réel valide
-    /// du contrat. `NutritionTimingResponse.meal` est `Optional`.
-    private func encodeNutritionTimingStub() -> Data {
-        Data(#"{"meal": null}"#.utf8)
+    /// Miroir de `readMode` (TS) — `settings.nutritionMode`, défaut `"auto"`.
+    private func readMode() throws -> String {
+        (try db.settingValue(key: "nutritionMode")) == "manual" ? "manual" : "auto"
     }
 
-    /// `reason: "no-targets"` — forme exacte renvoyée par le serveur quand
-    /// aucune cible n'est calculable (`remaining.kcal == null && remaining.protein
-    /// == null`), qui est TOUJOURS notre cas ici puisque les cibles ne sont
-    /// jamais calculées localement.
-    private func encodeNutritionSuggestionsStub() throws -> Data {
-        try JSONEncoder().encode(LocalNutritionSuggestionsStubDTO(
-            remaining: LocalNutritionMacrosDTO(kcal: nil, protein: nil, carbs: nil, fat: nil, fiber: nil),
-            items: [], reason: "no-targets"))
+    private struct NutritionManualTargets {
+        let kcal: Double?
+        let protein: Double?
+        let carbs: Double?
+        let fat: Double?
+        let fiber: Double?
+    }
+
+    /// Miroir de `readTargetKeys` (TS) — `settings.nutritionKcal<suffix>`
+    /// etc., `nil` si absent ou non numérique (jamais `NaN`).
+    private func readTargetKeys(suffix: String) throws -> NutritionManualTargets {
+        func val(_ base: String) throws -> Double? {
+            (try db.settingValue(key: "\(base)\(suffix)")).flatMap(Double.init)
+        }
+        return NutritionManualTargets(
+            kcal: try val("nutritionKcal"), protein: try val("nutritionProtein"),
+            carbs: try val("nutritionCarbs"), fat: try val("nutritionFat"), fiber: try val("nutritionFiber"))
+    }
+
+    private func readTargets() throws -> NutritionManualTargets { try readTargetKeys(suffix: "") }
+    private func readTargetMins() throws -> NutritionManualTargets { try readTargetKeys(suffix: "Min") }
+    private func readTargetMaxes() throws -> NutritionManualTargets { try readTargetKeys(suffix: "Max") }
+
+    /// Miroir de `readSettings` (TS) — `DEFAULT_TARGET_SETTINGS` avec repli
+    /// clé par clé sur `settings.nutritionXxx`, chaque valeur passée par
+    /// `clampSetting` (une valeur stockée hors bornes est ignorée, comme le
+    /// serveur). Ces clés ne sont écrites par AUCUNE route locale actuelle
+    /// (`PUT nutrition/settings` non porté, hors périmètre) : en pratique
+    /// toujours les valeurs par défaut, sauf seedées directement en test.
+    private func readSettings() throws -> NutritionEngineSettings {
+        var settings = NutritionEngineSettings.defaults
+        func apply(_ key: NutritionEngineSettingKey, _ dbKey: String) throws {
+            guard let raw = (try db.settingValue(key: dbKey)).flatMap(Double.init) else { return }
+            guard let clamped = NutritionTargetEngine.clampSetting(key, raw) else { return }
+            switch key {
+            case .weeklyLossPct: settings.weeklyLossPct = clamped
+            case .deficitKcal: settings.deficitKcal = clamped
+            case .sportFactor: settings.sportFactor = clamped
+            case .proteinPerKg: settings.proteinPerKg = clamped
+            case .floorKcal: settings.floorKcal = clamped
+            case .weeklyAlertKcal: settings.weeklyAlertKcal = clamped
+            }
+        }
+        try apply(.weeklyLossPct, "nutritionWeeklyLossPct")
+        try apply(.deficitKcal, "nutritionDeficitKcal")
+        try apply(.sportFactor, "nutritionSportFactor")
+        try apply(.proteinPerKg, "nutritionProteinPerKg")
+        try apply(.floorKcal, "nutritionFloorKcal")
+        try apply(.weeklyAlertKcal, "nutritionWeeklyAlertKcal")
+        return settings
+    }
+
+    /// Miroir de `effectiveTargets` (TS) — SANS le paramètre `programmeRanges`
+    /// (toujours `null` ici, cf. en-tête de section) : la branche
+    /// `fromProgramme` du TS est donc omise plutôt que portée morte.
+    private func effectiveTargets(date: String, auto: NutritionEngineTargetResult) throws -> (targets: LocalNutritionMacrosDTO, source: String) {
+        let manual = try readTargets()
+        let mode = try readMode()
+        let useAuto = mode == "auto" && auto.status == "ok" && auto.targetKcal != nil
+        func pick(_ value: Double?, _ fallback: Double?) -> Double? {
+            (useAuto && value != nil) ? value : fallback
+        }
+        let targets = LocalNutritionMacrosDTO(
+            kcal: useAuto ? auto.targetKcal : manual.kcal,
+            protein: pick(auto.macros.proteinG, manual.protein),
+            carbs: pick(auto.macros.carbsG, manual.carbs),
+            fat: pick(auto.macros.fatG, manual.fat),
+            fiber: pick(auto.macros.fiberG, manual.fiber))
+        return (targets, useAuto ? "auto" : "manual")
+    }
+
+    /// Miroir de `manualRanges` (TS) — cadre min/max des cibles MANUELLES
+    /// (`settings.nutritionXxxMin`/`Max`), PAS un cadre de programme (jamais
+    /// disponible ici, cf. en-tête de section). `min > max` : les deux valeurs
+    /// sont échangées, comme le serveur.
+    private func manualRanges() throws -> [String: LocalNutritionMacroRangeDTO]? {
+        let minT = try readTargetMins()
+        let maxT = try readTargetMaxes()
+        var ranges: [String: LocalNutritionMacroRangeDTO] = [:]
+        let pairs: [(String, Double?, Double?)] = [
+            ("kcal", minT.kcal, maxT.kcal), ("protein", minT.protein, maxT.protein),
+            ("carbs", minT.carbs, maxT.carbs), ("fat", minT.fat, maxT.fat), ("fiber", minT.fiber, maxT.fiber),
+        ]
+        for (key, lo, hi) in pairs {
+            guard lo != nil || hi != nil else { continue }
+            if let lo, let hi, lo > hi {
+                ranges[key] = LocalNutritionMacroRangeDTO(min: hi, max: lo)
+            } else {
+                ranges[key] = LocalNutritionMacroRangeDTO(min: lo, max: hi)
+            }
+        }
+        return ranges.isEmpty ? nil : ranges
+    }
+
+    /// Miroir de `remainingFor` (TS) — PAS de champ `fat` dans le résultat
+    /// (le serveur non plus : `totals`/`remaining` de cette aide se limitent à
+    /// kcal/protein/carbs/fiber) ; encodé ici avec `fat: nil` (`null`),
+    /// équivalent pour un décodage dans `NutritionMacros` (tous champs
+    /// optionnels).
+    private func remainingFor(date: String) throws -> LocalNutritionMacrosDTO {
+        let rows = try db.foodLog(date: date)
+        var sumKcal = 0.0, sumProtein = 0.0, sumCarbs = 0.0, sumFiber = 0.0
+        for row in rows {
+            sumKcal += row.kcal ?? 0
+            sumProtein += row.protein ?? 0
+            sumCarbs += row.carbs ?? 0
+            sumFiber += row.fiber ?? 0
+        }
+        let auto = try dayTarget(date: date)
+        let (targets, _) = try effectiveTargets(date: date, auto: auto)
+        func r1(_ v: Double) -> Double { (v * 10).rounded() / 10 }
+        return LocalNutritionMacrosDTO(
+            kcal: targets.kcal.map { r1($0 - sumKcal) }, protein: targets.protein.map { r1($0 - sumProtein) },
+            carbs: targets.carbs.map { r1($0 - sumCarbs) }, fat: nil, fiber: targets.fiber.map { r1($0 - sumFiber) })
+    }
+
+    /// Miroir de `shiftDate` (TS) — coupure UTC, jour calendaire ± n jours.
+    private static func shiftDate(_ date: String, byDays days: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let base = formatter.date(from: date) else { return date }
+        return formatter.string(from: base.addingTimeInterval(Double(days) * 86400))
+    }
+
+    /// `GET api/nutrition/targets` — miroir de `NutritionController.getTargets`,
+    /// réduit aux champs consommés par l'écran (`mode`/`targets`/`source`/`auto`)
+    /// — mêmes champs déjà explicitement omis du modèle `NutritionTargetInfo`
+    /// (`manual`/`manualMin`/`manualMax`/`programme`/`settings`/`date` du
+    /// serveur, jamais décodés côté écran, cf. en-tête de
+    /// `NutritionModels.swift`).
+    private func encodeNutritionTargets(query: [String: String]) throws -> Data {
+        let date = query["date"] ?? Self.todayDateKey()
+        let range = NSRange(date.startIndex..<date.endIndex, in: date)
+        guard Self.datePattern.firstMatch(in: date, range: range) != nil else {
+            throw LocalNutritionValidationError(reason: "Date invalide")
+        }
+        let auto = try dayTarget(date: date)
+        let (targets, source) = try effectiveTargets(date: date, auto: auto)
+        let dto = LocalNutritionTargetsResponseDTO(
+            mode: try readMode(), targets: targets, source: source,
+            auto: LocalNutritionAutoTargetComputedDTO(auto))
+        return try JSONEncoder().encode(dto)
+    }
+
+    /// `GET api/nutrition/weekly` — miroir de `NutritionController.getWeekly`
+    /// (`computeWeekly`, moyenne 7 j se terminant à `date`).
+    private func encodeNutritionWeekly(query: [String: String]) throws -> Data {
+        let end = query["date"] ?? Self.todayDateKey()
+        let range = NSRange(end.startIndex..<end.endIndex, in: end)
+        guard Self.datePattern.firstMatch(in: end, range: range) != nil else {
+            throw LocalNutritionValidationError(reason: "Date invalide")
+        }
+        let settings = try readSettings()
+        let intakeByDate = try db.foodLogKcalByDate()
+        var days: [NutritionEngineWeeklyDay] = []
+        for i in stride(from: 6, through: 0, by: -1) {
+            let date = Self.shiftDate(end, byDays: -i)
+            let auto = try dayTarget(date: date)
+            let logged = intakeByDate[date].map { $0.rounded() }
+            days.append(NutritionEngineWeeklyDay(
+                date: date, intakeKcal: logged, expenditureKcal: auto.expenditureKcal, targetKcal: auto.targetKcal,
+                balanceKcal: (logged != nil && auto.expenditureKcal != nil) ? logged! - auto.expenditureKcal! : nil))
+        }
+        let weekly = NutritionTargetEngine.computeWeekly(days, settings: settings)
+        return try JSONEncoder().encode(LocalNutritionWeeklyResponseDTO(weekly))
+    }
+
+    /// `GET api/nutrition/timing/:date` — miroir de `NutritionController.timing`
+    /// (fenêtre de digestion vs stress ambiant, `wellness_samples`).
+    private func encodeNutritionTiming(date: String) throws -> Data {
+        let range = NSRange(date.startIndex..<date.endIndex, in: date)
+        guard Self.datePattern.firstMatch(in: date, range: range) != nil else {
+            throw LocalNutritionValidationError(reason: "Date invalide")
+        }
+        guard let last = try db.lastFoodLogWithTs(date: date) else {
+            return try JSONEncoder().encode(LocalNutritionTimingResponseDTO(meal: nil))
+        }
+        func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
+        let avgStress = try db.averageStressBetween(fromTs: Double(last.ts), toTs: Double(last.ts) + 5400)
+        let baseH = clamp(1.5 + (last.kcal ?? 0) / 400 + (last.fat ?? 0) / 30, 1.5, 5)
+        let stressFactor = avgStress.map { clamp(1 + ($0 - 30) / 100, 0.75, 1.6) } ?? 1.0
+        let windowH = clamp(baseH * stressFactor, 1.5, 6)
+        let digEnd = Int((Double(last.ts) + windowH * 3600).rounded())
+        let meal = LocalNutritionMealTimingDTO(
+            lastMealTs: last.ts, digestionEndTs: digEnd, nextMealTs: digEnd,
+            gymStartTs: Int((Double(last.ts) + 2 * 3600).rounded()),
+            gymEndTs: Int((Double(last.ts) + 3.5 * 3600).rounded()),
+            avgStress: avgStress.map { Int($0.rounded()) }, windowH: (windowH * 10).rounded() / 10)
+        return try JSONEncoder().encode(LocalNutritionTimingResponseDTO(meal: meal))
+    }
+
+    /// `GET api/nutrition/suggestions/:date` — miroir de
+    /// `NutritionController.suggestions` (score protéines/kcal/fibres,
+    /// bibliothèque `foods` locale, max 6 items).
+    private func encodeNutritionSuggestions(date: String) throws -> Data {
+        let range = NSRange(date.startIndex..<date.endIndex, in: date)
+        guard Self.datePattern.firstMatch(in: date, range: range) != nil else {
+            throw LocalNutritionValidationError(reason: "Date invalide")
+        }
+        let remaining = try remainingFor(date: date)
+        guard remaining.kcal != nil || remaining.protein != nil else {
+            return try JSONEncoder().encode(LocalNutritionSuggestionsResponseDTO(remaining: remaining, items: [], reason: "no-targets"))
+        }
+        let needKcal = max(remaining.kcal ?? 0, 0)
+        let needProtein = max(remaining.protein ?? 0, 0)
+        let needFiber = max(remaining.fiber ?? 0, 0)
+        guard needKcal > 0 || needProtein > 0 || needFiber > 0 else {
+            return try JSONEncoder().encode(LocalNutritionSuggestionsResponseDTO(remaining: remaining, items: [], reason: "done"))
+        }
+
+        func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
+        func r1(_ v: Double) -> Double { (v * 10).rounded() / 10 }
+        func maxPortionsFor(_ portionGrams: Double) -> Double {
+            if portionGrams >= 100 { return 2 }
+            if portionGrams >= 60 { return 3 }
+            if portionGrams >= 25 { return 4 }
+            return 6
+        }
+
+        var scored: [(item: LocalNutritionSuggestionItemDTO, score: Double)] = []
+        for f in try db.foodsWithPositiveKcal() {
+            guard let kcal100 = f.kcal, kcal100 > 0 else { continue }
+            let byUnit = (f.unitGrams ?? 0) > 0
+            let portionG = byUnit ? f.unitGrams! : 100.0
+            let portionKcal = kcal100 * portionG / 100
+            let portionProtein = (f.protein ?? 0) * portionG / 100
+            guard portionKcal > 0 else { continue }
+            let byKcal = needKcal > 0 ? (needKcal * 0.6 / portionKcal).rounded(.down) : 1.0
+            let byProtein = (needProtein > 0 && portionProtein > 0) ? (needProtein / portionProtein).rounded() : Double.infinity
+            let portions = clamp(min(byKcal, byProtein), 1, maxPortionsFor(portionG))
+            let grams = r1(portions * portionG)
+            let units: Double? = byUnit ? portions : nil
+            let factor = grams / 100
+            let giveKcal = (kcal100 * factor).rounded()
+            let giveProtein = r1((f.protein ?? 0) * factor)
+            let giveCarbs = r1((f.carbs ?? 0) * factor)
+            let giveFiber = r1((f.fiber ?? 0) * factor)
+            let fillP = needProtein > 0 ? min(giveProtein / needProtein, 1) : 0
+            let fillK = needKcal > 0 ? min(giveKcal / needKcal, 1) : 0
+            let fillF = needFiber > 0 ? min(giveFiber / needFiber, 1) : 0
+            let score = fillP * 0.6 + fillK * 0.3 + fillF * 0.1
+            guard score > 0 else { continue }
+            scored.append((
+                LocalNutritionSuggestionItemDTO(
+                    foodId: f.id, name: f.name, grams: grams, units: units, unitLabel: f.unitLabel, unitGrams: f.unitGrams,
+                    kcal: giveKcal, protein: giveProtein, carbs: giveCarbs, fiber: giveFiber),
+                score))
+        }
+        scored.sort { $0.score > $1.score }
+        let items = Array(scored.prefix(6)).map { $0.item }
+        return try JSONEncoder().encode(LocalNutritionSuggestionsResponseDTO(remaining: remaining, items: items, reason: nil))
     }
 
     // MARK: - Nutrition — Open Food Facts (Part B, réseau AUTORISÉ)
@@ -1381,15 +1656,15 @@ private struct LocalNutritionProgrammeRefDTO: Encodable {
 }
 
 /// `targetSource` gardé pour fidélité de forme JSON (présent côté serveur,
-/// ignoré par `NutritionDay`, qui ne le modélise pas) — toujours `"manual"`
-/// ici puisque `targets` est toujours neutre (cf. `encodeNutritionDay`).
-/// `targetRanges`/`programme` toujours `nil` (même raison).
+/// ignoré par `NutritionDay`, qui ne le modélise pas) — `"auto"`/`"manual"`
+/// réel, cf. `RealLocalPulseBackend.effectiveTargets`. `programme` toujours
+/// `nil` : moteur programme non porté (cf. en-tête de section `day/:date`).
 private struct LocalNutritionDayDTO: Encodable {
     let date: String
     let entries: [LocalNutritionEntryDTO]
     let totals: LocalNutritionMacrosDTO
     let targets: LocalNutritionMacrosDTO
-    let targetSource = "manual"
+    let targetSource: String
     let targetRanges: [String: LocalNutritionMacroRangeDTO]?
     let programme: LocalNutritionProgrammeRefDTO?
     let remaining: LocalNutritionMacrosDTO
@@ -1490,68 +1765,135 @@ private struct LocalNutritionOkDTO: Encodable {
     let ok: Bool
 }
 
-// MARK: - DTO d'encodage JSON — Nutrition, stubs neutres
-// (`targets`/`weekly`/`suggestions` — cf. section d'implémentation)
+// MARK: - DTO d'encodage JSON — Nutrition, cibles calculées
+// (`targets`/`weekly`/`timing`/`suggestions` — cf. section d'implémentation,
+// incrément L5-Nutrition-analytics). Champs réduits à ceux consommés par
+// l'écran (`Pulse/Screens/Nutrition/NutritionModels.swift`) — mêmes
+// simplifications déjà actées explicitement côté modèle client (« détail de
+// calcul de l'objectif… non consommés »), cf. son en-tête. `programme` reste
+// TOUJOURS `nil` (moteur programme non porté, cf. `NutritionTarget.swift`).
 
 /// Miroir de `NutritionMacroProgrammePlan{name, unmet}` — jamais instancié
-/// non-`nil` ici (`LocalNutritionMacroPlanStubDTO.programme` reste `nil`).
+/// non-`nil` ici (`LocalNutritionMacroPlanDTO.programme` reste `nil`).
 private struct LocalNutritionMacroProgrammeStubDTO: Encodable {
     let name: String
     let unmet: [String]
 }
 
-private struct LocalNutritionMacroPlanStubDTO: Encodable {
-    let proteinG: Double? = nil
-    let fatG: Double? = nil
-    let carbsG: Double? = nil
-    let fiberG: Double? = nil
-    let proteinPerKg: Double? = nil
-    let programme: LocalNutritionMacroProgrammeStubDTO? = nil
+private struct LocalNutritionMacroPlanDTO: Encodable {
+    let proteinG: Double?
+    let fatG: Double?
+    let carbsG: Double?
+    let fiberG: Double?
+    let proteinPerKg: Double?
+    let programme: LocalNutritionMacroProgrammeStubDTO?
+
+    init(_ macros: NutritionEngineMacroPlan) {
+        proteinG = macros.proteinG
+        fatG = macros.fatG
+        carbsG = macros.carbsG
+        fiberG = macros.fiberG
+        proteinPerKg = macros.proteinPerKg
+        programme = nil
+    }
 }
 
-private struct LocalNutritionAutoDetailStubDTO: Encodable {
-    let restingKcal: Double? = nil
-    let activeKcal: Double? = nil
+private struct LocalNutritionAutoDetailComputedDTO: Encodable {
+    let restingKcal: Double?
+    let activeKcal: Double?
 }
 
-private struct LocalNutritionAutoTargetStubDTO: Encodable {
-    let status = "unavailable"
-    let source = "formula"
-    let missing: [String] = []
-    let targetKcal: Double? = nil
-    let expenditureKcal: Double? = nil
-    let deficitKcal: Double? = nil
-    let macros = LocalNutritionMacroPlanStubDTO()
-    let guardStatus = "none"
-    let detail = LocalNutritionAutoDetailStubDTO()
+/// Miroir du sous-arbre `auto` de `getTargets`/`day` (TS) — champs réduits à
+/// ceux du modèle `NutritionAutoTarget` côté écran.
+private struct LocalNutritionAutoTargetComputedDTO: Encodable {
+    let status: String
+    let source: String
+    let missing: [String]
+    let targetKcal: Double?
+    let expenditureKcal: Double?
+    let deficitKcal: Double?
+    let macros: LocalNutritionMacroPlanDTO
+    let guardStatus: String
+    let detail: LocalNutritionAutoDetailComputedDTO
 
     enum CodingKeys: String, CodingKey {
         case status, source, missing, targetKcal, expenditureKcal, deficitKcal, macros, detail
         case guardStatus = "guard"
     }
+
+    init(_ r: NutritionEngineTargetResult) {
+        status = r.status
+        source = r.source
+        missing = r.missing
+        targetKcal = r.targetKcal
+        expenditureKcal = r.expenditureKcal
+        deficitKcal = r.deficitKcal
+        macros = LocalNutritionMacroPlanDTO(r.macros)
+        guardStatus = r.guardStatus
+        detail = LocalNutritionAutoDetailComputedDTO(restingKcal: r.detail.restingKcal, activeKcal: r.detail.activeKcal)
+    }
 }
 
-private struct LocalNutritionTargetsStubDTO: Encodable {
-    let mode = "manual"
-    let targets = LocalNutritionMacrosDTO(kcal: nil, protein: nil, carbs: nil, fat: nil, fiber: nil)
-    let source = "manual"
-    let auto = LocalNutritionAutoTargetStubDTO()
+/// `GET api/nutrition/targets` — miroir réduit de `getTargets` (TS), cf.
+/// commentaire de `encodeNutritionTargets`.
+private struct LocalNutritionTargetsResponseDTO: Encodable {
+    let mode: String
+    let targets: LocalNutritionMacrosDTO
+    let source: String
+    let auto: LocalNutritionAutoTargetComputedDTO
 }
 
-private struct LocalNutritionWeeklyStubDTO: Encodable {
-    let loggedDays = 0
-    let partialDays = 0
-    let emptyDays = 0
-    let avgDeficitKcal: Double? = nil
-    let alert = false
-    /// `DEFAULT_TARGET_SETTINGS.weeklyAlertKcal` (`target.ts`) — seuil par
-    /// défaut, pas un résultat de calcul (cf. `encodeNutritionWeeklyStub`).
-    let thresholdKcal: Double = 600
+private struct LocalNutritionWeeklyResponseDTO: Encodable {
+    let loggedDays: Int
+    let partialDays: Int
+    let emptyDays: Int
+    let avgDeficitKcal: Double?
+    let alert: Bool
+    let thresholdKcal: Double
+
+    init(_ r: NutritionEngineWeeklyResult) {
+        loggedDays = r.loggedDays
+        partialDays = r.partialDays
+        emptyDays = r.emptyDays
+        avgDeficitKcal = r.avgDeficitKcal
+        alert = r.alert
+        thresholdKcal = r.thresholdKcal
+    }
 }
 
-private struct LocalNutritionSuggestionsStubDTO: Encodable {
+private struct LocalNutritionMealTimingDTO: Encodable {
+    let lastMealTs: Int
+    let digestionEndTs: Int
+    let nextMealTs: Int
+    let gymStartTs: Int
+    let gymEndTs: Int
+    let avgStress: Int?
+    let windowH: Double
+}
+
+private struct LocalNutritionTimingResponseDTO: Encodable {
+    let meal: LocalNutritionMealTimingDTO?
+}
+
+/// Miroir de l'objet `give` (`...give`) de `NutritionController.suggestions`
+/// — quantités ABSOLUES pour la portion suggérée (pas pour-100 g), SANS `fat`
+/// (le serveur non plus).
+private struct LocalNutritionSuggestionItemDTO: Encodable {
+    let foodId: Int
+    let name: String
+    let grams: Double
+    let units: Double?
+    let unitLabel: String?
+    let unitGrams: Double?
+    let kcal: Double
+    let protein: Double
+    let carbs: Double
+    let fiber: Double
+}
+
+private struct LocalNutritionSuggestionsResponseDTO: Encodable {
     let remaining: LocalNutritionMacrosDTO
-    let items: [Int] // toujours vide — le type de l'élément n'importe pas.
+    let items: [LocalNutritionSuggestionItemDTO]
     let reason: String?
 }
 
