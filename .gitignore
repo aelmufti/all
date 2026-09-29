@@ -8,5 +8,17 @@ xcuserdata/
 # Tooling scratch
 .playwright-mcp/
 
+# Fichiers de config locaux contenant des chemins/données personnelles
+# (ex. all/allTests/fit-samples.local.json — manifeste des .fit d'exemple).
+*.local.json
+
 # macOS
 .DS_Store
+
+# Documents de travail internes (gardés en local, non publiés)
+/CLAUDE.md
+/CADRAGE.md
+/SESSION-NOTES.md
+/all/SESSION-NOTES.md
+/all/docs/
+/docs/

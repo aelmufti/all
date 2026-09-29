@@ -26,14 +26,12 @@ import Foundation
 @testable import all
 
 private enum ActivitySample {
-    static let root = "/Users/alielmufti/Documents/Projects/custom-connect/samples"
-
     /// Course à pied avec GPS — session/12 laps/18 splits/zones de FC,
     /// aucune série (`setMesgs`).
-    static let running = "\(root)/user@example.com_306863786909.fit"
+    static var running: String { FitSamples.path("running") ?? "" }
     /// Musculation — 34 `setMesgs` (17 "active", 17 "rest") + zones de FC,
     /// AUCUN lap/split (pas de sous-segments côté montre pour ce sport).
-    static let strength = "\(root)/user@example.com_332754313137.fit"
+    static var strength: String { FitSamples.path("strength") ?? "" }
 
     static func data(_ path: String) throws -> Data {
         try Data(contentsOf: URL(fileURLWithPath: path))
@@ -48,6 +46,7 @@ private enum ActivitySample {
 
 struct FitActivityExtractorSummaryTests {
     @Test func runningSummaryMatchesReferenceSdkOutput() throws {
+        guard FitSamples.available else { return }
         let summary = FitActivityExtractor.extractSummary(messages: try ActivitySample.messages(ActivitySample.running))
         #expect(summary.sport == "running")
         #expect(summary.subSport == "generic")
@@ -60,6 +59,7 @@ struct FitActivityExtractorSummaryTests {
     }
 
     @Test func strengthSummaryMatchesReferenceSdkOutput() throws {
+        guard FitSamples.available else { return }
         let summary = FitActivityExtractor.extractSummary(messages: try ActivitySample.messages(ActivitySample.strength))
         #expect(summary.sport == "training")
         #expect(summary.subSport == "strengthTraining")
@@ -76,6 +76,7 @@ struct FitActivityExtractorSummaryTests {
 
 struct FitActivityExtractorDetailTests {
     @Test func runningDetailMatchesReferenceSdkOutput() throws {
+        guard FitSamples.available else { return }
         let detail = FitActivityExtractor.extractDetail(messages: try ActivitySample.messages(ActivitySample.running))
 
         // `track` (parcours GPS) : référence = sortie RÉELLE du SDK Garmin
@@ -138,6 +139,7 @@ struct FitActivityExtractorDetailTests {
     }
 
     @Test func strengthDetailMatchesReferenceSdkOutput() throws {
+        guard FitSamples.available else { return }
         let detail = FitActivityExtractor.extractDetail(messages: try ActivitySample.messages(ActivitySample.strength))
 
         // Pas de GPS en muscu (confirmé par le script jetable de référence :
@@ -186,6 +188,7 @@ struct ActivityIngestThenServeTests {
     /// (`PulseAPIClient.decoder`) dans les modèles RÉELS de l'écran
     /// (`ActivityListResponse`/`ActivityDetail`, `ActivityModels.swift`).
     @Test func ingestActivityThenServeListAndDetailDecodableByRealAppModels() async throws {
+        guard FitSamples.available else { return }
         let spoolRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("l3-activity-spool-\(UUID().uuidString)", isDirectory: true)
         let spool = try SpoolStore(root: spoolRoot)
@@ -234,6 +237,7 @@ struct ActivityIngestThenServeTests {
     /// running ci-dessus sur un chemin différent (`sets` au lieu de
     /// `laps`/`splits`).
     @Test func strengthActivityDetailExposesNamedSets() async throws {
+        guard FitSamples.available else { return }
         let spoolRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("l3-activity-spool-\(UUID().uuidString)", isDirectory: true)
         let spool = try SpoolStore(root: spoolRoot)
@@ -264,6 +268,7 @@ struct ActivityIngestThenServeTests {
     /// par `activities.file_hash` (cf. `LocalDb.isActivityImported`, PAS
     /// `imported_files` : divergence assumée vs wellness/sommeil).
     @Test func reingestingTheSameActivityIsIdempotent() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         let url = URL(fileURLWithPath: ActivitySample.running)
         let hash = try PulseUploader.sha256Hex(ofFileAt: url)
@@ -312,6 +317,7 @@ struct ActivityBackendEdgeCaseTests {
     /// côté serveur (`activities.controller.ts`) : résumé seul, `track: []`,
     /// `streams: null`, tout le reste vide.
     @Test func missingRawFileFallsBackToSummaryOnly() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         let messages = try ActivitySample.messages(ActivitySample.strength)
         let summary = FitActivityExtractor.extractSummary(messages: messages)
@@ -346,8 +352,7 @@ struct ActivityBackendEdgeCaseTests {
 // ignoré côté backend local — pas d'erreur pour autant).
 struct SommeilRouteCoverageTests {
     private enum WellnessSample {
-        static let root = "/Users/alielmufti/Documents/Projects/custom-connect/samples"
-        static let wellness1 = "\(root)/user@example.com_263438980021.fit"
+        static var wellness1: String { FitSamples.path("wellness1") ?? "" }
     }
 
     /// CAVEAT connu (déjà noté en L1) : aucun `.fit` "sommeil" (`fileId.type
@@ -358,6 +363,7 @@ struct SommeilRouteCoverageTests {
     /// bien présent et décodable (vide, en l'absence de nuit) — pas que son
     /// contenu est correct sur une vraie nuit. Toujours vrai après L3.
     @Test func sommeilViewModelRoutesAllRespond() async throws {
+        guard FitSamples.available else { return }
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("l3-sommeil-coverage-\(UUID().uuidString).sqlite").path
         let db = try LocalDb(path: path)

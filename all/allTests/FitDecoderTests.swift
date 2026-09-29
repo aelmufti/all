@@ -18,26 +18,27 @@
 //  logique que l'exception CLAUDE.md qui autorise la LECTURE de `.fit`
 //  déjà présents dans les dépôts, pas leur recopie ailleurs.
 //
+//  Résolus via `FitSamples` (manifeste JSON local, jamais commité, cf.
+//  `FitSamples.swift`) plutôt qu'en dur : chaque test qui en dépend fait
+//  `guard FitSamples.available else { return }` pour rester au vert
+//  (passage à vide) sur un poste sans le manifeste.
+//
 
 import Testing
 import Foundation
 @testable import all
 
 private enum Sample {
-    static let root = "/Users/alielmufti/Documents/Projects/custom-connect/samples"
-
     /// Fichier bien-être (`monitoringB`) #1 — 2024-07-02/03, sans SpO2.
-    static let wellness1 = "\(root)/user@example.com_263438980021.fit"
+    static var wellness1: String { FitSamples.path("wellness1") ?? "" }
     /// Fichier bien-être (`monitoringB`) #2 — 2026-06-19, avec SpO2.
-    static let wellness2 = "\(root)/user@example.com_450570856748.fit"
+    static var wellness2: String { FitSamples.path("wellness2") ?? "" }
     /// Trois fichiers d'activité (GPS/sessions) — hors périmètre L1, servent
     /// juste à vérifier que le décodeur ne plante pas sur des messages
     /// inconnus (records/laps/gpsMetadata…) et lit l'en-tête/CRC/fileId.
-    static let activities = [
-        "\(root)/user@example.com_306863786909.fit",
-        "\(root)/user@example.com_307525865897.fit",
-        "\(root)/user@example.com_332754313137.fit",
-    ]
+    static var activities: [String] {
+        ["running", "activity2", "strength"].map { FitSamples.path($0) ?? "" }
+    }
 
     static func data(_ path: String) throws -> Data {
         try Data(contentsOf: URL(fileURLWithPath: path))
@@ -48,6 +49,7 @@ private enum Sample {
 
 struct FitDecoderHeaderTests {
     @Test func decodesHeaderAndCrcForAllSamples() throws {
+        guard FitSamples.available else { return }
         for path in [Sample.wellness1, Sample.wellness2] + Sample.activities {
             let file = try FitDecoder.decode(Sample.data(path))
             #expect(file.crcValid, "CRC invalide pour \((path as NSString).lastPathComponent)")
@@ -58,6 +60,7 @@ struct FitDecoderHeaderTests {
     }
 
     @Test func classifiesMonitoringBFiles() throws {
+        guard FitSamples.available else { return }
         for path in [Sample.wellness1, Sample.wellness2] {
             let file = try FitDecoder.decode(Sample.data(path))
             let type = file.messages.first { $0.globalMessageNumber == FitProfile.mesgFileId }?.double(0)
@@ -70,6 +73,7 @@ struct FitDecoderHeaderTests {
     /// `.skipped`, pas planter dessus malgré leurs milliers de messages
     /// `record`/`gpsMetadata` (hors profil connu, décodés génériquement).
     @Test func activityFilesDecodeWithoutCrashingAndAreNotWellnessOrSleep() throws {
+        guard FitSamples.available else { return }
         for path in Sample.activities {
             let file = try FitDecoder.decode(Sample.data(path))
             let type = file.messages.first { $0.globalMessageNumber == FitProfile.mesgFileId }?.double(0)
@@ -84,6 +88,7 @@ struct FitDecoderHeaderTests {
 
 struct FitWellnessExtractorTests {
     @Test func wellness1MatchesReferenceCountsAndSamples() throws {
+        guard FitSamples.available else { return }
         let file = try FitDecoder.decode(Sample.data(Sample.wellness1))
         let data = FitWellnessExtractor.extractWellness(messages: file.messages)
 
@@ -105,6 +110,7 @@ struct FitWellnessExtractorTests {
     }
 
     @Test func wellness1MatchesReferenceDaysAndCounters() throws {
+        guard FitSamples.available else { return }
         let file = try FitDecoder.decode(Sample.data(Sample.wellness1))
         let data = FitWellnessExtractor.extractWellness(messages: file.messages)
 
@@ -135,6 +141,7 @@ struct FitWellnessExtractorTests {
     }
 
     @Test func wellness2MatchesReferenceCountsAndSamples() throws {
+        guard FitSamples.available else { return }
         let file = try FitDecoder.decode(Sample.data(Sample.wellness2))
         let data = FitWellnessExtractor.extractWellness(messages: file.messages)
 
@@ -156,6 +163,7 @@ struct FitWellnessExtractorTests {
     }
 
     @Test func wellness2MatchesReferenceDaysAndCounters() throws {
+        guard FitSamples.available else { return }
         let file = try FitDecoder.decode(Sample.data(Sample.wellness2))
         let data = FitWellnessExtractor.extractWellness(messages: file.messages)
 
@@ -178,6 +186,7 @@ struct FitWellnessExtractorTests {
     /// Cf. rapport d'incrément : le chemin sommeil n'est donc validé qu'au
     /// niveau structurel (types/champs du profil), pas contre une vraie nuit.
     @Test func extractSleepReturnsNilOnWellnessFiles() throws {
+        guard FitSamples.available else { return }
         for path in [Sample.wellness1, Sample.wellness2] {
             let file = try FitDecoder.decode(Sample.data(path))
             #expect(FitWellnessExtractor.extractSleep(messages: file.messages) == nil)
@@ -195,6 +204,7 @@ struct LocalIngestorTests {
     }
 
     @Test func ingestsWellnessFileIntoLocalDb() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         let url = URL(fileURLWithPath: Sample.wellness1)
         let hash = try PulseUploader.sha256Hex(ofFileAt: url)
@@ -220,6 +230,7 @@ struct LocalIngestorTests {
     /// Rejouer le MÊME fichier deux fois ne duplique rien — dédup par hash
     /// (`imported_files`), même contrat que Pulse (`IngestService.ingestBuffer`).
     @Test func reingestingTheSameFileIsIdempotent() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         let url = URL(fileURLWithPath: Sample.wellness1)
         let hash = try PulseUploader.sha256Hex(ofFileAt: url)
@@ -237,6 +248,7 @@ struct LocalIngestorTests {
     /// détaillée) — mais n'écrit RIEN dans les tables bien-être (`dates()`
     /// reste vide), tables disjointes.
     @Test func activityFileIsStoredNotSkipped() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         let url = URL(fileURLWithPath: Sample.activities[0])
         let hash = try PulseUploader.sha256Hex(ofFileAt: url)
@@ -252,6 +264,7 @@ struct LocalIngestorTests {
 
 struct RealLocalPulseBackendTests {
     @Test func serveDatesAndDaysAfterIngestion() async throws {
+        guard FitSamples.available else { return }
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("local-pulse-backend-tests-\(UUID().uuidString).sqlite").path
         let db = try LocalDb(path: path)

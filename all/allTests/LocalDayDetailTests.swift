@@ -27,9 +27,8 @@ import Foundation
 @testable import all
 
 private enum DaySample {
-    static let root = "/Users/alielmufti/Documents/Projects/custom-connect/samples"
-    static let wellness1 = "\(root)/user@example.com_263438980021.fit"
-    static let wellness2 = "\(root)/user@example.com_450570856748.fit"
+    static var wellness1: String { FitSamples.path("wellness1") ?? "" }
+    static var wellness2: String { FitSamples.path("wellness2") ?? "" }
 }
 
 // MARK: - `BodyBattery.simulatePivot` vs référence TS (`body-battery.ts` compilé avec `tsc` local)
@@ -123,6 +122,7 @@ struct LocalDayDetailTests {
     /// officiel en L1 (`FitWellnessExtractorTests`) — `day()` ne fait que
     /// rebucketer les mêmes lignes de `wellness_samples` par date/fuseau.
     @Test func wellness1DayTotalsAcrossDatesMatchL1Reference() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let dates = try db.dates()
@@ -143,6 +143,7 @@ struct LocalDayDetailTests {
     }
 
     @Test func wellness2DayTotalsAcrossDatesMatchL1Reference() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness2, fileName: "w2.fit", into: db)
         let dates = try db.dates()
@@ -167,6 +168,7 @@ struct LocalDayDetailTests {
     /// `bodyBatteryHigh`/`Low` toujours `nil`, `sportCalories` toujours `0`
     /// (activités = L3, cf. `docs/stockage-local.md`).
     @Test func summaryFieldsMatchL1Reference() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let detail = try db.dayDetail(date: "2024-07-02")
@@ -181,6 +183,7 @@ struct LocalDayDetailTests {
     /// `extractSleepReturnsNilOnWellnessFiles`) — le sommeil du jour doit
     /// rester une structure vide/`nil`, pas une erreur.
     @Test func sleepIsEmptyWithoutSleepData() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let detail = try db.dayDetail(date: "2024-07-02")
@@ -198,6 +201,7 @@ struct LocalDayDetailTests {
     /// échantillons, donc c'est le chemin "stress seul" de `BodyBattery`
     /// (déjà cross-vérifié contre la sortie TS ci-dessus) qui est exercé ici.
     @Test func bodyBatteryPivotIsNonEmptyAndBounded() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let detail = try db.dayDetail(date: "2024-07-02")
@@ -213,6 +217,7 @@ struct LocalDayDetailTests {
     /// séries vide aussi, mais pas d'erreur — miroir du comportement serveur
     /// sur un jour "creux".
     @Test func emptyDayProducesEmptySeriesNotError() throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let detail = try db.dayDetail(date: "2000-01-01")
@@ -233,6 +238,7 @@ struct LocalDayDetailTests {
     /// plus des valeurs (un champ manquant/mal typé ferait échouer le
     /// décodage, pas juste une assertion de valeur).
     @Test func backendServesDayDetailDecodableByRealAppModel() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
@@ -264,6 +270,7 @@ struct LocalDayDetailTests {
     /// sont toujours des entiers "purs" (epoch + décalage entiers), donc
     /// décodables dans les deux représentations.
     @Test func backendServesDayDetailDecodableByHomeModel() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingest(DaySample.wellness1, fileName: "w1.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
@@ -310,6 +317,7 @@ struct IngestThenServeTests {
     /// sert `day/:date` pour une date connue — bout-en-bout spool → base →
     /// backend, sans passer par le vrai réseau BLE.
     @Test func ingestAllThenServeDayDetailForKnownDate() throws {
+        guard FitSamples.available else { return }
         let spoolRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("local-ingest-then-serve-\(UUID().uuidString)", isDirectory: true)
         let spool = try SpoolStore(root: spoolRoot)

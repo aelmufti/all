@@ -36,9 +36,8 @@ import Foundation
 @testable import all
 
 private enum StatsSample {
-    static let root = "/Users/alielmufti/Documents/Projects/custom-connect/samples"
-    static let wellness1 = "\(root)/user@example.com_263438980021.fit"
-    static let running = "\(root)/user@example.com_306863786909.fit"
+    static var wellness1: String { FitSamples.path("wellness1") ?? "" }
+    static var running: String { FitSamples.path("running") ?? "" }
 }
 
 struct DashboardStatsLocalTests {
@@ -69,6 +68,7 @@ struct DashboardStatsLocalTests {
     /// l'horloge réelle, pas sur la dernière donnée connue (cf.
     /// `DashboardStatsTime.sinceDateNow`).
     @Test func tabHealthDecodesAndReflectsRestingHrFromWellnessSample() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingestWellness(StatsSample.wellness1, fileName: "w1.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
@@ -104,6 +104,7 @@ struct DashboardStatsLocalTests {
     // MARK: - `sleep-debt`/`sleep-insights`/`sleep-regularity` (FIDÈLE — branche "aucune nuit")
 
     @Test func sleepDebtWithoutSleepDataReturnsZeroBranch() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingestWellness(StatsSample.wellness1, fileName: "w1.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
@@ -180,6 +181,7 @@ struct DashboardStatsLocalTests {
     /// `tab-training` reflète une VRAIE activité locale (pas un stub muet),
     /// hors `zones`.
     @Test func tabTrainingWithOneRunningActivityReflectsRealData() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingestActivity(StatsSample.running, fileName: "running.fit", into: db)
         let backend = RealLocalPulseBackend(db: db)
@@ -266,6 +268,7 @@ struct DashboardStatsLocalTests {
     /// tomber tout l'écran Dashboard en mode Téléphone (`try await` sur le
     /// tuple des sept, cf. `DashboardViewModel.swift`).
     @Test func allSevenDashboardEndpointsDecodeWithRealModels() async throws {
+        guard FitSamples.available else { return }
         let db = try makeDb()
         try ingestWellness(StatsSample.wellness1, fileName: "w1.fit", into: db)
         try ingestActivity(StatsSample.running, fileName: "running.fit", into: db)
