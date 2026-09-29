@@ -155,13 +155,19 @@ enum FitDecoder {
                 let numeric = bt.isSigned ? Double(signedValue(raw, byteCount: elemSize)) : Double(raw)
                 out[num] = .number(numeric / scale - fieldOffset)
             } else {
+                // Même mise à l'échelle que la branche scalaire ci-dessus
+                // (`numeric / scale - fieldOffset`) — jusqu'à l'incrément L3
+                // aucun champ tableau connu du profil (`FitProfile`) n'avait
+                // d'échelle ≠ 1, ce cas ne s'était donc jamais présenté
+                // (bogue latent, découvert vs sortie SDK sur `timeInHrZone`,
+                // échelle 1000 — cf. rapport d'incrément L3).
                 var values: [Double] = []
                 values.reserveCapacity(count)
                 for i in 0..<count {
                     let raw = readUInt(bytes, at: cursor + i * elemSize, size: elemSize, bigEndian: def.bigEndian)
                     guard raw != bt.invalidRaw else { continue }
                     let numeric = bt.isSigned ? Double(signedValue(raw, byteCount: elemSize)) : Double(raw)
-                    values.append(numeric)
+                    values.append(numeric / scale - fieldOffset)
                 }
                 if !values.isEmpty { out[num] = .numbers(values) }
             }

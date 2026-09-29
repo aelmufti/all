@@ -18,9 +18,14 @@ import os
 enum LocalIngestKind: Equatable {
     case wellness
     case sleep
+    /// Fichier ACTIVITÉ (`fileId.type == 4`) — incrément L3, cf.
+    /// `docs/stockage-local.md`. Résumé stocké dans `activities`
+    /// (`LocalDb.storeActivity`) ; le détail (flux/segments) se recalcule à
+    /// la volée depuis le spool, cf. `RealLocalPulseBackend`.
+    case activity
     case duplicate
-    /// Type de fichier FIT reconnu mais pas wellness/sleep (ex. activité —
-    /// L3+), ou sommeil sans nuit exploitable (`extractSleep` renvoie `nil`).
+    /// Type de fichier FIT reconnu mais pas wellness/sleep/activité, ou
+    /// sommeil sans nuit exploitable (`extractSleep` renvoie `nil`).
     case skipped
     case error(String)
 }
@@ -39,6 +44,11 @@ enum LocalIngestor {
     /// tout le rejeu du spool.
     static func ingest(fileURL: URL, hash: String, fileName: String, into db: LocalDb) -> LocalIngestResult {
         do {
+            // Dédup wellness/sommeil : `imported_files`. Les activités ont
+            // leur propre dédup (`activities.file_hash`, testée plus bas
+            // juste avant `storeActivity`) — elles n'écrivent JAMAIS dans
+            // `imported_files`, comme côté serveur (cf. commentaire de
+            // `LocalDb.isActivityImported`).
             if try db.isImported(hash: hash) {
                 return LocalIngestResult(fileName: fileName, kind: .duplicate)
             }
@@ -59,6 +69,14 @@ enum LocalIngestor {
                 }
                 try db.storeSleep(sleep, hash: hash, fileName: fileName)
                 return LocalIngestResult(fileName: fileName, kind: .sleep)
+            }
+            if fileType == FitProfile.fileTypeActivity {
+                if try db.isActivityImported(hash: hash) {
+                    return LocalIngestResult(fileName: fileName, kind: .duplicate)
+                }
+                let summary = FitActivityExtractor.extractSummary(messages: file.messages)
+                try db.storeActivity(summary, hash: hash, fileName: fileName)
+                return LocalIngestResult(fileName: fileName, kind: .activity)
             }
             return LocalIngestResult(fileName: fileName, kind: .skipped)
         } catch {

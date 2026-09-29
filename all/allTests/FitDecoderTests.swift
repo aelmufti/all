@@ -232,17 +232,19 @@ struct LocalIngestorTests {
         #expect(try db.sampleCount(metric: "hr") == 160) // pas doublé
     }
 
-    /// Un fichier d'activité (hors périmètre bien-être L1) est ingéré
-    /// (décodé sans erreur) mais n'écrit rien — `.skipped`, comme côté Pulse
-    /// (`IngestService.ingestBuffer`, branche `kind === 'other'`).
-    @Test func activityFileIsSkippedNotErrored() throws {
+    /// Un fichier d'activité est ingéré dans `activities` (`.activity`,
+    /// incrément L3, cf. `ActivitiesExtractorTests.swift` pour la couverture
+    /// détaillée) — mais n'écrit RIEN dans les tables bien-être (`dates()`
+    /// reste vide), tables disjointes.
+    @Test func activityFileIsStoredNotSkipped() throws {
         let db = try makeDb()
         let url = URL(fileURLWithPath: Sample.activities[0])
         let hash = try PulseUploader.sha256Hex(ofFileAt: url)
 
         let result = LocalIngestor.ingest(fileURL: url, hash: hash, fileName: "activity.fit", into: db)
-        #expect(result.kind == .skipped)
+        #expect(result.kind == .activity)
         #expect(try db.dates().isEmpty)
+        #expect(try db.activitiesCount() == 1)
     }
 }
 

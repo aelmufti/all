@@ -10,10 +10,17 @@
 //  `RealLocalPulseBackend` puisse rejouer les mêmes requêtes que
 //  `WellnessController`. Incrément L1, cf. `docs/stockage-local.md`.
 //
-//  Sous-ensemble : seules les tables du chemin bien-être (`imported_files`,
-//  `wellness_days`, `wellness_counters`, `wellness_counter_samples`,
-//  `wellness_samples`, `wellness_sleep`). Le reste (`activities`, `foods`…)
-//  arrive avec les incréments qui en ont besoin (L3+, hors périmètre ici).
+//  Sous-ensemble : tables bien-être (`imported_files`, `wellness_days`,
+//  `wellness_counters`, `wellness_counter_samples`, `wellness_samples`,
+//  `wellness_sleep`) + activités (`activities`, `activity_zones` — incrément
+//  L3, cf. `docs/stockage-local.md`). Le reste (`foods`…) arrive avec les
+//  incréments qui en ont besoin.
+//
+//  `activity_zones` : schéma porté pour parité avec `db.service.ts`, mais
+//  **jamais peuplé** ici, comme côté serveur — `GET api/activities(/:id)` ne
+//  la lit pas (les zones de FC du détail viennent d'un recalcul à la volée
+//  du `.fit`, cf. `RealLocalPulseBackend`/`FitActivityExtractor`), elle sert
+//  à un job de fond distinct (calcul batch, hors périmètre L3).
 //
 //  Fichier : `Application Support/local-pulse/pulse-embarque.sqlite`,
 //  protection `completeUnlessOpen` — même politique que `SpoolStore`.
@@ -93,6 +100,27 @@ final class LocalDb {
     CREATE TABLE IF NOT EXISTS body_battery_state (
       date TEXT PRIMARY KEY,
       start_value REAL NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS activities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_hash TEXT NOT NULL UNIQUE,
+      file_name TEXT NOT NULL,
+      sport TEXT,
+      sub_sport TEXT,
+      start_time TEXT,
+      duration_s REAL,
+      distance_m REAL,
+      calories INTEGER,
+      avg_hr INTEGER,
+      max_hr INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_activities_start_time ON activities(start_time DESC);
+    CREATE TABLE IF NOT EXISTS activity_zones (
+      activity_id INTEGER NOT NULL,
+      zone INTEGER NOT NULL,
+      seconds REAL NOT NULL,
+      PRIMARY KEY (activity_id, zone)
     );
     """
 
@@ -187,6 +215,100 @@ final class LocalDb {
         let array: [[String: Any]] = phases.map { ["from": $0.from, "to": $0.to, "stage": $0.stage] }
         guard let data = try? JSONSerialization.data(withJSONObject: array) else { return "[]" }
         return String(data: data, encoding: .utf8) ?? "[]"
+    }
+
+    // MARK: - Ingestion/lecture activités (incrément L3, miroir `IngestService.ingestBuffer`
+    // branche `activity` + `ActivitiesController.list`/`detail`)
+
+    /// Dédup spécifique aux activités — miroir de `existingActivity` (TS,
+    /// `ingestBuffer`) : contrairement à wellness/sommeil, une activité
+    /// n'écrit JAMAIS dans `imported_files` côté serveur, sa dédup passe
+    /// uniquement par `activities.file_hash` (contrainte UNIQUE). Vérifié
+    /// AVANT `storeActivity` par `LocalIngestor.ingest` — sans ce contrôle,
+    /// réingérer deux fois le même fichier ferait échouer l'`INSERT` sur la
+    /// contrainte UNIQUE (remonterait en `.error`, pas `.duplicate`).
+    func isActivityImported(hash: String) throws -> Bool {
+        var found = false
+        try db.run("SELECT 1 FROM activities WHERE file_hash = ?", [.text(hash)]) { _ in found = true }
+        return found
+    }
+
+    /// Miroir de la branche `activity` d'`IngestService.ingestBuffer` — même
+    /// colonnes, même ordre. Renvoie l'id auto-incrémenté inséré.
+    @discardableResult
+    func storeActivity(_ summary: FitActivityExtractor.Summary, hash: String, fileName: String) throws -> Int {
+        try db.run(
+            """
+            INSERT INTO activities (file_hash, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [.text(hash), .text(fileName), sqliteOptionalText(summary.sport), sqliteOptionalText(summary.subSport),
+             sqliteOptionalText(summary.startTime), sqliteOptional(summary.durationS), sqliteOptional(summary.distanceM),
+             sqliteOptional(summary.calories), sqliteOptional(summary.avgHr), sqliteOptional(summary.maxHr)])
+        var id = 0
+        try db.run("SELECT last_insert_rowid()") { r in id = Int(r.double(0) ?? 0) }
+        return id
+    }
+
+    /// Une ligne `activities` — mêmes colonnes que `ACTIVITY_COLUMNS` côté
+    /// Nest (`activities.controller.ts`), sans `fileHash` (celui-ci n'est
+    /// exposé que par `activity(id:)`, jamais par la liste/le résumé JSON).
+    struct ActivityRow {
+        let id: Int
+        let fileName: String
+        let sport: String?
+        let subSport: String?
+        let startTime: String?
+        let durationS: Double?
+        let distanceM: Double?
+        let calories: Double?
+        let avgHr: Double?
+        let maxHr: Double?
+    }
+
+    func activitiesCount() throws -> Int {
+        var count = 0
+        try db.run("SELECT COUNT(*) FROM activities") { r in count = Int(r.double(0) ?? 0) }
+        return count
+    }
+
+    /// Miroir de `ActivitiesController.list` — plus récent en premier.
+    func activities(limit: Int, offset: Int) throws -> [ActivityRow] {
+        var out: [ActivityRow] = []
+        try db.run(
+            """
+            SELECT id, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr
+            FROM activities ORDER BY start_time DESC LIMIT ? OFFSET ?
+            """,
+            [.int(limit), .int(offset)]) { r in
+            out.append(Self.activityRow(from: r))
+        }
+        return out
+    }
+
+    /// Résumé + `file_hash` — le second sert à `RealLocalPulseBackend` pour
+    /// retrouver les octets bruts du `.fit` dans le spool (cf. `detail()`
+    /// côté serveur, qui fait le même `SELECT ... file_hash ...` avant de
+    /// relire `config.filesDir/<hash>.fit`).
+    func activity(id: Int) throws -> (row: ActivityRow, fileHash: String)? {
+        var result: (row: ActivityRow, fileHash: String)?
+        try db.run(
+            """
+            SELECT id, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr, file_hash
+            FROM activities WHERE id = ?
+            """,
+            [.int(id)]) { r in
+            result = (Self.activityRow(from: r), r.text(10) ?? "")
+        }
+        return result
+    }
+
+    private static func activityRow(from r: SQLiteRow) -> ActivityRow {
+        ActivityRow(
+            id: Int(r.double(0) ?? 0), fileName: r.text(1) ?? "",
+            sport: r.text(2), subSport: r.text(3), startTime: r.text(4),
+            durationS: r.double(5), distanceM: r.double(6), calories: r.double(7),
+            avgHr: r.double(8), maxHr: r.double(9))
     }
 
     // MARK: - Lecture (`wellness/days`, `wellness/dates` — cf. `RealLocalPulseBackend`)
@@ -625,4 +747,8 @@ final class LocalDb {
 
 private func sqliteOptional(_ value: Double?) -> SQLiteValue {
     value.map(SQLiteValue.double) ?? .null
+}
+
+private func sqliteOptionalText(_ value: String?) -> SQLiteValue {
+    value.map(SQLiteValue.text) ?? .null
 }

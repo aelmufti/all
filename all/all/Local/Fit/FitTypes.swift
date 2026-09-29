@@ -126,6 +126,23 @@ struct FitMessage {
     let fields: [UInt8: FitValue]
 
     func double(_ field: UInt8) -> Double? { fields[field]?.asNumber }
+
+    /// Valeur "tableau" d'un champ — utilisé par le chemin activité (L3, cf.
+    /// `FitActivityExtractor`) pour `set.category`/`timeInZone.timeInHrZone`/
+    /// `timeInZone.hrZoneHighBoundary`. Traite aussi un scalaire comme un
+    /// tableau à un élément : un champ FIT `array: true` qui n'a qu'UNE
+    /// valeur sur le fil est stocké `.number` par `FitDecoder` (branche
+    /// `count == 1`, cf. `readDataFields`), jamais `.numbers([x])` — même
+    /// idée que `Array.isArray(x) ? x : [x]` côté TS
+    /// (`FitParserService.extractSets`). Absent → tableau vide, jamais `nil`
+    /// (l'appelant n'a pas à re-tester la présence).
+    func numberList(_ field: UInt8) -> [Double] {
+        switch fields[field] {
+        case .numbers(let values): return values
+        case .number(let value): return [value]
+        case nil: return []
+        }
+    }
 }
 
 /// Résultat complet d'un décodage — les messages dans l'ordre du fichier, +
