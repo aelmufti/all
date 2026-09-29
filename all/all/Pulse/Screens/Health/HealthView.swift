@@ -14,16 +14,18 @@
 //  plutôt que de bloquer tout l'écran — un exercice pratique de la même règle
 //  que `IntensityDayCardComponent` côté Angular (au mieux, jamais bloquant).
 //
-//  Poids masqué en mode Téléphone (incrément L0, `docs/stockage-local.md`,
-//  « hors montre… masqués ») : la saisie du poids vit côté Pulse
-//  (`api/weight`), pas sur la montre — le backend local ne la sert pas.
+//  Poids servi en mode Téléphone depuis l'incrément L5 (`docs/stockage-local.md`) :
+//  `RealLocalPulseBackend` sert `api/weight` depuis `weight_log` (SQLite
+//  locale), la carte n'est donc plus masquée. `push` (statut de transmission
+//  vers la montre) reste toujours neutre côté backend local — l'écriture vers
+//  la montre passe par `BLEManager.requestWatchWeightWrite`, indépendante du
+//  mode de stockage (cf. `HealthViewModel.saveWeight`).
 //
 
 import SwiftUI
 
 struct HealthView: View {
     @State private var viewModel = HealthViewModel()
-    @State private var storageMode = StorageModeStore.shared
 
     var body: some View {
         NavigationStack {
@@ -60,9 +62,7 @@ struct HealthView: View {
                 MetricTabPicker(viewModel: viewModel)
                 HealthMetricChartCard(viewModel: viewModel, day: day)
                 IntensityCard(intensity: viewModel.intensity, failed: viewModel.intensityFailed)
-                if storageMode.mode != .phone {
-                    WeightCard(viewModel: viewModel)
-                }
+                WeightCard(viewModel: viewModel)
             }
             .padding(PulseSpacing.lg)
         }

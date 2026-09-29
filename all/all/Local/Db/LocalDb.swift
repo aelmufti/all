@@ -122,6 +122,15 @@ final class LocalDb {
       seconds REAL NOT NULL,
       PRIMARY KEY (activity_id, zone)
     );
+    CREATE TABLE IF NOT EXISTS weight_log (
+      date TEXT PRIMARY KEY,
+      kg REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
     """
 
     // MARK: - Dédup (`imported_files`) — même principe que Pulse : hash du
@@ -742,6 +751,156 @@ final class LocalDb {
 
     private static func shiftDate(_ date: String, byDays days: Int) -> String {
         FitWellnessExtractor.isoDate(dayStartUnixUTC(date) + Double(days) * 86400)
+    }
+
+    // MARK: - Poids (incrément L5, miroir `weight.controller.ts` `WeightController`)
+    //
+    // `weight_log`/`settings` — schéma EXACT de `db.service.ts` (`SCHEMA`,
+    // lignes ~63-66 et ~82-86). `RealLocalPulseBackend` rejoue `list()`/`add()`/
+    // `remove()` en s'appuyant sur `weightList(days:)` (assemble toute la
+    // réponse `GET api/weight`, même esprit que `dayDetail`) et les méthodes
+    // d'écriture ci-dessous.
+
+    struct WeightRow {
+        let date: String
+        let kg: Double
+    }
+
+    struct WeightSeriesRow {
+        let date: String
+        let kg: Double
+        let avg: Double
+    }
+
+    struct WeightList {
+        let current: Double?
+        let currentDate: String?
+        let deltaKg: Double?
+        let minKg: Double?
+        let maxKg: Double?
+        let entries: Int
+        let rangeDays: Int
+        let series: [WeightSeriesRow]
+    }
+
+    /// Fenêtre de moyenne glissante de `series[].avg` — miroir de
+    /// `AVG_WINDOW_DAYS` (TS).
+    private static let weightAvgWindowDays: Double = 7
+
+    /// Miroir de `WeightController.list` (TS) — `days` déjà bordé (7...3660)
+    /// par l'appelant (`RealLocalPulseBackend`, même bornage que le serveur).
+    /// `since` reproduit `new Date(Date.now() - days * 86400000)
+    /// .toISOString().slice(0, 10)` : coupure UTC, PAS le calendrier local
+    /// (divergent volontairement de `todayDateKey` côté `RealLocalPulseBackend`,
+    /// qui lui mime `todayKey()`/`dateKey()`, calendaires locaux — même
+    /// divergence de convention que le serveur TS entre les deux fonctions).
+    func weightList(days: Int) throws -> WeightList {
+        let since = FitWellnessExtractor.isoDate(Date().timeIntervalSince1970 - Double(days) * 86400)
+
+        var rows: [WeightRow] = []
+        try db.run(
+            "SELECT date, kg FROM weight_log WHERE date >= ? ORDER BY date ASC",
+            [.text(since)]) { r in
+            guard let date = r.text(0), let kg = r.double(1) else { return }
+            rows.append(WeightRow(date: date, kg: kg))
+        }
+
+        var latest: WeightRow?
+        try db.run("SELECT date, kg FROM weight_log ORDER BY date DESC LIMIT 1") { r in
+            guard let date = r.text(0), let kg = r.double(1) else { return }
+            latest = WeightRow(date: date, kg: kg)
+        }
+
+        // Miroir de la boucle `series.map((row, i) => ...)` (TS) : moyenne
+        // glissante sur `AVG_WINDOW_DAYS` jours, en repartant vers le passé
+        // depuis chaque ligne (les lignes sont triées ASC, donc `j` décroît).
+        var series: [WeightSeriesRow] = []
+        for i in rows.indices {
+            let from = Self.dayStartUnixUTC(rows[i].date) - Self.weightAvgWindowDays * 86400
+            var sum = 0.0
+            var n = 0
+            var j = i
+            while j >= 0 {
+                if Self.dayStartUnixUTC(rows[j].date) < from { break }
+                sum += rows[j].kg
+                n += 1
+                j -= 1
+            }
+            let avg = n > 0 ? (sum / Double(n) * 10).rounded() / 10 : rows[i].kg
+            series.append(WeightSeriesRow(date: rows[i].date, kg: rows[i].kg, avg: avg))
+        }
+
+        let kgs = rows.map { $0.kg }
+        let deltaKg: Double? = rows.count > 1
+            ? ((rows[rows.count - 1].kg - rows[0].kg) * 10).rounded() / 10
+            : nil
+
+        return WeightList(
+            current: latest?.kg, currentDate: latest?.date, deltaKg: deltaKg,
+            minKg: kgs.min(), maxKg: kgs.max(), entries: rows.count, rangeDays: days, series: series)
+    }
+
+    /// Miroir de l'`INSERT ... ON CONFLICT(date) DO UPDATE SET kg = excluded.kg`
+    /// de `WeightController.add`.
+    func upsertWeight(date: String, kg: Double) throws {
+        try db.run(
+            """
+            INSERT INTO weight_log (date, kg) VALUES (?, ?)
+            ON CONFLICT(date) DO UPDATE SET kg = excluded.kg
+            """,
+            [.text(date), .double(kg)])
+    }
+
+    /// Miroir de `WeightController.remove`.
+    func deleteWeight(date: String) throws {
+        try db.run("DELETE FROM weight_log WHERE date = ?", [.text(date)])
+    }
+
+    private func latestWeightRow() throws -> WeightRow? {
+        var latest: WeightRow?
+        try db.run("SELECT date, kg FROM weight_log ORDER BY date DESC LIMIT 1") { r in
+            guard let date = r.text(0), let kg = r.double(1) else { return }
+            latest = WeightRow(date: date, kg: kg)
+        }
+        return latest
+    }
+
+    /// Miroir de `WeightController.syncProfile` (privée côté TS, appelée par
+    /// `add`/`remove`) : republie `settings.weightKg` sur la dernière pesée
+    /// connue — ne touche à rien s'il n'y a plus aucune pesée (`if (!latest)
+    /// return;`, la clé reste alors périmée, comme côté serveur). Ne pousse
+    /// PAS vers la montre (`weightPush.queue`) : cette part est hors backend
+    /// local, l'app pousse déjà directement via `BLEManager.requestWatchWeightWrite`
+    /// (cf. `HealthViewModel.saveWeight`).
+    func syncWeightProfile() throws {
+        guard let latest = try latestWeightRow() else { return }
+        try setSetting(key: "weightKg", value: Self.jsNumberString(latest.kg))
+    }
+
+    /// `String(latest.kg)` (TS) — un nombre entier s'affiche sans `.0`
+    /// (`String(70)` → `"70"`), un nombre décimal garde sa décimale
+    /// (`String(70.5)` → `"70.5"`) ; suffisant pour la plage de poids en jeu
+    /// ici (arrondis à 0,1 kg par `add`/`remove`, jamais de notation
+    /// scientifique).
+    private static func jsNumberString(_ value: Double) -> String {
+        if value == value.rounded() { return String(Int64(value)) }
+        return String(value)
+    }
+
+    func settingValue(key: String) throws -> String? {
+        var value: String?
+        try db.run("SELECT value FROM settings WHERE key = ?", [.text(key)]) { r in
+            value = r.text(0)
+        }
+        return value
+    }
+
+    /// Miroir de `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`
+    /// (TS, `WeightController.syncProfile`/`WeightPushService.save`).
+    func setSetting(key: String, value: String) throws {
+        try db.run(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            [.text(key), .text(value)])
     }
 }
 

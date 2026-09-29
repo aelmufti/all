@@ -2,11 +2,11 @@
 //  LocalPulseBackend.swift
 //  all (bridge-connect)
 //
-//  Portage réel du backend local « Pulse embarqué » (incréments L1+L2, cf.
-//  `docs/stockage-local.md`) — remplace `StubLocalPulseBackend` (L0) pour les
-//  routes qu'il sait vraiment servir depuis `LocalDb`. Toute autre route
+//  Portage réel du backend local « Pulse embarqué » (incréments L1+L2+L3+L5,
+//  cf. `docs/stockage-local.md`) — remplace `StubLocalPulseBackend` (L0) pour
+//  les routes qu'il sait vraiment servir depuis `LocalDb`. Toute autre route
 //  continue de lever `LocalPulseUnavailableError` (`Pulse/Core/PulseAPIClient.swift`),
-//  à faire pour L3+ (sommeil détaillé/export, SpO2 report, poids…).
+//  à faire pour L4+ (sommeil détaillé/export, SpO2 report, nutrition, programme…).
 //
 //  Portée L1 : `GET api/wellness/days`, `GET api/wellness/dates`.
 //
@@ -22,6 +22,13 @@
 //  `ActivitiesController.detail`). `activities`/`sportCalories` dans
 //  `day/:date` restent `[]`/`0` (pas dans le périmètre de `WellnessController.day`
 //  ni côté serveur, cf. commentaire déjà présent sur `LocalWellnessDayDetailDTO`).
+//
+//  Portée L5 : `GET`/`POST api/weight`, `DELETE api/weight/:date` — miroir de
+//  `WeightController` (`weight.controller.ts`), `weight_log`/`settings`
+//  ajoutées à `LocalDb`. `push` (statut de transmission vers la montre)
+//  toujours à l'état neutre `idle` : le téléphone pousse le poids
+//  directement (`BLEManager.requestWatchWeightWrite`), il n'y a pas de file
+//  d'attente `weightPush` locale à refléter (cf. `LocalWeightPushDTO`).
 //
 
 import Foundation
@@ -95,6 +102,15 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             let date = String(r.dropFirst("wellness/day/".count))
             return try encodeDayDetail(date: date)
 
+        case ("GET", "weight"):
+            return try encodeWeightList(query: query)
+
+        case ("POST", "weight"):
+            return try encodeWeightAdd(body: body)
+
+        case ("DELETE", let r) where r.hasPrefix("weight/"):
+            return try encodeWeightDelete(date: String(r.dropFirst("weight/".count)))
+
         default:
             throw LocalPulseUnavailableError()
         }
@@ -109,6 +125,71 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         }
         let detail = try db.dayDetail(date: date)
         return try JSONEncoder().encode(LocalWellnessDayDetailDTO(detail))
+    }
+
+    // MARK: - Poids (incrément L5, miroir `WeightController` — `weight.controller.ts`)
+
+    private static let weightMinKg = 25.0
+    private static let weightMaxKg = 300.0
+
+    /// Miroir du bornage `Math.min(Math.max(parseInt(daysParam ?? '90', 10)
+    /// || 90, 7), 3660)` : `parseInt` invalide OU **nul** (`0 || 90` en JS,
+    /// `0` est "falsy") retombe sur 90, pas sur 7.
+    private func encodeWeightList(query: [String: String]) throws -> Data {
+        let parsed = query["days"].flatMap(Int.init)
+        let requested = (parsed != nil && parsed != 0) ? parsed! : 90
+        let days = min(max(requested, 7), 3660)
+        let list = try db.weightList(days: days)
+        return try JSONEncoder().encode(LocalWeightDataDTO(list))
+    }
+
+    /// Miroir de `WeightController.add` : `date` optionnel (défaut = jour
+    /// calendaire local, cf. `todayDateKey`), `kg` fini et arrondi à 0,1 kg,
+    /// bornes [25, 300]. Toute violation lève (le corps JSON exact importe
+    /// peu, `HealthViewModel.saveWeight` affiche un message générique sur
+    /// n'importe quelle erreur).
+    private func encodeWeightAdd(body: Data?) throws -> Data {
+        guard let body else { throw LocalWeightValidationError(reason: "Corps de requête manquant") }
+        let request = try JSONDecoder().decode(LocalWeightAddRequest.self, from: body)
+
+        let date = request.date ?? Self.todayDateKey()
+        let dateRange = NSRange(date.startIndex..<date.endIndex, in: date)
+        guard Self.datePattern.firstMatch(in: date, range: dateRange) != nil else {
+            throw LocalWeightValidationError(reason: "Date invalide")
+        }
+        guard let rawKg = request.kg, rawKg.isFinite else {
+            throw LocalWeightValidationError(reason: "Poids invalide")
+        }
+        let kg = (rawKg * 10).rounded() / 10
+        guard kg >= Self.weightMinKg && kg <= Self.weightMaxKg else {
+            throw LocalWeightValidationError(
+                reason: "Le poids doit être entre \(Int(Self.weightMinKg)) et \(Int(Self.weightMaxKg)) kg")
+        }
+
+        try db.upsertWeight(date: date, kg: kg)
+        try db.syncWeightProfile()
+        return try JSONEncoder().encode(LocalWeightSaveResultDTO(date: date, kg: kg))
+    }
+
+    /// Miroir de `WeightController.remove`.
+    private func encodeWeightDelete(date: String) throws -> Data {
+        let dateRange = NSRange(date.startIndex..<date.endIndex, in: date)
+        guard Self.datePattern.firstMatch(in: date, range: dateRange) != nil else {
+            throw LocalWeightValidationError(reason: "Date invalide")
+        }
+        try db.deleteWeight(date: date)
+        try db.syncWeightProfile()
+        return try JSONEncoder().encode(LocalWeightDeleteResultDTO(ok: true))
+    }
+
+    /// Miroir de `todayKey()`/`dateKey()` (TS, `time.ts`) : jour calendaire
+    /// **local** (composants du calendrier de l'appareil), à distinguer de la
+    /// coupure UTC utilisée par `LocalDb.weightList` pour `since` (même
+    /// divergence de convention que le serveur entre `todayKey()` et
+    /// `toISOString()`).
+    private static func todayDateKey() -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     // MARK: - Activités (incrément L3, miroir `ActivitiesController.list`/`detail`)
@@ -176,6 +257,15 @@ final class RealLocalPulseBackend: LocalPulseBackend {
 struct LocalActivityNotFoundError: Error, LocalizedError {
     let idString: String
     var errorDescription: String? { "Activité introuvable (\(idString))." }
+}
+
+/// `POST api/weight`/`DELETE api/weight/:date` sur une entrée invalide —
+/// miroir du `BadRequestException` côté Nest (`WeightController`). Message
+/// diagnostique seulement : l'écran affiche son propre message générique
+/// (« Poids refusé… ») sur n'importe quelle erreur, cf. `HealthViewModel.saveWeight`.
+struct LocalWeightValidationError: Error, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
 }
 
 /// DTO d'encodage JSON — mêmes clés que `WellnessDayRow`
@@ -338,6 +428,72 @@ private struct LocalWellnessDayDetailDTO: Encodable {
             stages: detail.sleepStages.map { LocalSleepStageDTO(from: $0.from, to: $0.to, stage: $0.stage) },
             score: detail.sleepScore)
     }
+}
+
+// MARK: - DTO d'encodage JSON — `GET/POST/DELETE api/weight` (incrément L5)
+//
+// Mêmes clés que `WeightData`/`WeightSeriesPoint`/`WeightPush`/`WeightSaveResult`
+// (`Pulse/Screens/Health/HealthModels.swift`) — `minKg`/`maxKg`/`rangeDays` en
+// plus, ignorés silencieusement par `Decodable` (mêmes clés que la réponse
+// serveur, gardées pour fidélité au miroir plutôt qu'utilité côté écran).
+
+/// `push` : toujours à l'état neutre `idle`/`nil`/`nil` — le backend local ne
+/// pousse RIEN vers la montre lui-même (le téléphone écrit directement via
+/// `BLEManager.requestWatchWeightWrite`, indépendamment du mode de stockage,
+/// cf. `HealthViewModel.saveWeight`) ; il n'y a donc jamais de file d'attente
+/// `weightPush` locale à refléter ici. Renvoyer autre chose qu'`idle`
+/// inventerait un statut de transmission qui n'existe pas côté backend local.
+private struct LocalWeightPushDTO: Encodable {
+    let status: String
+    let kg: Double?
+    let at: String?
+}
+
+private struct LocalWeightSeriesPointDTO: Encodable {
+    let date: String
+    let kg: Double
+    let avg: Double
+}
+
+private struct LocalWeightDataDTO: Encodable {
+    let current: Double?
+    let currentDate: String?
+    let deltaKg: Double?
+    let minKg: Double?
+    let maxKg: Double?
+    let entries: Int
+    let rangeDays: Int
+    let series: [LocalWeightSeriesPointDTO]
+    let push: LocalWeightPushDTO
+
+    init(_ list: LocalDb.WeightList) {
+        current = list.current
+        currentDate = list.currentDate
+        deltaKg = list.deltaKg
+        minKg = list.minKg
+        maxKg = list.maxKg
+        entries = list.entries
+        rangeDays = list.rangeDays
+        series = list.series.map { LocalWeightSeriesPointDTO(date: $0.date, kg: $0.kg, avg: $0.avg) }
+        push = LocalWeightPushDTO(status: "idle", kg: nil, at: nil)
+    }
+}
+
+/// Corps de `POST api/weight` — miroir de `{ date?: string; kg?: number }`
+/// (TS). Champs optionnels : la validation (`encodeWeightAdd`) distingue
+/// "absent" (→ défaut/erreur dédiée) de "présent mais invalide".
+private struct LocalWeightAddRequest: Decodable {
+    let date: String?
+    let kg: Double?
+}
+
+private struct LocalWeightSaveResultDTO: Encodable {
+    let date: String
+    let kg: Double
+}
+
+private struct LocalWeightDeleteResultDTO: Encodable {
+    let ok: Bool
 }
 
 // MARK: - DTO d'encodage JSON — `GET api/activities`/`GET api/activities/:id` (incrément L3)

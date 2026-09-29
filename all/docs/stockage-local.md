@@ -16,7 +16,8 @@ Décisions utilisateur (2026-09-29) :
 - **Historique** : la base locale est (ré)alimentée depuis le **spool** existant
   (tous les `.fit` depuis la 1re synchro de l'app). Pas de rapatriement depuis Pulse.
 - **Hors montre** (Nutrition, Programme, Poids) : **masqués** en mode Téléphone,
-  portés dans des incréments ultérieurs.
+  portés dans des incréments ultérieurs. *Poids porté depuis L5-Poids (2026-09-29) —
+  n'est donc plus masqué.*
 
 ## Architecture
 
@@ -35,4 +36,5 @@ SQLite calquées sur celles de Pulse → contrôleurs).
 | **L2 ✅** | `wellness/day/:date` (+ `bodyBatteryPivot` porté & recoupé vs TS) ; ingestion câblée (lancement + fin de traversée BLE) ; Maintenant + Santé lisibles en Téléphone. **Reportés** : `intensity` local + live HR local (dégradent proprement) ; `api/activities` = stub vide | 16 tests + build device |
 | **L3 ✅** | Activités : extracteur (résumé/streams/laps/sets/splits/hrZones), tables `activities`/`activity_zones`, `api/activities` + `:id` (détail reparsé depuis le spool). Sommeil : écran déjà servi par L1/L2 (vérifié). GPS porté (`track` peuplé → carte + Altitude). Fix décodeur : échelle appliquée aux champs tableau | 12 tests + build device |
 | L4 | Stats / Dashboard | |
-| L5+ | Nutrition, Programme, Poids | |
+| **L5-Poids ✅** | `weight_log`/`settings` (`LocalDb`) ; backend local sert `GET`/`POST api/weight`, `DELETE api/weight/:date` (miroir `WeightController`) ; `push` toujours neutre (`idle`) — l'écriture vers la montre reste directe (`BLEManager.requestWatchWeightWrite`) ; carte Poids démasquée en mode Téléphone | tests `WeightLocalTests` + build device |
+| L5+ | Nutrition, Programme | |
