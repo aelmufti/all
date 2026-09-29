@@ -136,7 +136,7 @@ private let programmeResponseJSON = Data(
           },
           "detail": {
             "nights": 12, "to": "2026-09-22", "staleDays": 0,
-            "axis": {"onsetMean": 1350, "onsetSd": 20},
+            "axis": {"onsetMean": 1350, "onsetSd": 20, "wakeMean": 430, "wakeSd": 18},
             "strip": [], "metrics": [], "hits": 8, "total": 10
           }
         }
