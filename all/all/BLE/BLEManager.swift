@@ -137,6 +137,17 @@ final class BLEManager: NSObject, ObservableObject {
     /// vie que les autres abonnements de session (annulé/reconstruit par
     /// `resetGfdiDiscoveryState`/`activateProtocolIfPossible`).
     private var weightWriteSubscription: AnyCancellable?
+    /// Relaie CHAQUE changement publié par `GarminSession` (pas seulement
+    /// `$state`, comme `garminSessionStateSubscription`) vers l'`objectWillChange`
+    /// de `BLEManager` — sans ce pont, une vue qui n'observe QUE `BLEManager`
+    /// (ex. la bannière globale de synchro, `Pulse/SyncStatusBanner.swift`, via
+    /// `syncActivity`) ne se re-rendrait jamais quand `syncState` ou
+    /// `deliveredFileIndexes` changent sur la session imbriquée : un `@Published`
+    /// d'un `ObservableObject` **enfant** ne remonte PAS automatiquement à
+    /// l'`objectWillChange` du parent en SwiftUI/Combine. Même cycle de vie que
+    /// les autres abonnements de session (annulé/reconstruit par
+    /// `resetGfdiDiscoveryState`/`activateProtocolIfPossible`).
+    private var garminSessionChangeForwarder: AnyCancellable?
 
     /// Poids (kg) demandé à l'écriture vers la montre mais pas encore confirmé
     /// transmis — conservé pour être rejoué à chaque nouveau lien (retry « au
@@ -209,6 +220,22 @@ final class BLEManager: NSObject, ObservableObject {
     /// automatique au premier venu). Réfs `CBPeripheral` gardées à part.
     @Published private(set) var discovered: [DiscoveredPeripheral] = []
     private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
+
+    /// Résumé synchro pour la bannière globale (`Pulse/SyncStatusBanner.swift`)
+    /// — pure projection de `connectionState`/`garminSession?.state`/
+    /// `garminSession?.syncState` via `SyncActivity.from` (cf. son
+    /// commentaire pour l'ordre de priorité). Recalculé à chaque accès :
+    /// aucun état supplémentaire à maintenir en synchro, et le pont
+    /// `garminSessionChangeForwarder` garantit que les vues qui observent
+    /// `BLEManager` se re-rendent bien quand la valeur change.
+    var syncActivity: SyncActivity {
+        SyncActivity.from(
+            connection: connectionState,
+            handshake: garminSession?.state,
+            sync: garminSession?.syncState,
+            deliveredCount: garminSession?.deliveredFileIndexes.count ?? 0
+        )
+    }
 
     // MARK: - Horodatages des mesures (métriques 1, 3, 5)
 
@@ -412,6 +439,8 @@ final class BLEManager: NSObject, ObservableObject {
         realtimeHeartRateSubscription = nil
         weightWriteSubscription?.cancel()
         weightWriteSubscription = nil
+        garminSessionChangeForwarder?.cancel()
+        garminSessionChangeForwarder = nil
         // Le lien est retombé : si une écriture de poids restait en attente, la
         // remettre en `.queued` (elle sera rejouée au prochain lien). Rien à
         // faire si elle avait déjà été transmise (pending effacé sur `.sent`).
@@ -782,6 +811,12 @@ extension BLEManager: CBPeripheralDelegate {
                     self.weightWriteState = state
                     if state == .sent { self.pendingWatchWeightKg = nil }
                 }
+            // Pont générique (cf. commentaire de la propriété) : toute mise à
+            // jour publiée par la session — `state`, `syncState`,
+            // `deliveredFileIndexes`, `acquiredFileIndexes`… — doit faire
+            // re-rendre les vues qui n'observent que `BLEManager`.
+            garminSessionChangeForwarder = session.objectWillChange
+                .sink { [weak self] in self?.objectWillChange.send() }
             session.start()
             // Rejoue une écriture de poids restée en attente d'un lien (la
             // session la met elle-même en file jusqu'à la fin de la poignée de

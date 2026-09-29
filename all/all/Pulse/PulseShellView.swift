@@ -118,6 +118,13 @@ struct PulseShellView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             PulseTabBar(selection: $tab, tabs: visibleTabs)
         }
+        // Indicateur global « synchronisation en cours » (cf. son commentaire
+        // d'en-tête) : overlay commun à tous les onglets, au-dessus du contenu
+        // ET de la barre d'onglets, purement informatif (ne capte aucun tap —
+        // `SyncStatusBanner` se rend elle-même `allowsHitTesting(false)`).
+        .overlay(alignment: .top) {
+            SyncStatusBanner()
+        }
         .onChange(of: tab) { _, newTab in
             visited.insert(newTab)
         }

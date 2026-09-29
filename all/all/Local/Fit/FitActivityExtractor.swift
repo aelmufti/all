@@ -7,16 +7,17 @@
 //  cf. `docs/stockage-local.md`. Opère sur la sortie générique de
 //  `FitDecoder` ([FitMessage]), comme `FitWellnessExtractor`.
 //
-//  Divergence assumée vs le serveur : le `track` (parcours GPS) n'est PAS
-//  extrait — `positionLat`/`positionLong` ne sont même pas dans le profil
-//  (`FitProfile`, cf. son en-tête). Décision actée de la tâche d'incrément :
-//  `ActivityDetail.track` reste toujours `[]` en mode Téléphone (pas de
-//  road-snapping/carte type `activity_tracks`/`activity_edges`, hors
-//  périmètre). Conséquence à connaître : `ActivityDetailView` masque alors la
-//  carte (`detail.track.count > 1`) ET l'onglet de courbe « Altitude »
-//  (`!detail.track.isEmpty` fait aussi partie de sa garde), même si le flux
-//  `streams.altitude` ci-dessous est, lui, bien peuplé — cf. rapport
-//  d'incrément.
+//  `track` (parcours GPS) : décision RÉVISÉE (cf. tâche d'incrément
+//  suivante) — construit à partir du MÊME jeu de records rééchantillonnés
+//  (`sampled`) que les flux, miroir exact de `parseDetail` (TS) : pour
+//  chaque record échantillonné avec `positionLat`/`positionLong` présents
+//  (`FitProfile.mesgRecord`, champs 0/1), pousse `[lat, lng]` en degrés
+//  (`semicircles * 180 / 2^31`, cf. `semicircleToDegree` ci-dessous — même
+//  constante que `SEMICIRCLE_TO_DEG` côté serveur). Les records SANS
+//  position sont sautés pour `track` mais contribuent quand même aux flux
+//  (`streams`) — donc `track.count` peut être strictement inférieur à
+//  `streams.time.count`. Rappel : `ActivityDetailView` affiche la carte dès
+//  `detail.track.count > 1` et l'onglet « Altitude » dès `!detail.track.isEmpty`.
 //
 //  Pas de mécanisme de "composants" FIT (dérivation bits d'un champ vers un
 //  autre) — cf. commentaire de `FitProfile.table[mesgRecord]` : les 3
@@ -84,6 +85,9 @@ enum FitActivityExtractor {
     }
 
     struct Detail {
+        /// Parcours GPS — `[lat, lng]` en degrés, un point par record
+        /// échantillonné qui a une position (cf. en-tête de fichier).
+        let track: [[Double]]
         let streams: Streams
         let laps: [Lap]
         let sets: [SetRow]
@@ -95,6 +99,10 @@ enum FitActivityExtractor {
     /// 3 échantillons d'activité (jusqu'à 1726 `recordMesgs`) ne dépasse ce
     /// seuil, mais le downsample reste porté pour les activités plus longues.
     private static let maxStreamPoints = 2000
+
+    /// Miroir `SEMICIRCLE_TO_DEG` (TS, `fit-parser.service.ts`) — un
+    /// "semicircle" FIT vaut `180 / 2^31` degré.
+    private static let semicircleToDegree = 180.0 / 2_147_483_648.0
 
     // MARK: - `extractSummary` (miroir `FitParserService.extractSummary`)
 
@@ -128,13 +136,14 @@ enum FitActivityExtractor {
             maxHr: nil)
     }
 
-    // MARK: - `parseDetail` (streams/laps/sets/splits/hrZones — PAS le `track`, cf. en-tête)
+    // MARK: - `parseDetail` (track/streams/laps/sets/splits/hrZones)
 
     static func extractDetail(messages: [FitMessage]) -> Detail {
         let records = messages.filter { $0.globalMessageNumber == FitProfile.mesgRecord }
         let sampled = downsample(records, max: maxStreamPoints)
         let startTs = records.first?.double(253)
 
+        var track: [[Double]] = []
         var time: [Double?] = []
         var hr: [Double?] = []
         var speed: [Double?] = []
@@ -147,6 +156,14 @@ enum FitActivityExtractor {
         distance.reserveCapacity(sampled.count)
 
         for record in sampled {
+            // `track` : miroir exact de `parseDetail` (TS) — même jeu de
+            // records échantillonnés que les flux ci-dessous, mais un point
+            // n'est poussé QUE si les deux positions sont présentes (les
+            // records sans position contribuent quand même à `time`/`hr`/…).
+            if let lat = record.double(0), let lng = record.double(1) {
+                track.append([lat * semicircleToDegree, lng * semicircleToDegree])
+            }
+
             let ts = record.double(253)
             time.append(ts != nil && startTs != nil ? ts! - startTs! : nil)
             hr.append(record.double(3))
@@ -156,6 +173,7 @@ enum FitActivityExtractor {
         }
 
         return Detail(
+            track: track,
             streams: Streams(time: time, hr: hr, speed: speed, altitude: altitude, distance: distance),
             laps: extractLaps(messages),
             sets: extractSets(messages),

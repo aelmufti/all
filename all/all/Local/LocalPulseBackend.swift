@@ -508,7 +508,7 @@ private struct LocalActivityDetailDTO: Encodable {
     /// `FitActivityExtractor.extractDetail`.
     init(row: LocalDb.ActivityRow, detail: FitActivityExtractor.Detail) {
         self.init(
-            row: row, track: [],
+            row: row, track: detail.track,
             streams: LocalActivityStreamsDTO(detail.streams),
             laps: detail.laps.map(LocalActivityLapDTO.init),
             sets: detail.sets.map(LocalActivitySetDTO.init),

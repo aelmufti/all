@@ -25,10 +25,15 @@
 //  décodage réel des 3 échantillons `activity` (`custom-connect/samples/*.fit`)
 //  avec le SDK officiel — cf. rapport d'incrément pour le détail.
 //
-//  GPS (`positionLat`/`positionLong`) volontairement ABSENT : décision actée
-//  de la tâche d'incrément, `ActivityDetail.track` reste toujours `[]` (pas de
-//  carte/road-snapping en L3, cf. `FitActivityExtractor`) — décoder ces deux
-//  champs n'aurait servi à rien.
+//  GPS (`positionLat`/`positionLong`) : décision RÉVISÉE (cf. tâche
+//  d'incrément suivante, `docs/stockage-local.md`) — `record.positionLat`/
+//  `positionLong` (champs 0/1, `sint32`, unités "semicircles", échelle 1,
+//  décalage 0 dans `profile.js`) sont décodés pour peupler `ActivityDetail.track`,
+//  miroir de `parseDetail` côté serveur. Conversion semicircles → degrés
+//  (`* 180 / 2^31`) faite dans `FitActivityExtractor` (comme côté TS,
+//  `SEMICIRCLE_TO_DEG` appliqué APRÈS lecture, pas ici) — PAS de
+//  road-snapping/carte type `activity_tracks`/`activity_edges` (hors
+//  périmètre, ce n'est que le point GPS brut par échantillon).
 //
 
 import Foundation
@@ -274,6 +279,14 @@ enum FitProfile {
             253: FieldMeta(name: "timestamp", scale: 1, offset: 0),
             3: FieldMeta(name: "heartRate", scale: 1, offset: 0),
             5: FieldMeta(name: "distance", scale: 100, offset: 0),
+            // `positionLat`/`positionLong` : champs 0/1, `sint32`, unités
+            // "semicircles", échelle 1/décalage 0 dans `profile.js` (vérifié
+            // ligne ~9465). Conversion en degrés faite dans
+            // `FitActivityExtractor` (pas ici), miroir de `parseDetail` côté
+            // serveur qui lit aussi la valeur brute avant de la multiplier
+            // par `SEMICIRCLE_TO_DEG`.
+            0: FieldMeta(name: "positionLat", scale: 1, offset: 0),
+            1: FieldMeta(name: "positionLong", scale: 1, offset: 0),
             // `speed`/`altitude` (16 bits, anciens champs) ET leurs variantes
             // `enhanced*` (32 bits) sont décodées séparément — le mécanisme de
             // "composants" FIT (qui dériverait l'un de l'autre au décodage)

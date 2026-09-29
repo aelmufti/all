@@ -78,6 +78,28 @@ struct FitActivityExtractorDetailTests {
     @Test func runningDetailMatchesReferenceSdkOutput() throws {
         let detail = FitActivityExtractor.extractDetail(messages: try ActivitySample.messages(ActivitySample.running))
 
+        // `track` (parcours GPS) : référence = sortie RÉELLE du SDK Garmin
+        // officiel rejouant `parseDetail` (TS) — script jetable de session,
+        // `records: 529 sampled: 529 track: 525` (4 records sans position,
+        // cf. `streams.time.count` == 529 ci-dessous : ces records
+        // contribuent quand même aux flux, d'où `track.count < streams.time.count`).
+        // Coordonnées premier/dernier point vérifiées à 5 décimales, PUIS à
+        // l'exactitude bit-à-bit (même formule, même ordre d'opérations que
+        // `SEMICIRCLE_TO_DEG` côté TS, donc même double IEEE-754 attendu).
+        #expect(detail.track.count == 525)
+        #expect(detail.track.count <= detail.streams.time.count)
+        let firstPoint = try #require(detail.track.first)
+        #expect(firstPoint.count == 2)
+        #expect(abs(firstPoint[0] - 48.90103) < 0.00001)
+        #expect(abs(firstPoint[1] - 2.23934) < 0.00001)
+        let lastPoint = try #require(detail.track.last)
+        #expect(abs(lastPoint[0] - 48.90065) < 0.00001)
+        #expect(abs(lastPoint[1] - 2.23880) < 0.00001)
+        #expect(firstPoint[0] == 48.90102834440768)
+        #expect(firstPoint[1] == 2.2393421083688736)
+        #expect(lastPoint[0] == 48.90065400861204)
+        #expect(lastPoint[1] == 2.2388013917952776)
+
         #expect(detail.streams.time.count == 529)
         #expect(detail.streams.time[0] == 0)
         #expect(detail.streams.time[1] == 1)
@@ -117,6 +139,11 @@ struct FitActivityExtractorDetailTests {
 
     @Test func strengthDetailMatchesReferenceSdkOutput() throws {
         let detail = FitActivityExtractor.extractDetail(messages: try ActivitySample.messages(ActivitySample.strength))
+
+        // Pas de GPS en muscu (confirmé par le script jetable de référence :
+        // `track: 0` sur les 1225 records échantillonnés) — chemin sans
+        // position, `track` reste vide plutôt que de fabriquer des coordonnées.
+        #expect(detail.track.isEmpty)
 
         #expect(detail.streams.time.count == 1225)
         #expect(detail.streams.hr[0] == 98)
@@ -189,9 +216,11 @@ struct ActivityIngestThenServeTests {
         let detail = try PulseAPIClient.decoder.decode(ActivityDetail.self, from: detailData)
         #expect(detail.id == item.id)
         #expect(detail.sport == "running")
-        // Décision actée L3 (cf. `FitActivityExtractor`) : le parcours GPS
-        // n'est JAMAIS peuplé, même quand le `.fit` brut est retrouvé.
-        #expect(detail.track.isEmpty)
+        // `Detail.track` est peuplé par l'extracteur ET propagé par la route
+        // (`LocalActivityDetailDTO.init(row:detail:)` passe `detail.track`) :
+        // 525 points GPS pour ce run, jamais plus que les échantillons de flux.
+        #expect(detail.track.count == 525)
+        #expect(detail.track.count <= (detail.streams?.time.count ?? 0))
         #expect(detail.streams?.hr.count == 529)
         #expect(detail.streams?.time.count == 529)
         #expect(detail.laps.count == 12)
