@@ -25,12 +25,14 @@
 //
 //  Stockage (incrément L0, `docs/stockage-local.md`) : `SettingsStorageSection`
 //  est la vraie colonne vertébrale de l'écran depuis cet incrément — en mode
-//  Téléphone, TOUT ce qui dépend d'un serveur (source de synchro Pulse, statut,
-//  Programme, profil, compte/déconnexion) n'a plus de sens et disparaît ;
-//  seuls Stockage, Apparence et l'accès à la Montre (diagnostic BLE local)
-//  restent joignables — cf. `SettingsWatchOnlySection` et
-//  `SettingsViewModel.load()` (court-circuite le chargement réseau dans ce
-//  mode, pour ne jamais coincer l'utilisateur derrière un `ErrorView`).
+//  Téléphone, tout ce qui dépend VRAIMENT d'un serveur (source de synchro
+//  Pulse, statut, Programme, compte/déconnexion) n'a plus de sens et
+//  disparaît ; Stockage, Apparence, l'accès à la Montre (diagnostic BLE local)
+//  et, depuis L6, Profil (servi par `RealLocalPulseBackend`, `GET`/`PUT
+//  api/profile`) restent joignables — cf. `SettingsWatchOnlySection`,
+//  `SettingsProfileSection` et `SettingsViewModel.load()` (court-circuite
+//  UNIQUEMENT le chargement source/statut/inventaire dans ce mode, jamais le
+//  profil, pour ne jamais coincer l'utilisateur derrière un `ErrorView`).
 //
 
 import SwiftUI
@@ -81,6 +83,7 @@ struct SettingsView: View {
                 SettingsAppearanceSection()
                 if storageMode.mode == .phone {
                     SettingsWatchOnlySection(onWatch: { showWatch = true })
+                    SettingsProfileSection(viewModel: viewModel)
                 } else {
                     SettingsProgrammeSection(onOpen: { showProgramme = true })
                     SettingsSyncSourceSection(

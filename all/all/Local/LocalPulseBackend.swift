@@ -3,7 +3,7 @@
 //  all (bridge-connect)
 //
 //  Portage réel du backend local « Pulse embarqué » (incréments
-//  L1+L2+L3+L4+L5, cf. `docs/stockage-local.md`) — remplace
+//  L1+L2+L3+L4+L5+L6, cf. `docs/stockage-local.md`) — remplace
 //  `StubLocalPulseBackend` (L0) pour les routes qu'il sait vraiment servir
 //  depuis `LocalDb`. Toute autre route continue de lever
 //  `LocalPulseUnavailableError` (`Pulse/Core/PulseAPIClient.swift`), à faire
@@ -36,6 +36,15 @@
 //  toujours à l'état neutre `idle` : le téléphone pousse le poids
 //  directement (`BLEManager.requestWatchWeightWrite`), il n'y a pas de file
 //  d'attente `weightPush` locale à refléter (cf. `LocalWeightPushDTO`).
+//
+//  Portée L6 : `GET`/`PUT api/profile` — miroir de `ProfileController`
+//  (`profile.controller.ts`), quatre clés `settings` déjà présentes
+//  (`birthYear`/`sex`/`weightKg`/`heightCm`, `weightKg` déjà tenue à jour par
+//  L5-Poids). Débloque le profil éditable en mode Téléphone (préalable à
+//  Nutrition-cibles/Programme, hors périmètre de cet incrément). Divergence
+//  assumée vs serveur : `weightKg` fourni par ce PUT est AUSSI répercuté dans
+//  `weight_log` du jour (le serveur ne le fait pas), cf. commentaire de
+//  section dédiée plus bas.
 //
 
 import Foundation
@@ -166,6 +175,14 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("GET", "stats/sleep-regularity"):
             return try DashboardStatsBackend.sleepRegularity(db: db, query: query)
 
+        // MARK: Profil (incrément L6, miroir `ProfileController` — `profile.controller.ts`)
+
+        case ("GET", "profile"):
+            return try encodeProfileGet()
+
+        case ("PUT", "profile"):
+            return try encodeProfileUpdate(body: body)
+
         case ("GET", "weight"):
             return try encodeWeightList(query: query)
 
@@ -237,6 +254,95 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         }
         let detail = try db.dayDetail(date: date)
         return try JSONEncoder().encode(LocalWellnessDayDetailDTO(detail))
+    }
+
+    // MARK: - Profil (incrément L6, miroir `ProfileController` — `profile.controller.ts`)
+    //
+    // Quatre clés `settings` (déjà utilisées par L5-Poids pour `weightKg`) :
+    // `birthYear`/`sex`/`weightKg`/`heightCm`. `GET` lit les quatre et
+    // renvoie `null` pour tout champ absent/invalide — miroir EXACT de
+    // `ProfileController.read` (`Number.isFinite(NaN) → null`, `sex` hors
+    // `{male,female}` → `null`). `PUT` valide champ par champ EXACTEMENT
+    // comme `ProfileController.update` (mêmes bornes, mêmes erreurs), écrit
+    // uniquement les champs fournis, puis renvoie le profil relu (miroir de
+    // `return ProfileController.read(this.dbService)` en fin de route).
+    //
+    // Divergence assumée vs le serveur (décision de cet incrément) :
+    // `ProfileController.update` n'écrit `weightKg` que dans `settings`,
+    // JAMAIS dans `weight_log` (contrairement à `WeightController.add`, qui
+    // écrit `weight_log` PUIS republie `settings.weightKg` depuis la dernière
+    // pesée, cf. `syncProfile`/`LocalDb.syncWeightProfile`). Ici, `PUT
+    // api/profile` avec `weightKg` fait les DEUX : upsert dans `weight_log`
+    // pour AUJOURD'HUI (même arrondi 0,1 kg que `WeightController.add`), puis
+    // `syncWeightProfile()` republie `settings.weightKg` depuis cette même
+    // entrée — une seule source de vérité (`weight_log`), jamais deux valeurs
+    // divergentes entre `settings.weightKg` et le dernier `weight_log`. Motif :
+    // en mode Téléphone il n'existe qu'UN écran de pesée (Santé,
+    // `HealthViewModel.saveWeight` → `POST api/weight`) mais ce PUT reste dans
+    // le contrat `SettingsProfile`/`ProfileController` pour parité de forme —
+    // le faire diverger silencieusement du poids réellement enregistré (deux
+    // `settings.weightKg` possibles selon la route empruntée) serait pire que
+    // cette petite divergence de comportement vs le serveur, jamais observable
+    // depuis les écrans (aucun écran natif n'envoie `weightKg` via ce PUT à ce
+    // jour, cf. `SettingsProfileUpdateRequest`).
+
+    private func encodeProfileGet() throws -> Data {
+        try JSONEncoder().encode(readProfile())
+    }
+
+    private func readProfile() throws -> LocalProfileDTO {
+        let birthYear = (try db.settingValue(key: "birthYear")).flatMap(Int.init)
+        let sexRaw = try db.settingValue(key: "sex")
+        let sex = (sexRaw == "male" || sexRaw == "female") ? sexRaw : nil
+        let weightKg = (try db.settingValue(key: "weightKg")).flatMap(Double.init)
+        let heightCm = (try db.settingValue(key: "heightCm")).flatMap(Double.init)
+        return LocalProfileDTO(birthYear: birthYear, sex: sex, weightKg: weightKg, heightCm: heightCm)
+    }
+
+    /// Miroir de `ProfileController.update` — bornes EXACTES
+    /// (`currentYear - 110`...`currentYear - 10` pour `birthYear`, `{male,
+    /// female}` pour `sex`, `[25, 300]` pour `weightKg`, `[100, 250]` pour
+    /// `heightCm`). Chaque champ `nil` dans le corps est laissé tel quel
+    /// (miroir de `body.xxx != null` côté TS) ; un champ présent mais hors
+    /// bornes lève immédiatement (aucune écriture partielle au-delà de ce qui
+    /// a déjà été traité, même ordre que le serveur : `birthYear`, `sex`,
+    /// `weightKg`, `heightCm`).
+    private func encodeProfileUpdate(body: Data?) throws -> Data {
+        guard let body else { throw LocalProfileValidationError(reason: "Corps de requête manquant") }
+        let req = try JSONDecoder().decode(LocalProfileUpdateRequestDTO.self, from: body)
+        let currentYear = Calendar.current.component(.year, from: Date())
+
+        if let birthYear = req.birthYear {
+            guard birthYear >= currentYear - 110, birthYear <= currentYear - 10 else {
+                throw LocalProfileValidationError(reason: "Invalid birthYear")
+            }
+            try db.setSetting(key: "birthYear", value: String(birthYear))
+        }
+        if let sex = req.sex {
+            guard sex == "male" || sex == "female" else {
+                throw LocalProfileValidationError(reason: "Invalid sex")
+            }
+            try db.setSetting(key: "sex", value: sex)
+        }
+        if let weightKg = req.weightKg {
+            guard weightKg.isFinite, weightKg >= Self.weightMinKg, weightKg <= Self.weightMaxKg else {
+                throw LocalProfileValidationError(reason: "Invalid weightKg")
+            }
+            // Cf. commentaire d'en-tête de section : upsert `weight_log` du
+            // jour (même arrondi que `WeightController.add`) puis republie
+            // `settings.weightKg` depuis cette entrée — jamais un écrit direct
+            // et distinct de `settings.weightKg` ici.
+            let rounded = (weightKg * 10).rounded() / 10
+            try db.upsertWeight(date: Self.todayDateKey(), kg: rounded)
+            try db.syncWeightProfile()
+        }
+        if let heightCm = req.heightCm {
+            guard heightCm.isFinite, heightCm >= 100, heightCm <= 250 else {
+                throw LocalProfileValidationError(reason: "Invalid heightCm")
+            }
+            try db.setSetting(key: "heightCm", value: String(heightCm))
+        }
+        return try JSONEncoder().encode(readProfile())
     }
 
     // MARK: - Poids (incrément L5, miroir `WeightController` — `weight.controller.ts`)
@@ -772,6 +878,41 @@ struct LocalActivityNotFoundError: Error, LocalizedError {
 struct LocalWeightValidationError: Error, LocalizedError {
     let reason: String
     var errorDescription: String? { reason }
+}
+
+/// `PUT api/profile` sur une entrée invalide — miroir du `BadRequestException`
+/// côté Nest (`ProfileController.update`). Message diagnostique seulement :
+/// `SettingsViewModel.saveProfile` affiche son propre message générique sur
+/// n'importe quelle erreur.
+struct LocalProfileValidationError: Error, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
+}
+
+// MARK: - DTO d'encodage JSON — `GET`/`PUT api/profile` (incrément L6)
+//
+// Mêmes clés que `SettingsProfile` (`Pulse/Screens/Settings/SettingsModels.swift`)
+// — miroir de `Profile` (`profile.controller.ts`).
+
+private struct LocalProfileDTO: Encodable {
+    let birthYear: Int?
+    let sex: String?
+    let weightKg: Double?
+    let heightCm: Double?
+}
+
+/// Corps de `PUT api/profile` — mêmes quatre champs optionnels que
+/// `{ birthYear?: number; sex?: string; weightKg?: number; heightCm?: number }`
+/// (TS). Distinct de `SettingsProfileUpdateRequest` (`SettingsModels.swift`,
+/// `Encodable` côté client, sans `weightKg` — cet écran ne l'envoie jamais,
+/// cf. commentaire de section) : ce type-ci décode le corps JSON brut tel que
+/// le contrat serveur l'accepte réellement, même si aucun écran natif actuel
+/// n'exerce `weightKg` par cette route.
+private struct LocalProfileUpdateRequestDTO: Decodable {
+    let birthYear: Int?
+    let sex: String?
+    let weightKg: Double?
+    let heightCm: Double?
 }
 
 /// DTO d'encodage JSON — mêmes clés que `WellnessDayRow`

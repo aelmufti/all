@@ -70,17 +70,26 @@ final class SettingsViewModel {
 
     func load() async {
         state = .loading
-        // Mode Téléphone (incrément L0, `docs/stockage-local.md`) : rien de ce
-        // que cet écran charge (source de synchro, statut, profil) n'a de sens
-        // sans serveur — tout passerait de toute façon par le backend local
-        // stub et échouerait (`LocalPulseUnavailableError`), affichant
-        // `ErrorView` en boucle et coinçant l'utilisateur SANS accès au
-        // sélecteur de Stockage pour revenir en arrière. On court-circuite :
-        // l'écran passe directement à `.loaded`, `SettingsView` n'affiche
-        // alors que les sections qui ne dépendent pas de ces données
-        // (Stockage, Apparence, Montre).
+        // Mode Téléphone (incréments L0+L6, `docs/stockage-local.md`) :
+        // source de synchro / statut / inventaire n'ont pas de sens sans
+        // serveur — ils passeraient par le backend local stub et
+        // échoueraient (`LocalPulseUnavailableError`), affichant `ErrorView`
+        // en boucle et coinçant l'utilisateur SANS accès au sélecteur de
+        // Stockage pour revenir en arrière. On les court-circuite : `source`/
+        // `status`/`inventory` restent `nil`, `SettingsView` n'affiche alors
+        // que les sections qui ne les lisent pas (Stockage, Apparence,
+        // Montre, Profil). Le PROFIL, lui, EST servi localement depuis L6
+        // (`RealLocalPulseBackend`, `GET api/profile`) — on le charge donc
+        // quand même, seul, via le même `client` (le routage vers le backend
+        // local est déjà géré par `PulseAPIClient`, transparent ici).
         guard StorageModeStore.current != .phone else {
-            state = .loaded
+            do {
+                let profile: SettingsProfile = try await client.get("api/profile")
+                applyProfile(profile)
+                state = .loaded
+            } catch {
+                state = .failed(Self.message(for: error))
+            }
             return
         }
         do {
