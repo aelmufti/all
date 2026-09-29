@@ -1,26 +1,38 @@
-# bridge-connect
+# All
 
-Collecteur iOS pour montre **Garmin Venu 2**, en Bluetooth Low Energy (protocole
-GFDI). L'app récupère les fichiers `.fit` de la montre et permet de les consulter
-de deux façons, au choix (réglage **Stockage**) :
+Application **iOS** pour suivre ses données de santé et d'entraînement issues
+d'une montre **Garmin Venu 2**, entièrement en natif SwiftUI.
 
-- **Téléphone** — tout reste sur l'iPhone (base locale, aucun serveur, aucun
-  réseau sauf le scan nutrition, voir *Confidentialité*).
-- **Pulse** — les fichiers sont poussés vers un serveur [custom-connect
-  « Pulse »](https://github.com/) personnel (source de vérité).
-- **Les deux** — envoi à Pulse + copie locale ; lecture depuis Pulse avec repli
-  local s'il est injoignable.
+All réunit deux rôles dans une seule app :
 
-> **Statut : travail en cours.** Fonctionne sur matériel réel. Le Bluetooth
-> arrière-plan a été abandonné au profit d'une collecte au premier plan.
+1. **Collecteur** — se lie à la montre en Bluetooth Low Energy (protocole GFDI)
+   et récupère ses fichiers `.fit` (rôle historiquement appelé *bridge-connect*).
+2. **Consultation** — affiche les données dans des écrans natifs : **Accueil**
+   (entraînement + intensité), **Activités**, **Santé** (FC, stress, SpO2,
+   respiration, sommeil…), **Nutrition** (journal + objectifs + scan), **Sommeil**
+   et **Stats / Dashboard**.
+
+### Deux façons de stocker (réglage *Stockage*)
+
+- **Téléphone** — tout est décodé, calculé et stocké **sur l'iPhone** (base
+  SQLite locale, « Pulse embarqué »). Aucun serveur, aucun réseau — sauf le scan
+  nutrition (voir *Confidentialité*). L'app fonctionne alors **de façon autonome**,
+  sans compte.
+- **Pulse** — les `.fit` sont poussés vers un serveur **custom-connect « Pulse »**
+  personnel, qui reste la source de vérité ; l'app en est le client.
+- **Les deux** — envoi à Pulse **et** copie locale ; lecture depuis Pulse avec
+  repli automatique sur le local s'il est injoignable.
+
+> **Statut : travail en cours.** Fonctionne sur matériel réel. La collecte se fait
+> au premier plan (le Bluetooth arrière-plan a été abandonné).
 
 ## Licence
 
 **GNU Affero General Public License v3.0 (AGPL-3.0)** — voir [`LICENSE`](LICENSE).
 
-Ce projet est une **œuvre dérivée de [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge)**
-(AGPL-3.0) : le protocole Garmin a été rétro-conçu par Gadgetbridge et est ici
-**porté en Swift**. Détails de filiation et composants tiers dans [`NOTICE`](NOTICE).
+All est une **œuvre dérivée de [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge)**
+(AGPL-3.0) : le protocole Garmin (GFDI) a été rétro-conçu par Gadgetbridge et est
+ici **porté en Swift**. Filiation et composants tiers détaillés dans [`NOTICE`](NOTICE).
 
 En conséquence, si vous **distribuez** cette app (même à un seul testeur, même
 gratuitement), vous devez :
@@ -37,9 +49,9 @@ uniquement pour décrire l'interopérabilité.
 
 ## Confidentialité
 
-- Les données de santé de la montre restent **sur l'iPhone** (mode Téléphone) ou
-  ne vont que vers **votre** serveur Pulse (modes Pulse / Les deux). Aucune
-  télémétrie, aucun envoi vers un tiers.
+- Les données de santé restent **sur l'iPhone** (mode Téléphone) ou ne vont que
+  vers **votre** serveur Pulse (modes Pulse / Les deux). Aucune télémétrie, aucun
+  envoi vers un tiers.
 - **Seul appel réseau externe** : le scan / la recherche d'aliments interroge
   **Open Food Facts** (`openfoodfacts.org`), et uniquement quand vous le
   déclenchez. Données Open Food Facts sous licence ODbL.
@@ -50,7 +62,8 @@ uniquement pour décrire l'interopérabilité.
 
 - **Xcode** (cible iOS **17.5+**), Swift. Bundle id `CleanYourRoom.all`.
 - Le lien BLE et la mesure ne se testent **que sur un iPhone physique** avec une
-  Venu 2 — pas au simulateur.
+  Venu 2 — pas au simulateur. Le reste de l'app (mode Téléphone) se teste au
+  simulateur.
 
 ```sh
 # Tests unitaires (simulateur)
@@ -65,6 +78,14 @@ xcodebuild -project all/all.xcodeproj -scheme all \
 Avec un compte Apple **gratuit**, la signature de développement expire tous les
 7 jours : il faut alors réinstaller l'app et **faire confiance au profil**
 (Réglages → Général → VPN et gestion de l'appareil).
+
+## Structure du dépôt
+
+- `all/` — projet Xcode (`all.xcodeproj`), sources de l'app (`all/all/`) et tests
+  (`all/allTests/`).
+- `all/all/GFDI/` — pile du protocole Garmin (dérivée de Gadgetbridge, cf. `NOTICE`).
+- `all/all/Local/` — « Pulse embarqué » : décodeur FIT, base SQLite, backend local.
+- `all/all/Pulse/` — écrans natifs et client de l'API Pulse.
 
 ## Composants tiers
 
