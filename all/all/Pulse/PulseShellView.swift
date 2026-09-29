@@ -64,14 +64,12 @@ enum PulseTab: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Onglets « hors montre » (incrément L0, `docs/stockage-local.md`) :
-    /// masqués en mode Téléphone, portés dans des incréments ultérieurs
-    /// (le backend local n'a rien à leur servir, cf. `PulseAPIClient`). Seule
-    /// la Nutrition est un onglet primaire à ce jour — Programme/Poids sont
-    /// respectivement dans Réglages et sur l'écran Santé (cf. `HealthView`).
+    /// Tous les onglets sont désormais disponibles dans tous les modes : la
+    /// Nutrition, jadis masquée en mode Téléphone (incrément L0), est servie en
+    /// local depuis L5-Nutrition (`docs/stockage-local.md`). Conservé comme
+    /// point d'extension si un futur onglet devait rester hors périmètre local.
     func isAvailable(in mode: StorageMode) -> Bool {
-        guard self == .nutrition else { return true }
-        return mode != .phone
+        true
     }
 }
 
