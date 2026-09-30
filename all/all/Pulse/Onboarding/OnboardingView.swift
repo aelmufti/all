@@ -49,30 +49,43 @@ struct OnboardingView: View {
                     case .storage:
                         if showPulseLogin {
                             OnboardingPulseLoginStep(
-                                onSuccess: { step = .profile },
-                                onBack: { showPulseLogin = false }
+                                onSuccess: { goTo(.profile) },
+                                onBack: { setShowPulseLogin(false) }
                             )
+                            .transition(stepTransition)
                         } else {
                             OnboardingStorageModeStep(
                                 onChoosePhone: {
                                     StorageModeStore.shared.mode = .phone
-                                    step = .profile
+                                    goTo(.profile)
                                 },
                                 onChoosePulse: {
                                     StorageModeStore.shared.mode = .pulse
-                                    showPulseLogin = true
+                                    setShowPulseLogin(true)
                                 }
                             )
+                            .transition(stepTransition)
                         }
                     case .profile:
                         OnboardingProfileStep(
-                            onContinue: { step = .watch },
-                            onSkip: { step = .watch }
+                            onContinue: { goTo(.watch) },
+                            onBack: { goTo(.storage) },
+                            onSkip: { goTo(.watch) }
                         )
+                        .transition(stepTransition)
                     case .watch:
-                        OnboardingWatchStep(onSkip: { step = .theme })
+                        OnboardingWatchStep(
+                            onBack: { goTo(.profile) },
+                            onAutoAdvance: { goTo(.theme) },
+                            onSkip: { goTo(.theme) }
+                        )
+                        .transition(stepTransition)
                     case .theme:
-                        OnboardingThemeStep(onFinish: { OnboardingStore.shared.markCompleted() })
+                        OnboardingThemeStep(
+                            onBack: { goTo(.watch) },
+                            onFinish: { OnboardingStore.shared.markCompleted() }
+                        )
+                        .transition(stepTransition)
                     }
                 }
             }
@@ -81,24 +94,57 @@ struct OnboardingView: View {
         .background(Color.pulseBackground)
         .scrollDismissesKeyboard(.interactively)
     }
+
+    /// Transition commune entre étapes — glissement horizontal doux + fondu,
+    /// dans le sens de la lecture (avance vers la droite, recul vers la
+    /// gauche). `switch` change déjà le type de vue rendue à chaque étape,
+    /// donc SwiftUI traite ça comme une suppression/insertion sans `.id()`
+    /// explicite ; il suffit que la mutation d'état soit englobée dans
+    /// `withAnimation` (cf. `goTo`/`setShowPulseLogin`).
+    private var stepTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .move(edge: .trailing)),
+            removal: .opacity.combined(with: .move(edge: .leading))
+        )
+    }
+
+    private func goTo(_ next: Step) {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            step = next
+        }
+    }
+
+    private func setShowPulseLogin(_ value: Bool) {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showPulseLogin = value
+        }
+    }
 }
 
 // MARK: - Indicateur d'étape
 
 /// Quatre segments (une par étape principale, cf. `OnboardingView.Step`) — le
 /// sous-écran de connexion Pulse ne compte pas comme une étape à part
-/// entière (il reste rattaché au segment Stockage).
+/// entière (il reste rattaché au segment Stockage). Le libellé numérique
+/// au-dessus rend la progression lisible sans avoir à compter les segments.
 private struct OnboardingProgressIndicator: View {
     let current: Int
     let total: Int
 
     var body: some View {
-        HStack(spacing: PulseSpacing.sm) {
-            ForEach(0..<total, id: \.self) { index in
-                Capsule()
-                    .fill(index <= current ? Color.pulseAccent : Color.pulseBorder)
-                    .frame(height: 4)
-                    .frame(maxWidth: .infinity)
+        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
+            Text("Étape \(current + 1) sur \(total)")
+                .font(PulseFont.metricLabel)
+                .foregroundStyle(Color.pulseTextSecondary)
+                .tracking(0.6)
+            HStack(spacing: PulseSpacing.sm) {
+                ForEach(0..<total, id: \.self) { index in
+                    Capsule()
+                        .fill(index <= current ? Color.pulseAccent : Color.pulseBorder)
+                        .frame(height: 5)
+                        .frame(maxWidth: .infinity)
+                        .animation(.easeInOut(duration: 0.3), value: current)
+                }
             }
         }
         .accessibilityElement(children: .ignore)
@@ -108,22 +154,69 @@ private struct OnboardingProgressIndicator: View {
 
 // MARK: - En-tête / actions communs aux étapes 2-4
 
-/// Titre + sous-titre alignés à gauche — commun aux étapes 2 à 4 (l'étape 1
-/// a son propre en-tête centré avec icône, cf. `OnboardingStorageModeStep`).
+/// Icône dans un badge circulaire teinté + titre + sous-titre, centrés —
+/// commun aux étapes 2 à 4. Motif visuel partagé avec le badge (plus grand)
+/// de l'étape 1 (cf. `OnboardingStorageModeStep`), pour que chaque étape
+/// s'ouvre sur le même repère visuel sans répéter le même degré d'emphase
+/// (l'étape 1 reste la plus « spectaculaire » — cf. skill design, principe
+/// de restraint : concentrer l'effet visuel fort à un seul endroit).
 private struct OnboardingStepHeader: View {
+    let icon: String
     let title: String
     let subtitle: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            Text(title)
-                .font(.title2.bold())
-                .foregroundStyle(Color.pulseTextPrimary)
-            Text(subtitle)
-                .font(.footnote)
-                .foregroundStyle(Color.pulseTextSecondary)
+        VStack(spacing: PulseSpacing.md) {
+            OnboardingIconBadge(icon: icon, diameter: 56, iconSize: .title2)
+            VStack(spacing: PulseSpacing.xs) {
+                Text(title)
+                    .font(.title2.bold())
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .multilineTextAlignment(.center)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Badge circulaire teinté (fond `pulseAccent` à faible opacité) autour d'un
+/// SF Symbol — motif visuel répété entre l'en-tête d'accueil (grand) et les
+/// en-têtes d'étape (plus petits), pour une identité cohérente sans dupliquer
+/// le même degré d'emphase partout.
+private struct OnboardingIconBadge: View {
+    let icon: String
+    var diameter: CGFloat = 88
+    var iconSize: Font = .largeTitle
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.pulseAccent.opacity(0.12))
+                .frame(width: diameter, height: diameter)
+            Image(systemName: icon)
+                .font(iconSize)
+                .foregroundStyle(Color.pulseAccent)
+        }
+    }
+}
+
+/// Ligne « Retour » commune aux étapes 2-4 et au sous-écran de connexion
+/// Pulse — un seul style de navigation arrière dans tout le parcours.
+private struct OnboardingBackRow: View {
+    let action: () -> Void
+
+    var body: some View {
+        HStack {
+            Button(action: action) {
+                Label("Retour", systemImage: "chevron.left")
+                    .font(.footnote)
+            }
+            .foregroundStyle(Color.pulseTextSecondary)
+            Spacer()
+        }
     }
 }
 
@@ -175,19 +268,18 @@ private struct OnboardingStorageModeStep: View {
 
     var body: some View {
         VStack(spacing: PulseSpacing.xl) {
-            VStack(spacing: PulseSpacing.sm) {
-                Image(systemName: "waveform.path.ecg")
-                    .font(.largeTitle)
-                    .foregroundStyle(Color.pulseAccent)
+            VStack(spacing: PulseSpacing.md) {
+                OnboardingIconBadge(icon: "waveform.path.ecg")
                 Text("Bienvenue sur All")
-                    .font(.title2.bold())
+                    .font(.title.bold())
                     .foregroundStyle(Color.pulseTextPrimary)
                 Text("Choisis où vivent tes données. Modifiable ensuite dans Paramètres > Stockage.")
-                    .font(.footnote)
+                    .font(.subheadline)
                     .foregroundStyle(Color.pulseTextSecondary)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, PulseSpacing.md)
             }
-            .padding(.top, PulseSpacing.xl)
+            .padding(.top, PulseSpacing.lg)
 
             VStack(spacing: PulseSpacing.md) {
                 Button(action: onChoosePhone) {
@@ -260,16 +352,10 @@ private struct OnboardingPulseLoginStep: View {
 
     var body: some View {
         VStack(spacing: PulseSpacing.lg) {
-            HStack {
-                Button(action: onBack) {
-                    Label("Retour", systemImage: "chevron.left")
-                        .font(.footnote)
-                }
-                .foregroundStyle(Color.pulseTextSecondary)
-                Spacer()
-            }
+            OnboardingBackRow(action: onBack)
 
             OnboardingStepHeader(
+                icon: "server.rack",
                 title: "Connexion à Pulse",
                 subtitle: "Renseigne l'adresse de ton serveur Pulse puis connecte-toi avec ton compte."
             )
@@ -319,6 +405,7 @@ private struct OnboardingPulseLoginStep: View {
 
 private struct OnboardingProfileStep: View {
     let onContinue: () -> Void
+    let onBack: () -> Void
     let onSkip: () -> Void
 
     @State private var birthYearText = ""
@@ -332,7 +419,10 @@ private struct OnboardingProfileStep: View {
 
     var body: some View {
         VStack(spacing: PulseSpacing.lg) {
+            OnboardingBackRow(action: onBack)
+
             OnboardingStepHeader(
+                icon: "person.text.rectangle",
                 title: "Ton profil",
                 subtitle: "Sert au métabolisme de base et à l'objectif calorique. Complétable plus tard dans Paramètres."
             )
@@ -432,43 +522,120 @@ private struct OnboardingProfileStep: View {
 // MARK: - Étape 3 — Montre (passable)
 
 private struct OnboardingWatchStep: View {
+    let onBack: () -> Void
+    /// Avance déclenchée par la connexion (auto, avec délai bref) OU par un
+    /// tap manuel sur « Continuer » une fois connecté — cf. `body`.
+    let onAutoAdvance: () -> Void
     let onSkip: () -> Void
 
+    /// Observe `BLEManager.shared` directement (comme `BLEDiagnosticView`) :
+    /// dès que `connectionState` passe à `.connected`, on affiche la
+    /// confirmation et on avance automatiquement — l'utilisateur n'a pas à
+    /// taper « Plus tard » après avoir jumelé la montre (demande utilisateur).
+    @ObservedObject private var ble = BLEManager.shared
     @State private var showWatch = false
+    @State private var justConnected = false
+    /// Travail différé annulable : si l'utilisateur retourne en arrière (ou
+    /// tape « Continuer » lui-même) pendant le court délai de confirmation,
+    /// on ne veut PAS qu'une avance différée se déclenche après coup et le
+    /// pousse en avant malgré lui.
+    @State private var pendingAdvance: DispatchWorkItem?
 
     var body: some View {
         VStack(spacing: PulseSpacing.lg) {
+            OnboardingBackRow(action: onBack)
+
             OnboardingStepHeader(
+                icon: "antenna.radiowaves.left.and.right",
                 title: "Ta montre",
-                subtitle: "Ouvre l'app près de ta Venu 2 pour rapatrier tes données. Possible aussi plus tard, depuis Paramètres > Montre."
+                subtitle: justConnected
+                    ? "Le lien Bluetooth est établi — tu peux continuer."
+                    : "Ouvre l'app près de ta Venu 2 pour rapatrier tes données. Possible aussi plus tard, depuis Paramètres > Montre."
             )
 
-            PulseCard {
-                HStack(spacing: PulseSpacing.md) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
-                        .font(.title2)
-                        .foregroundStyle(Color.pulseAccent)
-                        .frame(width: 32)
-                    VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-                        Text("Collecteur Bluetooth")
-                            .font(PulseFont.sectionTitle)
-                            .foregroundStyle(Color.pulseTextPrimary)
-                        Text("Diagnostic BLE, synchronisation en temps réel.")
-                            .font(.footnote)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                }
-            }
+            if justConnected {
+                OnboardingWatchConnectedCard()
 
-            Button("Ouvrir le collecteur") { showWatch = true }
+                Button("Continuer") {
+                    pendingAdvance?.cancel()
+                    onAutoAdvance()
+                }
                 .buttonStyle(.borderedProminent)
                 .tint(Color.pulseAccent)
                 .frame(maxWidth: .infinity)
+            } else {
+                PulseCard {
+                    HStack(spacing: PulseSpacing.md) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.title2)
+                            .foregroundStyle(Color.pulseAccent)
+                            .frame(width: 32)
+                        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
+                            Text("Collecteur Bluetooth")
+                                .font(PulseFont.sectionTitle)
+                                .foregroundStyle(Color.pulseTextPrimary)
+                            Text("Diagnostic BLE, synchronisation en temps réel.")
+                                .font(.footnote)
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                    }
+                }
 
-            OnboardingSkipButton(action: onSkip)
+                Button("Ouvrir le collecteur") { showWatch = true }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.pulseAccent)
+                    .frame(maxWidth: .infinity)
+
+                OnboardingSkipButton(action: onSkip)
+            }
         }
         .sheet(isPresented: $showWatch) {
             WatchSectionView()
+        }
+        .onAppear {
+            // Étape déjà revisitée (retour arrière) alors que la montre était
+            // déjà connectée avant cette apparition : afficher la confirmation
+            // sans reprogrammer d'avance automatique (l'utilisateur vient
+            // justement de choisir de revenir ici).
+            if ble.connectionState == .connected {
+                justConnected = true
+            }
+        }
+        .onChange(of: ble.connectionState) { _, newValue in
+            guard newValue == .connected, !justConnected else { return }
+            justConnected = true
+            showWatch = false // referme le diagnostic si la connexion aboutit pendant qu'il est ouvert
+            let work = DispatchWorkItem { onAutoAdvance() }
+            pendingAdvance = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
+        }
+        .onDisappear {
+            // Vue quittée (retour arrière, ou avance déjà effectuée) : une
+            // avance différée n'a plus lieu d'être — cf. commentaire de
+            // `pendingAdvance`.
+            pendingAdvance?.cancel()
+        }
+    }
+}
+
+/// Confirmation affichée une fois la montre connectée (cf. `OnboardingWatchStep`).
+private struct OnboardingWatchConnectedCard: View {
+    var body: some View {
+        PulseCard {
+            HStack(spacing: PulseSpacing.md) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(Color.pulseSuccess)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: PulseSpacing.xs) {
+                    Text("Montre connectée")
+                        .font(PulseFont.sectionTitle)
+                        .foregroundStyle(Color.pulseTextPrimary)
+                    Text("La synchronisation pourra se faire dès que l'app est ouverte à proximité.")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                }
+            }
         }
     }
 }
@@ -476,13 +643,17 @@ private struct OnboardingWatchStep: View {
 // MARK: - Étape 4 — Thème (passable)
 
 private struct OnboardingThemeStep: View {
+    let onBack: () -> Void
     let onFinish: () -> Void
 
     @State private var theme = ThemeStore.shared
 
     var body: some View {
         VStack(spacing: PulseSpacing.lg) {
+            OnboardingBackRow(action: onBack)
+
             OnboardingStepHeader(
+                icon: "circle.lefthalf.filled",
                 title: "Apparence",
                 subtitle: "Modifiable à tout moment dans Paramètres."
             )
