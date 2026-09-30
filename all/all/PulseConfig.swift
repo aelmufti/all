@@ -52,6 +52,42 @@ enum PulseConfig {
         }
     }
 
+    /// Normalise une saisie utilisateur libre en `baseURL` et la persiste.
+    ///
+    /// **Tolérant au schéma manquant** : si l'utilisateur tape juste un hôte
+    /// (`pulse.<tailnet>.ts.net`), on préfixe `https://`. Sinon `URL(string:)`
+    /// produit une URL **sans `scheme`**, que le reste de l'app refuse
+    /// (`PulseAPIClient` → `.notConfigured`) — et le bouton « Se connecter »,
+    /// gardé par `PulseConfig.baseURL != nil`, restait désactivé sans raison
+    /// visible pour l'utilisateur. Une saisie vide efface l'URL (`nil`). Une
+    /// saisie inexploitable laisse l'URL existante intacte (ne casse rien en
+    /// cours de frappe). Renvoie l'URL retenue, ou `nil`.
+    @discardableResult
+    static func setBaseURL(fromUserInput raw: String) -> URL? {
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            baseURL = nil
+            return nil
+        }
+        guard let url = normalizedBaseURL(fromUserInput: raw) else {
+            // Saisie inexploitable en cours de frappe : ne pas casser l'existant.
+            return baseURL
+        }
+        baseURL = url
+        return url
+    }
+
+    /// Partie **pure** de `setBaseURL` (aucun effet de bord, testable sans
+    /// toucher au global `baseURL`) : normalise une saisie libre en URL,
+    /// préfixe `https://` si le schéma manque. `nil` si vide ou ininterprétable.
+    static func normalizedBaseURL(fromUserInput raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let url = URL(string: candidate),
+              url.scheme != nil, url.host != nil else { return nil }
+        return url
+    }
+
     /// Token Bearer dédié au téléphone (`Authorization: Bearer <token>`,
     /// contrat §3) — persisté en Keychain (`PulseIngestTokenKeychain`), jamais en
     /// `UserDefaults` (secret d'authentification, contrairement à `baseURL`).

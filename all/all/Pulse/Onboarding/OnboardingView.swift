@@ -379,9 +379,8 @@ private struct OnboardingPulseLoginStep: View {
     }
 
     private func persistServerURL() {
-        let trimmed = serverURLString.trimmingCharacters(in: .whitespaces)
-        guard let url = URL(string: trimmed), url.scheme != nil else { return }
-        PulseConfig.baseURL = url
+        // Tolérant au schéma manquant, cf. `PulseConfig.setBaseURL`.
+        PulseConfig.setBaseURL(fromUserInput: serverURLString)
     }
 
     private func submit() {

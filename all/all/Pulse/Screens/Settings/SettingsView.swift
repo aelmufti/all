@@ -122,6 +122,14 @@ struct SettingsView: View {
 
 private struct SettingsStorageSection: View {
     @State private var store = StorageModeStore.shared
+    /// Mode serveur (Pulse / Les deux) demandé depuis le picker alors qu'aucune
+    /// session n'est active : on n'applique PAS le mode tout de suite — on
+    /// présente d'abord la connexion dans une feuille **annulable**
+    /// (`PulseModeLoginSheet`). Le mode ne bascule qu'en cas de connexion
+    /// réussie ; « Annuler » laisse le mode inchangé (Téléphone). Sans ça,
+    /// basculer le picker sur Pulse virait `ContentView` sur un `LoginView`
+    /// plein écran sans retour clair (l'utilisateur se retrouvait coincé).
+    @State private var pendingServerMode: StorageMode?
 
     var body: some View {
         Section {
@@ -136,10 +144,28 @@ private struct SettingsStorageSection: View {
         } footer: {
             Text(Self.footnote(for: store.mode))
         }
+        .sheet(item: $pendingServerMode) { mode in
+            PulseModeLoginSheet(targetMode: mode)
+        }
     }
 
     private var modeBinding: Binding<StorageMode> {
-        Binding(get: { store.mode }, set: { store.mode = $0 })
+        Binding(
+            get: { store.mode },
+            set: { newMode in
+                // Basculer vers un mode qui exige le serveur (Pulse / Les deux)
+                // sans session active : passer par la feuille de connexion
+                // plutôt que d'appliquer le mode (ce qui basculerait
+                // `ContentView` sur `LoginView` plein écran, sans sortie claire).
+                // Vers Téléphone, ou si déjà connecté : appliquer directement.
+                if (newMode == .pulse || newMode == .both),
+                   AuthStore.shared.username == nil {
+                    pendingServerMode = newMode
+                } else {
+                    store.mode = newMode
+                }
+            }
+        )
     }
 
     private static func footnote(for mode: StorageMode) -> String {
@@ -150,6 +176,84 @@ private struct SettingsStorageSection: View {
             return "Téléphone : rien n'est envoyé à Pulse, tout reste sur l'iPhone. La montre est archivée dès l'enregistrement local (pas d'attente d'un accusé serveur)."
         case .both:
             return "Les deux : envoyé à Pulse ET gardé sur l'iPhone. L'app lit Pulse et se replie automatiquement sur le téléphone si Pulse est injoignable."
+        }
+    }
+}
+
+// MARK: - Connexion Pulse depuis le picker de stockage
+//
+// Présentée par `SettingsStorageSection` quand l'utilisateur choisit
+// « Pulse »/« Les deux » alors qu'aucune session n'est active (typiquement
+// depuis Téléphone, sans compte). Réutilise `PulseCredentialsForm` /
+// `PulseLoginErrorMapper` (extraits de `LoginView`) : MÊME saisie, MÊME mapping
+// d'erreur. Le mode de stockage n'est appliqué qu'APRÈS une connexion réussie ;
+// « Annuler » ferme sans rien changer (on reste sur Téléphone). Pas d'écran
+// plein sans sortie.
+private struct PulseModeLoginSheet: View {
+    let targetMode: StorageMode
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var serverURLString = PulseConfig.baseURL?.absoluteString ?? ""
+    @State private var username = ""
+    @State private var password = ""
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+
+    private let auth = AuthStore.shared
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: PulseSpacing.lg) {
+                    PulseCredentialsForm(
+                        serverURLString: $serverURLString,
+                        username: $username,
+                        password: $password,
+                        isSubmitDisabled: !canSubmit || isSubmitting,
+                        isSubmitting: isSubmitting,
+                        errorMessage: errorMessage,
+                        submitLabel: "Se connecter",
+                        onSubmit: submit,
+                        onServerURLChange: persistServerURL
+                    )
+                }
+                .padding(PulseSpacing.lg)
+            }
+            .background(Color.pulseBackground)
+            .scrollDismissesKeyboard(.interactively)
+            .navigationTitle("Connexion à Pulse")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Annuler") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var canSubmit: Bool {
+        PulseConfig.baseURL != nil && !username.isEmpty && !password.isEmpty
+    }
+
+    private func persistServerURL() {
+        PulseConfig.setBaseURL(fromUserInput: serverURLString)
+    }
+
+    private func submit() {
+        persistServerURL()
+        guard canSubmit else { return }
+        errorMessage = nil
+        isSubmitting = true
+        Task {
+            defer { isSubmitting = false }
+            do {
+                try await auth.login(username: username, password: password)
+                // Connexion OK : seulement MAINTENANT on applique le mode voulu.
+                StorageModeStore.shared.mode = targetMode
+                dismiss()
+            } catch {
+                errorMessage = PulseLoginErrorMapper.message(for: error)
+            }
         }
     }
 }

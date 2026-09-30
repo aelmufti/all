@@ -81,9 +81,8 @@ struct LoginView: View {
     }
 
     private func persistServerURL() {
-        let trimmed = serverURLString.trimmingCharacters(in: .whitespaces)
-        guard let url = URL(string: trimmed), url.scheme != nil else { return }
-        PulseConfig.baseURL = url
+        // Tolérant au schéma manquant, cf. `PulseConfig.setBaseURL`.
+        PulseConfig.setBaseURL(fromUserInput: serverURLString)
     }
 
     private func submit() {
@@ -121,6 +120,22 @@ struct PulseCredentialsForm: View {
     let onSubmit: () -> Void
     let onServerURLChange: () -> Void
 
+    /// Ce qui manque pour activer « Se connecter », dans l'ordre des champs.
+    /// `nil` = tout est rempli (le bouton est alors actif, sauf soumission en
+    /// cours). Calculé depuis les bindings de ce formulaire, donc valable pour
+    /// les trois appelants (login, onboarding, picker de stockage) sans param
+    /// supplémentaire.
+    private var disabledHint: String? {
+        if serverURLString.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Renseignez l'adresse du serveur Pulse (https://…)."
+        }
+        if username.isEmpty { return "Renseignez votre identifiant." }
+        if password.isEmpty { return "Renseignez votre mot de passe." }
+        // Tous les champs remplis mais toujours désactivé : l'adresse n'a pas
+        // pu être interprétée en URL (cf. `PulseConfig.setBaseURL`).
+        return "Vérifiez l'adresse du serveur Pulse."
+    }
+
     var body: some View {
         PulseCard {
             SectionHeader("Serveur")
@@ -146,6 +161,12 @@ struct PulseCredentialsForm: View {
                 Text(errorMessage)
                     .font(.footnote)
                     .foregroundStyle(Color.pulseDanger)
+            } else if isSubmitDisabled, !isSubmitting, let disabledHint {
+                // Pourquoi « Se connecter » est grisé — lève la confusion
+                // (« je remplis tout et le bouton reste désactivé »).
+                Text(disabledHint)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseTextSecondary)
             }
 
             Button(action: onSubmit) {
