@@ -160,6 +160,52 @@ struct PulseCard<Content: View>: View {
     }
 }
 
+/// Badge circulaire teinté (fond `pulseAccent` à faible opacité) autour d'un
+/// SF Symbol — repère visuel d'en-tête, partagé entre l'onboarding
+/// (`OnboardingIconBadge` en dérive) et la porte de login (`LoginView`). Un seul
+/// endroit pour la recette (taille, teinte) afin d'éviter la dérive.
+struct PulseIconBadge: View {
+    let icon: String
+    var diameter: CGFloat = 88
+    var iconSize: Font = .largeTitle
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.pulseAccent.opacity(0.12))
+                .frame(width: diameter, height: diameter)
+            Image(systemName: icon)
+                .font(iconSize)
+                .foregroundStyle(Color.pulseAccent)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Séparateur « ─── ou ─── » horizontal — marque une bifurcation entre deux
+/// voies d'égale importance (ex. se connecter vs. utiliser sans serveur).
+struct PulseOrDivider: View {
+    var label: String = "ou"
+
+    var body: some View {
+        HStack(spacing: PulseSpacing.md) {
+            line
+            Text(label)
+                .font(.footnote)
+                .foregroundStyle(Color.pulseTextSecondary)
+            line
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var line: some View {
+        Rectangle()
+            .fill(Color.pulseBorder)
+            .frame(height: 1)
+            .frame(maxWidth: .infinity)
+    }
+}
+
 /// Tuile de statistique : libellé + grande valeur + unité optionnelle.
 /// Base visuelle des futurs écrans de données (FC, pas, calories, sommeil…).
 struct StatTile: View {

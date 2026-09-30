@@ -191,15 +191,9 @@ private struct OnboardingIconBadge: View {
     var diameter: CGFloat = 88
     var iconSize: Font = .largeTitle
 
+    // Recette partagée avec `LoginView` — un seul endroit, cf. `PulseIconBadge`.
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.pulseAccent.opacity(0.12))
-                .frame(width: diameter, height: diameter)
-            Image(systemName: icon)
-                .font(iconSize)
-                .foregroundStyle(Color.pulseAccent)
-        }
+        PulseIconBadge(icon: icon, diameter: diameter, iconSize: iconSize)
     }
 }
 

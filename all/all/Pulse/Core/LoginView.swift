@@ -40,14 +40,22 @@ struct LoginView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: PulseSpacing.lg) {
-                VStack(spacing: PulseSpacing.xs) {
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.largeTitle)
-                        .foregroundStyle(Color.pulseAccent)
-                    Text("Pulse")
-                        .font(.title2.bold())
-                        .foregroundStyle(Color.pulseTextPrimary)
+            VStack(spacing: PulseSpacing.xl) {
+                // Hero — même identité que l'onboarding (badge circulaire teinté
+                // + titre/sous-titre centrés), pour que la porte de login ne
+                // détonne pas avec le reste de l'app.
+                VStack(spacing: PulseSpacing.md) {
+                    PulseIconBadge(icon: "waveform.path.ecg")
+                    VStack(spacing: PulseSpacing.xs) {
+                        Text("Connexion à Pulse")
+                            .font(.title.bold())
+                            .foregroundStyle(Color.pulseTextPrimary)
+                        Text("Retrouve tes données depuis ton serveur Pulse personnel.")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.pulseTextSecondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, PulseSpacing.md)
+                    }
                 }
                 .padding(.top, PulseSpacing.xxl)
 
@@ -63,11 +71,27 @@ struct LoginView: View {
                     onServerURLChange: persistServerURL
                 )
 
-                Button("Utiliser sans serveur") {
-                    StorageModeStore.shared.mode = .phone
+                // Alternative « sans serveur » — remontée en action claire
+                // (bouton bordé + explication) plutôt qu'un lien gris minuscule
+                // qu'on ne remarquait pas.
+                VStack(spacing: PulseSpacing.md) {
+                    PulseOrDivider()
+
+                    Button {
+                        StorageModeStore.shared.mode = .phone
+                    } label: {
+                        Label("Utiliser sans serveur", systemImage: "iphone")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.pulseAccent)
+
+                    Text("Tout reste sur cet iPhone, aucun compte requis. Modifiable ensuite dans Paramètres > Stockage.")
+                        .font(.caption)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, PulseSpacing.md)
                 }
-                .font(.footnote)
-                .foregroundStyle(Color.pulseTextSecondary)
                 .padding(.bottom, PulseSpacing.lg)
             }
             .padding(PulseSpacing.lg)
