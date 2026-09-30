@@ -23,6 +23,18 @@ extension View {
     func reloadsOnLocalDataChange(_ onChange: @escaping () async -> Void) -> some View {
         modifier(LocalDataChangeModifier(onChange: onChange))
     }
+
+    /// Recharge l'écran quand la SOURCE de données change (`Stockage` :
+    /// Pulse ↔ Téléphone ↔ Les deux) — cf. `.storageModeDidChange`. À la
+    /// différence de `reloadsOnLocalDataChange` (qui réutilise le garde-fou
+    /// « jour du jour » des écrans), on passe ici la fermeture de rechargement
+    /// **complète** (`load()`) : la source bascule entièrement, donc même une
+    /// sélection sur un jour passé doit être re-tirée du nouveau backend, sinon
+    /// l'écran resterait figé sur les données de l'ancienne source jusqu'au
+    /// redémarrage de l'app.
+    func reloadsOnStorageModeChange(_ onChange: @escaping () async -> Void) -> some View {
+        modifier(StorageModeChangeModifier(onChange: onChange))
+    }
 }
 
 private struct LocalDataChangeModifier: ViewModifier {
@@ -37,6 +49,23 @@ private struct LocalDataChangeModifier: ViewModifier {
                 // debounce : chaque notification correspond déjà à un rejeu
                 // de spool complet côté `LocalIngestor` (pas de rafale).
                 for await _ in NotificationCenter.default.notifications(named: .allLocalDataDidChange) {
+                    await onChange()
+                }
+            }
+    }
+}
+
+private struct StorageModeChangeModifier: ViewModifier {
+    let onChange: () async -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .task {
+                // Même mécanisme que `LocalDataChangeModifier` : flux async
+                // annulé par SwiftUI à la disparition de l'écran. Un changement
+                // de mode est un événement rare (action utilisateur) — pas de
+                // rafale, pas de debounce nécessaire.
+                for await _ in NotificationCenter.default.notifications(named: .storageModeDidChange) {
                     await onChange()
                 }
             }

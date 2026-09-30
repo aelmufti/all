@@ -56,6 +56,7 @@ struct HealthView: View {
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
         // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
         .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
+        .reloadsOnStorageModeChange { await viewModel.load() }
     }
 
     private func loaded(day: WellnessDayDetail) -> some View {

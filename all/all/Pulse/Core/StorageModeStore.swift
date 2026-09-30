@@ -68,6 +68,16 @@ final class StorageModeStore {
     var mode: StorageMode {
         didSet {
             defaults.set(mode.rawValue, forKey: Self.key)
+            // Changement réel de source de données → prévenir les écrans
+            // ouverts pour qu'ils rechargent immédiatement depuis la NOUVELLE
+            // source (Pulse ↔ local), sans redémarrage de l'app. Posté sur le
+            // main actor (ce `didSet` y tourne, classe `@MainActor`), donc reçu
+            // sur le main actor par les écrans. Garde `mode != oldValue` : le
+            // picker segmenté ne déclenche que sur vrai changement, mais on
+            // évite une notif superflue si quelqu'un réassigne la même valeur.
+            if mode != oldValue {
+                NotificationCenter.default.post(name: .storageModeDidChange, object: nil)
+            }
         }
     }
 
@@ -87,4 +97,15 @@ final class StorageModeStore {
         let stored = UserDefaults.standard.string(forKey: key).flatMap(StorageMode.init(rawValue:))
         return stored ?? .pulse
     }
+}
+
+extension Notification.Name {
+    /// Postée par `StorageModeStore.mode.didSet` quand le mode change vraiment.
+    /// Signal pour que les écrans de données rechargent leur sélection courante
+    /// depuis la nouvelle source (`.reloadsOnStorageModeChange`, cf.
+    /// `LocalDataRefresh.swift`). Distincte de `.allLocalDataDidChange`
+    /// (ingestion locale, `LocalIngestor`) : ici toute la source bascule, donc
+    /// le rechargement est un `load()` complet — y compris sur un jour passé,
+    /// là où le reload d'ingestion se contente d'un garde-fou « jour du jour ».
+    static let storageModeDidChange = Notification.Name("storageModeDidChange")
 }

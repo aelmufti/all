@@ -55,6 +55,7 @@ struct NutritionView: View {
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
         // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
         .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
+        .reloadsOnStorageModeChange { await viewModel.load() }
         .onChange(of: addTrigger) { _, _ in
             viewModel.openAddSheet()
         }

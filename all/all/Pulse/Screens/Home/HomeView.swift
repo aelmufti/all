@@ -96,6 +96,7 @@ struct HomeView: View {
         // `.refreshesAtDayChange`, mais déclenché par l'arrivée réelle d'un
         // nouveau fichier plutôt que par le calendrier.
         .reloadsOnLocalDataChange { await viewModel.load() }
+        .reloadsOnStorageModeChange { await viewModel.load() }
     }
 
     /// En-tête en contenu : titre « Accueil » 24pt + roue crantée (Paramètres).

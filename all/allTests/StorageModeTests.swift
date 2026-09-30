@@ -65,6 +65,50 @@ struct StorageModeStoreTests {
         StorageModeStore.shared.mode = .pulse
         #expect(StorageModeStore.current == .pulse)
     }
+
+    // MARK: Notification de changement de source (.storageModeDidChange)
+    //
+    // Signal qui fait recharger les écrans ouverts sans redémarrage de l'app
+    // (`.reloadsOnStorageModeChange`, cf. `LocalDataRefresh.swift`). Observé
+    // en direct : l'observateur avec `queue: nil` est appelé synchronement sur
+    // le thread qui poste (ici le main actor), donc `count` est à jour au
+    // moment de l'assertion, sans attente.
+
+    @Test @MainActor func postsStorageModeDidChangeOnRealChange() {
+        let suiteName = "storage-mode-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = StorageModeStore(defaults: defaults) // démarre à .pulse
+        var count = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .storageModeDidChange, object: nil, queue: nil
+        ) { _ in count += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        store.mode = .phone
+        #expect(count == 1)
+        store.mode = .both
+        #expect(count == 2)
+    }
+
+    @Test @MainActor func doesNotPostStorageModeDidChangeWhenValueUnchanged() {
+        let suiteName = "storage-mode-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = StorageModeStore(defaults: defaults)
+        store.mode = .phone // établit l'état courant
+
+        var count = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .storageModeDidChange, object: nil, queue: nil
+        ) { _ in count += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        store.mode = .phone // même valeur → aucune notification
+        #expect(count == 0)
+    }
 }
 
 // MARK: - RoutingSpoolUploader — routage de l'upload selon le mode

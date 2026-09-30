@@ -99,6 +99,13 @@ struct ContentView: View {
         // rester simple, pas de logique de mode dupliquée dans cette vue.
         .onChange(of: storageMode.mode) { _, _ in
             PulseBacklogPusher.pushIfNeeded()
+            // Passage en Téléphone/Les deux : remonter tout de suite le spool
+            // en base locale (self-guard : no-op en `.pulse`), pour que les
+            // écrans qui viennent de basculer sur la source locale
+            // (`.reloadsOnStorageModeChange`) y trouvent des données fraîches.
+            // Si une insertion a lieu, `LocalIngestor` reposte lui-même
+            // `.allLocalDataDidChange` → second rechargement, sans redémarrage.
+            LocalIngestor.ingestIfNeeded()
         }
     }
 }

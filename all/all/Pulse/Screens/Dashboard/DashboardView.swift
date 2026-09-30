@@ -46,6 +46,7 @@ struct DashboardView: View {
         // « jour courant » ici (période glissante depuis aujourd'hui), donc
         // un rechargement inconditionnel comme `retry()`/`selectPeriod`.
         .reloadsOnLocalDataChange { await viewModel.load() }
+        .reloadsOnStorageModeChange { await viewModel.load() }
     }
 
     private var overview: some View {

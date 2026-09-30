@@ -59,6 +59,7 @@ struct ActivitiesView: View {
         // complet que le pull-to-refresh (`.refreshable`), pas de notion de
         // « jour courant » ici (liste, pas un écran par jour).
         .reloadsOnLocalDataChange { await vm.load() }
+        .reloadsOnStorageModeChange { await vm.load() }
     }
 
     @ViewBuilder
