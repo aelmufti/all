@@ -74,6 +74,14 @@ struct ContentView: View {
             // bloque jamais l'affichage de la coquille.
             LocalIngestor.ingestIfNeeded()
 
+            // Rattrapage Pulse (`Sync/PulseBacklogPusher.swift`) : pousse tout
+            // fichier resté dans le Spool sans jamais avoir atteint Pulse
+            // (typiquement collecté en mode Téléphone lors d'une session
+            // antérieure, puis le mode a basculé — éventuellement hors ligne,
+            // donc rattrapé ici au lancement plutôt qu'au seul changement de
+            // mode). Se garde elle-même (mode, config Pulse) ; fire-and-forget.
+            PulseBacklogPusher.pushIfNeeded()
+
             // Mode Téléphone : pas de session à vérifier, la coquille
             // s'affiche déjà (condition ci-dessus) — inutile d'appeler
             // `api/auth/me` (qui échouerait de toute façon sans `baseURL`).
@@ -82,6 +90,15 @@ struct ContentView: View {
                 return
             }
             _ = await auth.check()
+        }
+        // Basculement du mode Stockage vers Pulse/Les deux : rattrape tout de
+        // suite le retard éventuel (fichiers collectés en Téléphone, jamais
+        // poussés) plutôt que d'attendre le prochain lancement de l'app.
+        // `pushIfNeeded()` se re-garde lui-même (no-op en `.phone`, cf.
+        // `PulseBacklogPusher.swift`) — appelé inconditionnellement ici pour
+        // rester simple, pas de logique de mode dupliquée dans cette vue.
+        .onChange(of: storageMode.mode) { _, _ in
+            PulseBacklogPusher.pushIfNeeded()
         }
     }
 }

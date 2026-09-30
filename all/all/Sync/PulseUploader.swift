@@ -248,9 +248,16 @@ final class PulseSpoolUploader: SpoolUploading {
 final class RoutingSpoolUploader: SpoolUploading {
     private let pulseUploader: SpoolUploading
     private let mode: () -> StorageMode
+    /// `nil` par défaut pour ne pas casser les constructions de test existantes
+    /// (`RoutingSpoolUploaderTests`, qui n'en passent pas) — `BLEManager` passe
+    /// sa vraie `SpoolStore` en production. Sert UNIQUEMENT à marquer
+    /// `pushedToPulse` (cf. `upload` ci-dessous) ; cette classe ne lit/écrit
+    /// jamais `state`, qui reste entièrement gouverné par `GarminSession`.
+    private let spoolStore: SpoolStore?
 
-    init(pulseUploader: SpoolUploading, mode: @escaping () -> StorageMode = { StorageModeStore.current }) {
+    init(pulseUploader: SpoolUploading, spoolStore: SpoolStore? = nil, mode: @escaping () -> StorageMode = { StorageModeStore.current }) {
         self.pulseUploader = pulseUploader
+        self.spoolStore = spoolStore
         self.mode = mode
     }
 
@@ -259,7 +266,19 @@ final class RoutingSpoolUploader: SpoolUploading {
         case .phone:
             completion(.delivered)
         case .pulse, .both:
-            pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename, completion: completion)
+            // Seule branche qui parle réellement HTTP à Pulse (`pulseUploader`,
+            // toujours un `PulseSpoolUploader` en production) : c'est ELLE, et
+            // seulement elle, qui peut garantir `pushedToPulse == true` ⟺ un
+            // vrai 2xx a eu lieu. On marque avant de remonter `completion` au
+            // reste de la pile (GarminSession), qui continue d'ignorer
+            // totalement `pushedToPulse` (son rôle reste `markDelivered` +
+            // l'archivage montre, inchangés).
+            pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename) { [spoolStore] outcome in
+                if outcome == .delivered {
+                    spoolStore?.markPushedToPulse(forFileAt: fileURL)
+                }
+                completion(outcome)
+            }
         }
     }
 }

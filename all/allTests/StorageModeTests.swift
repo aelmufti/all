@@ -143,3 +143,83 @@ struct RoutingSpoolUploaderTests {
         #expect(inner.calls.count == 1, "toujours 1 : le second appel (mode phone) n'a pas dû retoucher l'uploader Pulse")
     }
 }
+
+// MARK: - RoutingSpoolUploader — marquage `pushedToPulse` (rattrapage Pulse,
+// cf. `Sync/PulseBacklogPusher.swift`)
+//
+// `pushedToPulse` doit être vrai SSI un vrai 2xx Pulse a eu lieu : ces tests
+// couvrent les trois cas qui prouvent que la garantie tient — branche
+// `pulse`/`both` + `.delivered` (marque), branche `.phone` (jamais, même avec
+// une `SpoolStore` fournie), branche `pulse`/`both` + issue non `.delivered`
+// (ne marque pas). Toujours via `RecordingSpoolUploading` (ci-dessus), jamais
+// un vrai `PulseSpoolUploader`/réseau.
+
+struct RoutingSpoolUploaderPushedToPulseTests {
+    private func makeTempStore() throws -> (store: SpoolStore, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-connect-routing-pushed-tests-\(UUID().uuidString)", isDirectory: true)
+        return (try SpoolStore(root: root), root)
+    }
+
+    private func sampleDirectoryEntry(fileIndex: Int) -> GarminDirectoryEntry {
+        GarminDirectoryEntry(fileIndex: fileIndex, dataType: 128, subType: 4, fileNumber: fileIndex, sizeBytes: 6, garminTimestamp: 0)!
+    }
+
+    @Test func pulseModeMarksPushedToPulseOnARealDelivered() throws {
+        let (store, root) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id, relativePath) = SpoolStore.identity(for: sampleDirectoryEntry(fileIndex: 1))
+        try store.recordAcquired(id, relativePath: relativePath, data: Data("x".utf8))
+        let fileURL = store.fileURL(for: store.entries[id]!)
+
+        let inner = RecordingSpoolUploading()
+        inner.outcomeToReturn = .delivered
+        let router = RoutingSpoolUploader(pulseUploader: inner, spoolStore: store, mode: { .pulse })
+
+        var captured: PulseUploadOutcome?
+        router.upload(fileURL: fileURL, watchFilename: id.name) { captured = $0 }
+
+        #expect(captured == .delivered)
+        #expect(store.entries[id]?.pushedToPulse == true)
+    }
+
+    /// Même livraison locale qu'avant (issue `.delivered` synthétisée, sans
+    /// requête) — mais désormais avec une `SpoolStore` réelle fournie au
+    /// routeur : vérifie que la présence de la `SpoolStore` seule ne suffit
+    /// pas à marquer `pushedToPulse`, seule la branche `pulse`/`both` peut.
+    @Test func phoneModeNeverMarksPushedToPulseEvenWithASpoolStoreProvided() throws {
+        let (store, root) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id, relativePath) = SpoolStore.identity(for: sampleDirectoryEntry(fileIndex: 2))
+        try store.recordAcquired(id, relativePath: relativePath, data: Data("x".utf8))
+        let fileURL = store.fileURL(for: store.entries[id]!)
+
+        let inner = RecordingSpoolUploading()
+        let router = RoutingSpoolUploader(pulseUploader: inner, spoolStore: store, mode: { .phone })
+
+        var captured: PulseUploadOutcome?
+        router.upload(fileURL: fileURL, watchFilename: id.name) { captured = $0 }
+
+        #expect(captured == .delivered, "livraison locale : même issue qu'un 2xx, mais jamais marquée pushedToPulse")
+        #expect(store.entries[id]?.pushedToPulse == false, "mode Téléphone : jamais de requête réelle, jamais pushedToPulse")
+        #expect(inner.calls.isEmpty)
+    }
+
+    @Test func aNonDeliveredOutcomeInPulseOrBothModeDoesNotMarkPushed() throws {
+        let (store, root) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id, relativePath) = SpoolStore.identity(for: sampleDirectoryEntry(fileIndex: 3))
+        try store.recordAcquired(id, relativePath: relativePath, data: Data("x".utf8))
+        let fileURL = store.fileURL(for: store.entries[id]!)
+
+        let inner = RecordingSpoolUploading()
+        inner.outcomeToReturn = .keepRetry
+        let router = RoutingSpoolUploader(pulseUploader: inner, spoolStore: store, mode: { .both })
+
+        var captured: PulseUploadOutcome?
+        router.upload(fileURL: fileURL, watchFilename: id.name) { captured = $0 }
+
+        #expect(captured == .keepRetry)
+        #expect(store.entries[id]?.pushedToPulse == false)
+    }
+}

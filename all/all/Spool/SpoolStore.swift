@@ -196,6 +196,42 @@ final class SpoolStore {
         log.info("Fichier archivé sur la montre : \(entry.relativePath, privacy: .public)")
     }
 
+    /// Marque `pushedToPulse=true` après un accusé **réel** de Pulse (2xx) —
+    /// jamais après la livraison locale du mode Téléphone. Appelée par
+    /// `RoutingSpoolUploader` (branche `pulse`/`both` uniquement, cf.
+    /// `Sync/PulseUploader.swift`) et par `Sync/PulseBacklogPusher.swift`.
+    /// Idempotente (pas de garde d'état contrairement à `markDelivered`/
+    /// `markArchived` : `pushedToPulse` n'est pas une transition d'état
+    /// séquentielle, juste un fait qui devient vrai une fois pour toutes) ;
+    /// ignore silencieusement une entrée inconnue, même logique défensive que
+    /// les deux autres `mark*`.
+    func markPushedToPulse(_ id: WatchFileID) {
+        guard var entry = entries[id] else {
+            log.warning("markPushedToPulse ignoré : entrée inconnue (\(id.name, privacy: .public))")
+            return
+        }
+        guard !entry.pushedToPulse else { return }
+        entry.pushedToPulse = true
+        entries[id] = entry
+        persistJournal()
+        log.info("Fichier effectivement poussé vers Pulse : \(entry.relativePath, privacy: .public)")
+    }
+
+    /// Variante par URL de fichier plutôt que par identité — pour
+    /// `RoutingSpoolUploader`, qui ne connaît que `fileURL`/`watchFilename`
+    /// (pas le `WatchFileID` complet, propriété de `GarminSession`). Retrouve
+    /// l'entrée par correspondance de `fileURL(for:)` dans le journal ; ignore
+    /// silencieusement si rien ne correspond (défensif — ne devrait jamais
+    /// arriver puisque `fileURL` vient toujours de `fileURL(for:)` sur une
+    /// entrée du spool).
+    func markPushedToPulse(forFileAt url: URL) {
+        guard let id = entries.first(where: { fileURL(for: $0.value) == url })?.key else {
+            log.warning("markPushedToPulse(forFileAt:) ignoré : aucune entrée pour \(url.lastPathComponent, privacy: .public)")
+            return
+        }
+        markPushedToPulse(id)
+    }
+
     /// URL disque d'une entrée du spool — pour que `PulseUploader` lise le
     /// `.fit` sans connaître la structure interne de `filesDir` (racine du
     /// spool, privée à ce type).

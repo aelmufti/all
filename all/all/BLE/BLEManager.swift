@@ -195,7 +195,13 @@ final class BLEManager: NSObject, ObservableObject {
     /// `docs/stockage-local.md`) : en mode Téléphone, aucune requête ne part
     /// jamais vers `URLSessionPulseUploadTransport` — la livraison est locale
     /// (`RoutingSpoolUploader.upload` court-circuite avant `PulseSpoolUploader`).
-    private let pulseUploader: SpoolUploading = RoutingSpoolUploader(pulseUploader: PulseSpoolUploader())
+    /// `spoolStore` (déclarée juste au-dessus) lui est passée UNIQUEMENT pour
+    /// qu'elle marque `pushedToPulse` sur un vrai 2xx (cf.
+    /// `RoutingSpoolUploader.upload`) — elle ne lui sert à rien d'autre.
+    /// `lazy var` (plutôt que `let`) : un initialiseur de propriété stockée ne
+    /// peut pas lire une propriété sœur (`spoolStore`) avant que `self` existe
+    /// — `lazy` diffère l'évaluation au premier accès, après la fin de l'init.
+    private lazy var pulseUploader: SpoolUploading = RoutingSpoolUploader(pulseUploader: PulseSpoolUploader(), spoolStore: spoolStore)
 
     /// Pousseur de FC live vers Pulse (incrément Live-1b, `Sync/LiveHeartRatePush.swift`)
     /// — même raison d'être partagée que `pulseUploader` : une seule `URLSession`
