@@ -21,6 +21,14 @@
 //  le lien « Utiliser sans serveur » de `LoginView`), la coquille s'affiche
 //  immédiatement, qu'`AuthStore` ait une session ou non.
 //
+//  Onboarding (premier lancement, `Pulse/Onboarding/OnboardingView.swift`) :
+//  porte gate EN PREMIER, avant même storageMode/auth — tant que
+//  `OnboardingStore.shared.completed == false`, `OnboardingView` s'affiche à
+//  la place de tout le reste (y compris la porte de login). C'est
+//  `OnboardingView` qui pose `storageMode`/l'auth Pulse en cours de route ; le
+//  `.task` ci-dessous reste actif pendant l'onboarding (harmless — cf. son
+//  commentaire), il n'a juste aucun effet visible tant que l'onboarding gate.
+//
 
 import SwiftUI
 
@@ -33,10 +41,15 @@ struct ContentView: View {
     /// Observé pour re-rendre au changement de mode de stockage — cf.
     /// en-tête de fichier.
     @State private var storageMode = StorageModeStore.shared
+    /// Observé pour re-rendre dès `OnboardingView.markCompleted()` — cf.
+    /// en-tête de fichier.
+    @State private var onboarding = OnboardingStore.shared
 
     var body: some View {
         Group {
-            if storageMode.mode == .phone || auth.username != nil {
+            if !onboarding.completed {
+                OnboardingView()
+            } else if storageMode.mode == .phone || auth.username != nil {
                 PulseShellView()
             } else if auth.isChecking {
                 // Vérification de la session persistée (cookie déjà posé

@@ -121,14 +121,17 @@ struct SettingsProfile: Decodable, Equatable {
     let heightCm: Double?
 }
 
-/// Corps de `PUT /api/profile` — mêmes trois champs que
-/// `SettingsComponent.saveProfile()` (Angular) envoie (`birthYear`, `sex`,
-/// `heightCm` si renseignée) ; jamais `weightKg` depuis cet écran. Les
-/// propriétés `Optional` sont omises du JSON par l'encodage synthétisé
-/// (`encodeIfPresent`, cf. `NutritionLogRequest` et ses tests) plutôt
-/// qu'envoyées en `null`.
+/// Corps de `PUT /api/profile`. `SettingsComponent.saveProfile()` (Angular)
+/// et `SettingsView` n'envoient que `birthYear`/`sex`/`heightCm` — `weightKg`
+/// reste éditable ici (le serveur ET `RealLocalPulseBackend` l'acceptent
+/// déjà, cf. `profile.controller.ts` et `Local/LocalPulseBackend.swift`)
+/// pour le pas de Profil de l'onboarding (`OnboardingProfileStep`), seul
+/// appelant à ce jour à le renseigner. Les propriétés `Optional` sont omises
+/// du JSON par l'encodage synthétisé (`encodeIfPresent`, cf.
+/// `NutritionLogRequest` et ses tests) plutôt qu'envoyées en `null`.
 struct SettingsProfileUpdateRequest: Encodable {
     var birthYear: Int?
     var sex: String?
     var heightCm: Double?
+    var weightKg: Double?
 }
