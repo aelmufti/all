@@ -179,6 +179,18 @@ final class PulseAPIClient {
     /// réponse vient du serveur (`nil` depuis le backend local, qui n'en a
     /// pas — `decode` s'en sert seulement pour un message de diagnostic).
     private func routedData(method: String, path: String, query: [String: String], bodyData: Data?) async throws -> (Data, Int?) {
+        // L'authentification est une opération PUREMENT serveur : le backend
+        // local (« Pulse embarqué ») n'a pas de comptes. On force donc le
+        // serveur pour `api/auth/*`, quel que soit le mode de stockage. Sans ça,
+        // en mode Téléphone/Les deux, une tentative de connexion — typiquement
+        // depuis le picker de stockage pour BASCULER vers Pulse, alors que le
+        // mode est encore `.phone` — était routée vers le local et échouait avec
+        // « Pas encore disponible en mode Téléphone ». Pas de repli local non
+        // plus : si Pulse est injoignable, l'échec de transport remonte tel quel
+        // (« Pulse est inatteignable »), ce qui est le bon message.
+        if Self.isServerOnly(path: path) {
+            return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+        }
         switch modeProvider() {
         case .phone:
             return (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
@@ -197,6 +209,15 @@ final class PulseAPIClient {
                 return (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
             }
         }
+    }
+
+    /// Routes qui ne passent JAMAIS par le backend local, quel que soit le mode
+    /// de stockage — l'authentification (`api/auth/login|me|logout`), que le
+    /// « Pulse embarqué » ne connaît pas (pas de comptes en local). Normalise un
+    /// éventuel « / » de tête avant de tester le préfixe.
+    private static func isServerOnly(path: String) -> Bool {
+        let normalized = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        return normalized.hasPrefix("api/auth/")
     }
 
     /// Exécute réellement contre Pulse — construit la requête, y attache le

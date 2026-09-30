@@ -334,6 +334,26 @@ struct PulseSocleTests {
         #expect(local.calls.first?.path == "api/wellness/day/2026-09-23")
     }
 
+    /// L'auth est purement serveur (le backend local n'a pas de comptes) : même
+    /// en mode Téléphone, `api/auth/*` doit partir au serveur, jamais au local
+    /// — sinon basculer vers Pulse depuis le picker de stockage échouait avec
+    /// « Pas encore disponible en mode Téléphone ». Cf. `PulseAPIClient
+    /// .isServerOnly`.
+    @Test func authRoutesAlwaysHitServerEvenInPhoneMode() async throws {
+        let local = RecordingLocalPulseBackend()
+        let client = routedClient(mode: .phone, localBackend: local)
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
+        }
+
+        struct Creds: Encodable { let username: String; let password: String }
+        struct Me: Decodable, Equatable { let username: String }
+        let me: Me = try await client.post("api/auth/login", body: Creds(username: "ali", password: "x"))
+
+        #expect(me == Me(username: "ali"))
+        #expect(local.calls.isEmpty, "l'auth ne doit jamais toucher le backend local")
+    }
+
     @Test func pulseModeNeverCallsTheLocalBackendEvenOnServerError() async throws {
         let local = RecordingLocalPulseBackend()
         let client = routedClient(mode: .pulse, localBackend: local)
