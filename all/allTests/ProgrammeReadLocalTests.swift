@@ -209,19 +209,16 @@ struct ProgrammeReadLocalTests {
 
     // MARK: - Écritures différées
 
-    /// `activate`/`stop`/`session`/`push`/`export` restent `LocalPulseUnavailableError`
-    /// — aucune route d'écriture locale pour Programme dans cet incrément
-    /// (déclenchées par une action utilisateur, pas au chargement de l'écran).
-    @Test func writeRoutesStayDeferred() async throws {
+    /// `candidates`/`export`/`push` restent `LocalPulseUnavailableError` —
+    /// hors périmètre L7b (cf. `RealLocalPulseBackend`, en-tête de section
+    /// Programme). `activate`/`stop`/`session`, eux, sont désormais servies
+    /// (incrément L7b) — couvertes par `ProgrammeWriteLocalTests`, PAS ici :
+    /// avec un corps `{}` elles lèvent maintenant `LocalProgrammeValidationError`
+    /// (validation), plus `LocalPulseUnavailableError`.
+    @Test func candidatesExportPushStayDeferred() async throws {
         let backend = RealLocalPulseBackend(db: try makeDb())
         await #expect(throws: LocalPulseUnavailableError.self) {
-            _ = try await backend.handle(method: "POST", path: "api/programme/activate", query: [:], body: Data("{}".utf8))
-        }
-        await #expect(throws: LocalPulseUnavailableError.self) {
-            _ = try await backend.handle(method: "POST", path: "api/programme/stop", query: [:], body: Data("{}".utf8))
-        }
-        await #expect(throws: LocalPulseUnavailableError.self) {
-            _ = try await backend.handle(method: "POST", path: "api/programme/session", query: [:], body: Data("{}".utf8))
+            _ = try await backend.handle(method: "GET", path: "api/programme/candidates", query: [:], body: nil)
         }
         await #expect(throws: LocalPulseUnavailableError.self) {
             _ = try await backend.handle(method: "GET", path: "api/programme/push", query: [:], body: nil)

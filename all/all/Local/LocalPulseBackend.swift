@@ -193,15 +193,24 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("PUT", "profile"):
             return try encodeProfileUpdate(body: body)
 
-        // MARK: Programme (incrément L7a, LECTURE SEULE — miroir `ProgrammeController.current`/
-        // `domainView`). `activate`/`stop`/`session`/`candidates`/`export`/`push`
-        // ne sont PAS servies : leurs chemins ("programme/activate"…) ne
-        // matchent aucun `case` ci-dessous, retombent donc sur le `default`
-        // (`LocalPulseUnavailableError`) — cf. en-tête de section dédiée plus
-        // bas et rapport d'incrément.
+        // MARK: Programme (incrément L7a LECTURE + L7b ÉCRITURE — miroir
+        // `ProgrammeController.current`/`domainView`/`activate`/`stop`/
+        // `toggleSession`). `candidates`/`export`/`push` restent délibérément
+        // hors périmètre (leurs chemins ne matchent aucun `case` ci-dessous,
+        // retombent sur le `default` `LocalPulseUnavailableError`) — cf.
+        // en-tête de section dédiée plus bas et rapport d'incrément.
 
         case ("GET", "programme"):
             return try encodeProgrammeCurrent(query: query)
+
+        case ("POST", "programme/activate"):
+            return try encodeProgrammeActivate(body: body)
+
+        case ("POST", "programme/stop"):
+            return try encodeProgrammeStop(body: body)
+
+        case ("POST", "programme/session"):
+            return try encodeProgrammeSession(body: body)
 
         case ("GET", "weight"):
             return try encodeWeightList(query: query)
@@ -1146,37 +1155,39 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         return (raw * 10).rounded() / 10
     }
 
-    // MARK: - Programme (incrément L7a, LECTURE SEULE — miroir `ProgrammeController.current`/
-    // `domainView`, moteur dans `Local/Programme/` : `ProgrammeCatalogue.swift`
+    // MARK: - Programme (incrément L7a LECTURE + L7b ÉCRITURE — miroir
+    // `ProgrammeController.current`/`domainView`/`activate`/`stop`/
+    // `toggleSession`, moteur dans `Local/Programme/` : `ProgrammeCatalogue.swift`
     // (catalogue statique), `ProgrammeProgress.swift` (rapprochement séances/
-    // activités, avancement alimentation), `ProgrammeSleep.swift` (analyse de
-    // régularité du sommeil). `ProgrammeConstraints.swift` porté mais NON câblé
-    // (cf. son en-tête — sert seulement à `nutrition.controller.ts`, jamais à
-    // cette route).
+    // activités, avancement alimentation, `buildPlan`/`sessionsPerWeek`
+    // désormais RÉELLEMENT appelés par `encodeProgrammeActivate`),
+    // `ProgrammeSleep.swift` (analyse de régularité du sommeil).
+    // `ProgrammeConstraints.swift` porté mais NON câblé (cf. son en-tête —
+    // sert seulement à `nutrition.controller.ts`, jamais à cette route).
     //
     // Portée : les TROIS domaines (`training`/`nutrition`/`sleep`) sont
-    // FIDÈLES — aucune dégradation nécessaire, `checkDay`/`analyseSleep`
-    // (alimentation/sommeil) ne dépendent d'AUCUN moteur non porté (ni
-    // `Local/NutritionTarget.swift`, ni un cadre de programme quelconque),
-    // juste de `food_log`/`weight_log`/`settings`/`wellness_sleep`/`activities`,
-    // déjà tous disponibles localement. `programme_state`/`programme_plan`/
-    // `programme_done` (ajoutées cet incrément, `LocalDb.swift`) sont TOUJOURS
-    // vides tant qu'aucune route d'activation locale n'existe (cf. plus bas) :
-    // `domainView` retombe alors honnêtement sur `active: null, detail: null`
-    // pour les trois domaines — MÊME comportement que le serveur avec une base
-    // vide, rien de fabriqué.
+    // FIDÈLES en lecture — aucune dégradation nécessaire, `checkDay`/
+    // `analyseSleep` (alimentation/sommeil) ne dépendent d'AUCUN moteur non
+    // porté (ni `Local/NutritionTarget.swift`, ni un cadre de programme
+    // quelconque), juste de `food_log`/`weight_log`/`settings`/
+    // `wellness_sleep`/`activities`, déjà tous disponibles localement.
     //
-    // Routes d'écriture DÉLIBÉRÉMENT DIFFÉRÉES (déclenchées par une action
-    // utilisateur, pas au chargement de l'écran) : `POST programme/activate`,
-    // `POST programme/stop`, `POST programme/session`, `GET programme/candidates`,
-    // `GET`/`POST programme/export(/:fileName)`, `GET`/`POST programme/push` —
-    // aucun de ces chemins ne matche `case ("GET", "programme")` ci-dessus,
-    // ils retombent tous sur le `default` (`LocalPulseUnavailableError`).
-    // Appuyer sur Activer/Arrêter/Cocher/Envoyer en mode Téléphone affiche donc
-    // une erreur — attendu pour cet incrément, cf. rapport. `ProgrammeViewModel.load()`
-    // appelle aussi `GET programme/push` (statut d'envoi) en second, mais
-    // l'échec y est avalé (`catch` silencieux, statut secondaire) : l'écran se
-    // charge quand même.
+    // Écriture (L7b) : `POST programme/activate`/`stop`/`session` sont
+    // désormais servies — miroir FIDÈLE de `ProgrammeController.activate`/
+    // `stop`/`toggleSession` (validations, transaction, upsert), cf.
+    // `encodeProgrammeActivate`/`encodeProgrammeStop`/`encodeProgrammeSession`
+    // plus bas et `LocalDb.programmeActivate`/`programmeStop`/
+    // `programmeSessionDelete`/`programmeSessionUpsert`. Restent
+    // DÉLIBÉRÉMENT hors périmètre (aucun `case` ne matche, retombent sur le
+    // `default` `LocalPulseUnavailableError`) : `GET programme/candidates`
+    // (rapprochement manuel avec une activité — l'écran ne l'utilise pas,
+    // cf. `ProgrammeViewModel.toggleSession`), `GET`/`POST programme/export(/:fileName)`
+    // et `GET`/`POST programme/push` (génération/envoi de fichiers `.FIT` —
+    // hors périmètre de cet incrément, `ProgrammeViewModel.sendToWatch`
+    // affiche donc une erreur). `ProgrammeViewModel.load()` appelle aussi
+    // `GET programme/push` (statut d'envoi) en second, mais l'échec y est
+    // avalé (`catch` silencieux, statut secondaire) : l'écran se charge
+    // quand même.
 
     private func encodeProgrammeCurrent(query: [String: String]) throws -> Data {
         var date = Self.todayDateKey()
@@ -1345,6 +1356,118 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     private func programmeWeight(date: String) throws -> Double? {
         if let logged = try db.weightOn(date: date) { return logged }
         return (try db.settingValue(key: "weightKg")).flatMap(Double.init)
+    }
+
+    // MARK: - Programme — écriture (incrément L7b, miroir `activate`/`stop`/
+    // `toggleSession` de `ProgrammeController`, cf. en-tête de section plus
+    // haut).
+
+    /// `yyyy-MM-dd` valide — même `datePattern` que le reste du fichier,
+    /// factorisé ici car réutilisé trois fois par les routes d'écriture
+    /// (`startedOn`/`session.date`).
+    private static func isValidDateKey(_ s: String) -> Bool {
+        let range = NSRange(s.startIndex..<s.endIndex, in: s)
+        return datePattern.firstMatch(in: s, range: range) != nil
+    }
+
+    /// Miroir de `cleanDays` (TS, privée) — dédoublonné, filtré à 0...6, trié.
+    /// Distinct de `parseProgrammeDays` (plus haut) : celui-ci part d'un
+    /// tableau JSON déjà décodé (`activate`), `parseProgrammeDays` d'une
+    /// chaîne stockée (`"1,3,5"`, relue par `domainView`).
+    private static func cleanProgrammeDays(_ raw: [Int]) -> [Int] {
+        Array(Set(raw.filter { $0 >= 0 && $0 <= 6 })).sorted()
+    }
+
+    /// `POST api/programme/activate` — miroir de `ProgrammeController.activate` :
+    /// `programmeId` inconnu → erreur (`Unknown programme`) ; `startedOn` du
+    /// corps si valide, sinon aujourd'hui ; pour un programme `training`,
+    /// `days` doit couvrir au moins `sessionsPerWeek` jours (même message
+    /// d'erreur, pluriel inclus) ; plan reconstruit via `buildPlan` pour
+    /// `training` seulement (vide pour `nutrition`/`sleep`, comme le
+    /// serveur) ; écriture déléguée à `LocalDb.programmeActivate` (transaction
+    /// complète). Réponse = `current()` À AUJOURD'HUI (comme `return
+    /// this.current()` côté serveur — PAS `startedOn`).
+    private func encodeProgrammeActivate(body: Data?) throws -> Data {
+        guard let body else { throw LocalProgrammeValidationError(reason: "Corps de requête manquant") }
+        let req = try JSONDecoder().decode(LocalProgrammeActivateRequestDTO.self, from: body)
+        guard let programmeId = req.programmeId, let programme = ProgrammeCatalogue.programme(byId: programmeId) else {
+            throw LocalProgrammeValidationError(reason: "Unknown programme")
+        }
+        var startedOn = Self.todayDateKey()
+        if let param = req.startedOn, Self.isValidDateKey(param) { startedOn = param }
+
+        let needed = ProgrammeProgressEngine.sessionsPerWeek(programme)
+        let days = Self.cleanProgrammeDays(req.days ?? [])
+        if programme.kind == .training, days.count < needed {
+            throw LocalProgrammeValidationError(
+                reason: "Ce programme demande \(needed) jour\(needed > 1 ? "s" : "") par semaine")
+        }
+        let plan = programme.kind == .training
+            ? ProgrammeProgressEngine.buildPlan(programme: programme, startedOn: startedOn, days: days)
+            : []
+
+        try db.programmeActivate(
+            programmeId: programme.id, kind: programme.kind.rawValue, startedOn: startedOn, days: days,
+            plan: plan.map { (week: $0.week, session: $0.session, date: $0.date) })
+        return try encodeProgrammeCurrent(query: [:])
+    }
+
+    /// `POST api/programme/stop` — miroir de `ProgrammeController.stop` :
+    /// `kind` doit correspondre à un des trois domaines catalogués (comme
+    /// `DOMAINS.find`), sinon erreur (`Unknown kind`).
+    private func encodeProgrammeStop(body: Data?) throws -> Data {
+        guard let body else { throw LocalProgrammeValidationError(reason: "Corps de requête manquant") }
+        let req = try JSONDecoder().decode(LocalProgrammeStopRequestDTO.self, from: body)
+        guard let kindRaw = req.kind, ProgrammeCatalogue.domains.contains(where: { $0.kind.rawValue == kindRaw }) else {
+            throw LocalProgrammeValidationError(reason: "Unknown kind")
+        }
+        try db.programmeStop(kind: kindRaw)
+        return try encodeProgrammeCurrent(query: [:])
+    }
+
+    /// `POST api/programme/session` — miroir de `ProgrammeController.toggleSession` :
+    /// nécessite un programme `training` actif (`No active programme` sinon),
+    /// `week`/`session` non vides (`Missing session` sinon). `done === false`
+    /// → suppression du pointage. Sinon : `activityId` fourni doit être une
+    /// activité connue (`Unknown activity` sinon, date dérivée de
+    /// l'activité) ; à défaut, `date` du corps si `yyyy-MM-dd` valide, sinon
+    /// la date planifiée (`programme_plan`) ou aujourd'hui — même ordre de
+    /// repli que `activityDate ?? (body.date && DATE_RE.test(...) ? body.date
+    /// : plannedOn ?? todayKey())`.
+    private func encodeProgrammeSession(body: Data?) throws -> Data {
+        guard let body else { throw LocalProgrammeValidationError(reason: "Corps de requête manquant") }
+        let req = try JSONDecoder().decode(LocalProgrammeSessionRequestDTO.self, from: body)
+        guard let state = try db.programmeActiveState(kind: ProgrammeEngineKind.training.rawValue) else {
+            throw LocalProgrammeValidationError(reason: "No active programme")
+        }
+        guard let week = req.week, let session = req.session, !session.isEmpty else {
+            throw LocalProgrammeValidationError(reason: "Missing session")
+        }
+
+        if req.done == false {
+            try db.programmeSessionDelete(programmeId: state.programmeId, week: week, session: session)
+            return try encodeProgrammeCurrent(query: [:])
+        }
+
+        let activityId = req.activityId
+        var activityDate: String?
+        if let activityId {
+            activityDate = try db.programmeActivityDate(id: activityId)
+            guard activityDate != nil else {
+                throw LocalProgrammeValidationError(reason: "Unknown activity")
+            }
+        }
+        let date: String
+        if let activityDate {
+            date = activityDate
+        } else if let bodyDate = req.date, Self.isValidDateKey(bodyDate) {
+            date = bodyDate
+        } else {
+            date = try db.programmePlannedOn(programmeId: state.programmeId, week: week, session: session) ?? Self.todayDateKey()
+        }
+
+        try db.programmeSessionUpsert(programmeId: state.programmeId, week: week, session: session, date: date, activityId: activityId)
+        return try encodeProgrammeCurrent(query: [:])
     }
 }
 
@@ -1783,6 +1906,41 @@ private struct LocalProgrammeDomainDTO: Encodable {
             try container.encode(d, forKey: .detail)
         }
     }
+}
+
+/// `POST api/programme/activate`/`stop`/`session` sur une entrée invalide, ou
+/// `session` sans programme `training` actif — miroir du `BadRequestException`
+/// côté Nest (`ProgrammeController`). Message diagnostique, affiché tel quel
+/// par `ProgrammeViewModel.mutate` (`Self.message(for:)`).
+struct LocalProgrammeValidationError: Error, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
+}
+
+// MARK: - DTO de décodage JSON — corps `POST api/programme/activate`/`stop`/
+// `session` (incrément L7b) — mêmes clés que `ProgrammeActivateRequest`/
+// `ProgrammeStopRequest`/`ProgrammeSessionRequest`
+// (`Pulse/Screens/Programme/ProgrammeModels.swift`), tous les champs restent
+// optionnels ici (même si l'écran natif les envoie toujours) pour décoder
+// fidèlement le contrat serveur, qui les traite comme tels
+// (`body.programmeId?`, `body.days?`…).
+
+private struct LocalProgrammeActivateRequestDTO: Decodable {
+    let programmeId: String?
+    let startedOn: String?
+    let days: [Int]?
+}
+
+private struct LocalProgrammeStopRequestDTO: Decodable {
+    let kind: String?
+}
+
+private struct LocalProgrammeSessionRequestDTO: Decodable {
+    let week: Int?
+    let session: String?
+    let date: String?
+    let done: Bool?
+    let activityId: Int?
 }
 
 // MARK: - DTO d'encodage JSON — `GET/POST/DELETE api/weight` (incrément L5)

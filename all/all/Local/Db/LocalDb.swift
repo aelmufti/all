@@ -1983,16 +1983,104 @@ final class LocalDb {
         return result
     }
 
+    // MARK: - Programme — écriture (incrément L7b, miroir `activate`/`stop`/
+    // `toggleSession` de `programme.controller.ts`, appelées depuis
+    // `RealLocalPulseBackend`).
+
+    /// Miroir de `activate()` (TS) — transaction complète : purge
+    /// `programme_done` si le programme "bouge" (date de départ ou jours
+    /// différents de l'état précédent, même comparaison que le serveur —
+    /// `previous.days ?? ''` vs `days.join(',')`), désactive tout autre
+    /// programme du même `kind`, upsert l'état actif (`ON CONFLICT` sur
+    /// `programme_id`, comme le serveur), remplace entièrement le plan
+    /// (`programme_plan`, purge puis réinsertion — `plan` vide pour un
+    /// programme non `training`, cf. appelant).
+    func programmeActivate(
+        programmeId: String, kind: String, startedOn: String, days: [Int],
+        plan: [(week: Int, session: String, date: String)]
+    ) throws {
+        try db.transaction {
+            var previous: (startedOn: String, days: String?)?
+            try db.run(
+                "SELECT started_on, days FROM programme_state WHERE programme_id = ?",
+                [.text(programmeId)]) { r in
+                guard let started = r.text(0) else { return }
+                previous = (started, r.text(1))
+            }
+            let daysJoined = days.map(String.init).joined(separator: ",")
+            let moved = previous.map { $0.startedOn != startedOn || ($0.days ?? "") != daysJoined } ?? false
+            if moved {
+                try db.run("DELETE FROM programme_done WHERE programme_id = ?", [.text(programmeId)])
+            }
+            try db.run("UPDATE programme_state SET active = 0 WHERE kind = ?", [.text(kind)])
+            try db.run(
+                """
+                INSERT INTO programme_state (programme_id, kind, started_on, active, days)
+                VALUES (?, ?, ?, 1, ?)
+                ON CONFLICT(programme_id) DO UPDATE SET kind = excluded.kind, started_on = excluded.started_on,
+                                                         active = 1, days = excluded.days
+                """,
+                [.text(programmeId), .text(kind), .text(startedOn), .text(daysJoined)])
+            try db.run("DELETE FROM programme_plan WHERE programme_id = ?", [.text(programmeId)])
+            for row in plan {
+                try db.run(
+                    "INSERT INTO programme_plan (programme_id, week, session, date) VALUES (?, ?, ?, ?)",
+                    [.text(programmeId), .int(row.week), .text(row.session), .text(row.date)])
+            }
+        }
+    }
+
+    /// Miroir de `stop()` (TS).
+    func programmeStop(kind: String) throws {
+        try db.run("UPDATE programme_state SET active = 0 WHERE kind = ?", [.text(kind)])
+    }
+
+    /// Miroir de la branche `body.done === false` de `toggleSession()` (TS).
+    func programmeSessionDelete(programmeId: String, week: Int, session: String) throws {
+        try db.run(
+            "DELETE FROM programme_done WHERE programme_id = ? AND week = ? AND session = ?",
+            [.text(programmeId), .int(week), .text(session)])
+    }
+
+    /// Miroir de l'`INSERT ... ON CONFLICT` final de `toggleSession()` (TS).
+    func programmeSessionUpsert(programmeId: String, week: Int, session: String, date: String, activityId: Int?) throws {
+        try db.run(
+            """
+            INSERT INTO programme_done (programme_id, week, session, date, activity_id)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(programme_id, week, session) DO UPDATE SET date = excluded.date, activity_id = excluded.activity_id
+            """,
+            [.text(programmeId), .int(week), .text(session), .text(date), sqliteOptional(activityId.map(Double.init))])
+    }
+
+    /// Miroir de `activityDate` (TS, privée) — jour calendaire
+    /// (`substr(start_time, 1, 10)`) de l'activité `id`, `nil` si inconnue.
+    func programmeActivityDate(id: Int) throws -> String? {
+        var result: String?
+        try db.run(
+            "SELECT substr(start_time, 1, 10) FROM activities WHERE id = ?",
+            [.int(id)]) { r in result = r.text(0) }
+        return result
+    }
+
+    /// Miroir de `plannedOn` (TS, privée).
+    func programmePlannedOn(programmeId: String, week: Int, session: String) throws -> String? {
+        var result: String?
+        try db.run(
+            "SELECT date FROM programme_plan WHERE programme_id = ? AND week = ? AND session = ?",
+            [.text(programmeId), .int(week), .text(session)]) { r in result = r.text(0) }
+        return result
+    }
+
     // MARK: - Programme — écriture de TEST seulement (incrément L7a)
     //
-    // AUCUNE route HTTP locale n'appelle ces trois méthodes (`activate`/`stop`/
-    // `session` restent `LocalPulseUnavailableError`, cf. `RealLocalPulseBackend`) :
-    // elles existent uniquement pour permettre à `ProgrammeReadLocalTests` de
-    // seeder un programme actif directement dans `programme_state`/
-    // `programme_plan`/`programme_done`, sans passer par une route
-    // d'activation qui n'existe pas encore — même esprit que `storeActivity`
-    // (écrite par l'ingestion, jamais par une route HTTP). Préfixe `debug`
-    // pour signaler l'intention : à ne PAS appeler depuis `RealLocalPulseBackend`.
+    // `ProgrammeReadLocalTests` (lecture) continue de seeder un programme actif
+    // via ces trois méthodes plutôt que par `programmeActivate` (elle veut
+    // poser un état ARBITRAIRE — plan/pointages disjoints d'un vrai calcul de
+    // `buildPlan` — pour isoler la lecture du moteur d'activation) — même
+    // esprit que `storeActivity` (écrite par l'ingestion, jamais par une route
+    // HTTP). Préfixe `debug` pour signaler l'intention : ne PAS appeler depuis
+    // `RealLocalPulseBackend` (qui utilise les méthodes ci-dessus).
 
     func debugActivateProgramme(programmeId: String, kind: String, startedOn: String, days: String?) throws {
         try db.run(
