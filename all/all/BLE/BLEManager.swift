@@ -94,6 +94,14 @@ final class BLEManager: NSObject, ObservableObject {
     /// nouveau lien (cf. `activateProtocolIfPossible`).
     private var wantsRealtime = false
 
+    /// Lecture seule de l'intention de mesure temps réel courante — consommée
+    /// par `HomeViewModel` en mode Téléphone (`mapPhoneLiveHeartRate`) pour
+    /// refléter l'état « activé » du bouton Accueil sans dupliquer cet état
+    /// côté vue-modèle : `BLEManager` reste seul maître de `wantsRealtime`,
+    /// y compris quand `allApp.swift` l'active/désactive au premier/arrière-
+    /// plan, indépendamment de tout écran.
+    var isRealtimeWanted: Bool { wantsRealtime }
+
     // MARK: - Chemin GFDI V2 (Micro-Link)
     //
     // Caractéristiques accumulées au fil des découvertes CoreBluetooth (une par
@@ -117,6 +125,19 @@ final class BLEManager: NSObject, ObservableObject {
     /// `REALTIME_*` n'est enregistré ici, seulement construite prête à
     /// recevoir des toggles utilisateur (cf. `RealtimeMetricsView`).
     @Published private(set) var realtimeSession: RealtimeSession?
+    /// FC en direct exposée pour du code hors de la vue temps réel — mode
+    /// Téléphone (`HomeViewModel.mapPhoneLiveHeartRate`, pas de serveur à
+    /// interroger pour `api/live/hr`). Mise à jour dans
+    /// `handleRealtimeHeartRate`, INDÉPENDAMMENT du push Pulse (qui continue
+    /// de consommer la même lecture juste en dessous) : les deux modes
+    /// partagent la même mesure, l'un par abonnement Combine local, l'autre
+    /// par POST réseau (pulse/both). Remis à `nil` par `stopRealtime()` et
+    /// `resetGfdiDiscoveryState()` (cf. leurs commentaires) plutôt que
+    /// conservé périmé — le choix le plus simple qui ne mente jamais côté
+    /// UI ; pas de notion de fraîcheur/péremption ici, contrairement au DTO
+    /// réseau (`stale`), c'est `HomeViewModel.mapPhoneLiveHeartRate` qui la
+    /// dérive à l'affichage.
+    @Published private(set) var liveHeartRate: LiveHeartRate.Reading?
     /// Abonnement à `GarminSession.state` — sert uniquement à savoir **quand**
     /// requalifier un lien en cours de revalidation comme réellement exploitable
     /// (cf. `checkLinkLivenessIfRevalidating`). Ne duplique aucune logique
@@ -376,6 +397,10 @@ final class BLEManager: NSObject, ObservableObject {
         wantsRealtime = false
         realtimeSession?.disableKnownMetrics()
         liveHrPusher.push(.off)
+        // Mode Téléphone : plus de mesure en cours, ne pas laisser un ancien
+        // bpm s'afficher comme « en direct » côté Accueil alors que la
+        // diffusion est coupée (cf. commentaire de la propriété).
+        liveHeartRate = nil
         log.info("Temps réel off (métriques connues)")
     }
 
@@ -396,14 +421,18 @@ final class BLEManager: NSObject, ObservableObject {
     /// journalisé (règle héritée de Live-1a).
     private func handleRealtimeHeartRate(_ heartRate: RealtimeHeartRate?) {
         guard wantsRealtime, let heartRate, heartRate.isValid else { return }
-        liveHrPusher.push(LiveHeartRate.Reading(
+        let reading = LiveHeartRate.Reading(
             enabled: true,
             broadcasting: true,
             heartRate: Int(heartRate.heartRate),
             measuredAt: Date(),
             stale: false,
             hint: nil
-        ))
+        )
+        // Exposé pour le mode Téléphone (`HomeViewModel`, cf. commentaire de
+        // la propriété) — INDÉPENDANT du push Pulse ci-dessous.
+        liveHeartRate = reading
+        liveHrPusher.push(reading)
     }
 
     private func startScan() {
@@ -433,6 +462,10 @@ final class BLEManager: NSObject, ObservableObject {
         garminCommunicator = nil
         garminSession = nil
         realtimeSession = nil
+        // Le lien précédent est abandonné : un ancien bpm n'a plus de raison
+        // d'être considéré « en direct » sur le lien à venir (cf. commentaire
+        // de la propriété).
+        liveHeartRate = nil
         garminSessionStateSubscription?.cancel()
         garminSessionStateSubscription = nil
         realtimeHeartRateSubscription?.cancel()

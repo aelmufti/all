@@ -14,6 +14,7 @@
 //  Angular).
 //
 
+import Combine
 import Foundation
 import Observation
 
@@ -138,8 +139,15 @@ final class HomeViewModel {
 
     private let client: PulseAPIClient
 
+    /// Abonnement à `BLEManager.$liveHeartRate` (mode Téléphone) — cf.
+    /// `subscribeToPhoneLiveHeartRate`. Annulé automatiquement à la
+    /// désallocation du view-model (une instance par apparition de
+    /// `HomeView`, `@State private var viewModel = HomeViewModel()`).
+    private var liveHeartRateSubscription: AnyCancellable?
+
     init(client: PulseAPIClient = .shared) {
         self.client = client
+        subscribeToPhoneLiveHeartRate()
     }
 
     // MARK: - Chargement
@@ -229,28 +237,105 @@ final class HomeViewModel {
 
     /// FC en direct — appelée au chargement puis en boucle par la vue
     /// (`.task` annulée automatiquement à la disparition de l'écran).
+    ///
+    /// Mode Téléphone : `api/live/hr` n'existe pas côté backend local (pas de
+    /// serveur à interroger en arrière-plan) — la FC en direct vient
+    /// directement de `BLEManager.liveHeartRate`, déjà alimentée par la FC
+    /// GFDI temps réel (`BLEManager.handleRealtimeHeartRate`), comme
+    /// l'écriture du poids (`HealthViewModel.saveWeight`) bascule sur
+    /// `BLEManager` plutôt que le socle réseau. Les mises à jour ~1×/s
+    /// arrivent par l'abonnement Combine (`subscribeToPhoneLiveHeartRate`) ;
+    /// cet appel rafraîchit juste la valeur courante tout de suite (chargement
+    /// initial, ou entre deux émissions).
     func refreshLive() async {
-        do {
-            live = try await client.get("api/live/hr")
-        } catch {
-            live = nil
+        guard StorageModeStore.current == .phone else {
+            do {
+                live = try await client.get("api/live/hr")
+            } catch {
+                live = nil
+            }
+            return
         }
+        applyPhoneLiveHeartRate(BLEManager.shared.liveHeartRate)
     }
 
     func startLive() async {
-        do {
-            live = try await client.post("api/live/hr/start")
-        } catch {
-            // Best-effort : un échec de démarrage laisse simplement le dernier état connu.
+        guard StorageModeStore.current == .phone else {
+            do {
+                live = try await client.post("api/live/hr/start")
+            } catch {
+                // Best-effort : un échec de démarrage laisse simplement le dernier état connu.
+            }
+            return
         }
+        BLEManager.shared.startRealtime()
+        // `wantsRealtime` passe à vrai tout de suite (synchrone) : refléter
+        // l'état « activé » sans attendre la première trame GFDI (~1 s), pour
+        // que le bouton change d'état immédiatement.
+        applyPhoneLiveHeartRate(BLEManager.shared.liveHeartRate)
     }
 
     func stopLive() async {
-        do {
-            live = try await client.post("api/live/hr/stop")
-        } catch {
-            // idem
+        guard StorageModeStore.current == .phone else {
+            do {
+                live = try await client.post("api/live/hr/stop")
+            } catch {
+                // idem
+            }
+            return
         }
+        BLEManager.shared.stopRealtime()
+        applyPhoneLiveHeartRate(BLEManager.shared.liveHeartRate)
+    }
+
+    /// Abonnement Combine à `BLEManager.$liveHeartRate` (mode Téléphone) —
+    /// mis en place une fois à l'init, filtré par mode à CHAQUE émission
+    /// (jamais capturé, même règle que `StorageModeStore.current` ailleurs
+    /// dans le socle) : permet de basculer de mode en cours de session sans
+    /// reconstruire le view-model. `sink` n'est pas isolé au main actor
+    /// statiquement (Combine ne le garantit pas), bien que `BLEManager`
+    /// publie déjà depuis le thread principal (délégué CoreBluetooth sur la
+    /// queue `nil` = main) — on saute explicitement sur le main actor plutôt
+    /// que de s'appuyer sur ce détail d'implémentation.
+    private func subscribeToPhoneLiveHeartRate() {
+        liveHeartRateSubscription = BLEManager.shared.$liveHeartRate
+            .sink { [weak self] reading in
+                Task { @MainActor in
+                    self?.applyPhoneLiveHeartRate(reading)
+                }
+            }
+    }
+
+    private func applyPhoneLiveHeartRate(_ reading: LiveHeartRate.Reading?) {
+        guard StorageModeStore.current == .phone else { return }
+        live = Self.mapPhoneLiveHeartRate(
+            reading: reading,
+            connected: BLEManager.shared.connectionState == .connected,
+            wantsRealtime: BLEManager.shared.isRealtimeWanted
+        )
+    }
+
+    /// Mapping PUR `BLEManager.liveHeartRate` (+ état du lien) → `HomeLiveHeartRate`
+    /// — même forme que la route serveur `api/live/hr`, jamais interrogée en
+    /// mode Téléphone. Extrait en fonction statique pure pour rester testable
+    /// sans BLE réel (cf. `allTests`). `broadcasting` reflète la présence
+    /// d'un bpm valide (`BLEManager` ne publie que des lectures valides,
+    /// `RealtimeHeartRate.isValid`) ; `stale` reste `false` — pas de notion de
+    /// péremption côté BLE local, contrairement au TTL serveur du DTO réseau.
+    nonisolated static func mapPhoneLiveHeartRate(
+        reading: LiveHeartRate.Reading?, connected: Bool, wantsRealtime: Bool
+    ) -> HomeLiveHeartRate {
+        let bpm = reading?.heartRate
+        return HomeLiveHeartRate(
+            reachable: connected,
+            detail: nil,
+            enabled: wantsRealtime,
+            broadcasting: bpm != nil,
+            heartRate: bpm,
+            measuredAt: reading?.measuredAt.map { isoFormatter.string(from: $0) },
+            stale: false,
+            hint: nil
+        )
     }
 
     // MARK: - « Maintenant »

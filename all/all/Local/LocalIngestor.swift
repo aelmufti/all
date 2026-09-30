@@ -15,6 +15,15 @@
 import Foundation
 import os
 
+/// Notifié sur le main actor par `LocalIngestor.ingestIfNeeded()` quand le
+/// rejeu du spool a réellement inséré quelque chose (pas seulement des
+/// doublons/skips/erreurs) — cf. `.reloadsOnLocalDataChange`
+/// (`Pulse/Core/LocalDataRefresh.swift`), consommé par les écrans de données
+/// pour se rafraîchir sans attendre un redémarrage de l'app.
+extension Notification.Name {
+    static let allLocalDataDidChange = Notification.Name("allLocalDataDidChange")
+}
+
 enum LocalIngestKind: Equatable {
     case wellness
     case sleep
@@ -89,6 +98,24 @@ enum LocalIngestor {
         file.messages.first { $0.globalMessageNumber == FitProfile.mesgFileId }?.double(0)
     }
 
+    /// Vrai si AU MOINS UN résultat correspond à une insertion réelle
+    /// (wellness/sommeil/activité nouvellement écrits) — décide si les écrans
+    /// doivent être notifiés (`.allLocalDataDidChange`). `.duplicate`/
+    /// `.skipped`/`.error` ne changent rien à ce que lit un écran, donc ne
+    /// déclenchent jamais de rafraîchissement. Fonction PURE (aucune E/S),
+    /// extraite pour être testable sans `SpoolStore`/`LocalDb` réels — cf.
+    /// `allTests/LocalIngestorTests.swift`.
+    static func hasNewInsertion(_ results: [LocalIngestResult]) -> Bool {
+        results.contains { result in
+            switch result.kind {
+            case .wellness, .sleep, .activity:
+                return true
+            case .duplicate, .skipped, .error:
+                return false
+            }
+        }
+    }
+
     /// Rejoue TOUT le spool existant dans les tables locales (§4 de la tâche
     /// d'incrément : « spool → tables »). Ne touche JAMAIS au journal du
     /// spool (`SpoolStore` reste seul maître de `acquired`/`delivered`/
@@ -141,6 +168,13 @@ enum LocalIngestor {
                 log.info("ingestIfNeeded: \(results.count, privacy: .public) entrée(s) du spool rejouée(s), 0 erreur")
             } else {
                 log.error("ingestIfNeeded: \(errors.count, privacy: .public)/\(results.count, privacy: .public) entrée(s) en erreur")
+            }
+            // N'avertir les écrans QUE si quelque chose a réellement changé —
+            // éviter un rechargement pour rien à chaque rejeu (idempotent la
+            // plupart du temps, tout le spool étant déjà dans `imported_files`).
+            guard hasNewInsertion(results) else { return }
+            await MainActor.run {
+                NotificationCenter.default.post(name: .allLocalDataDidChange, object: nil)
             }
         }
     }

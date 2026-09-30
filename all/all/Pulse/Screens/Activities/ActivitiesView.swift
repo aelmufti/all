@@ -54,6 +54,11 @@ struct ActivitiesView: View {
                     ActivityDetailView(activityId: id)
                 }
         }
+        // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
+        // ouvert (cf. `LocalIngestor.ingestIfNeeded`) : même rechargement
+        // complet que le pull-to-refresh (`.refreshable`), pas de notion de
+        // « jour courant » ici (liste, pas un écran par jour).
+        .reloadsOnLocalDataChange { await vm.load() }
     }
 
     @ViewBuilder

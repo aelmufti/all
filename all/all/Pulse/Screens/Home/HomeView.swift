@@ -91,6 +91,11 @@ struct HomeView: View {
         // Bascule de jour : à minuit local et au retour premier plan, recharge
         // « aujourd'hui » (l'Accueil est toujours sur le jour courant).
         .refreshesAtDayChange { await viewModel.load() }
+        // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
+        // ouvert (cf. `LocalIngestor.ingestIfNeeded`) : mêmes données que
+        // `.refreshesAtDayChange`, mais déclenché par l'arrivée réelle d'un
+        // nouveau fichier plutôt que par le calendrier.
+        .reloadsOnLocalDataChange { await viewModel.load() }
     }
 
     /// En-tête en contenu : titre « Accueil » 24pt + roue crantée (Paramètres).

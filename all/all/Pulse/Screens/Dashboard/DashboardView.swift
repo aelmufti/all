@@ -41,6 +41,11 @@ struct DashboardView: View {
             }
         }
         .task { await viewModel.loadIfNeeded() }
+        // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
+        // ouvert (cf. `LocalIngestor.ingestIfNeeded`) : pas de notion de
+        // « jour courant » ici (période glissante depuis aujourd'hui), donc
+        // un rechargement inconditionnel comme `retry()`/`selectPeriod`.
+        .reloadsOnLocalDataChange { await viewModel.load() }
     }
 
     private var overview: some View {

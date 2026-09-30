@@ -52,6 +52,10 @@ struct HealthView: View {
         // Bascule de jour : à minuit local et au retour premier plan, avance au
         // nouveau jour si l'utilisateur est sur le dernier jour connu.
         .refreshesAtDayChange { await viewModel.reloadForNewDay() }
+        // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
+        // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
+        // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
+        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
     }
 
     private func loaded(day: WellnessDayDetail) -> some View {

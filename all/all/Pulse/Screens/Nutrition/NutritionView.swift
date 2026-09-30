@@ -51,6 +51,10 @@ struct NutritionView: View {
         // Bascule de jour à minuit local + retour premier plan (avance au
         // nouveau jour si l'utilisateur était sur aujourd'hui).
         .refreshesAtDayChange { await viewModel.reloadForNewDay() }
+        // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
+        // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
+        // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
+        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
         .onChange(of: addTrigger) { _, _ in
             viewModel.openAddSheet()
         }
