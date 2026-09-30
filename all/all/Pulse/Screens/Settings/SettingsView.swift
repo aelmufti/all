@@ -26,13 +26,17 @@
 //  Stockage (incrément L0, `docs/stockage-local.md`) : `SettingsStorageSection`
 //  est la vraie colonne vertébrale de l'écran depuis cet incrément — en mode
 //  Téléphone, tout ce qui dépend VRAIMENT d'un serveur (source de synchro
-//  Pulse, statut, Programme, compte/déconnexion) n'a plus de sens et
-//  disparaît ; Stockage, Apparence, l'accès à la Montre (diagnostic BLE local)
-//  et, depuis L6, Profil (servi par `RealLocalPulseBackend`, `GET`/`PUT
-//  api/profile`) restent joignables — cf. `SettingsWatchOnlySection`,
-//  `SettingsProfileSection` et `SettingsViewModel.load()` (court-circuite
-//  UNIQUEMENT le chargement source/statut/inventaire dans ce mode, jamais le
-//  profil, pour ne jamais coincer l'utilisateur derrière un `ErrorView`).
+//  Pulse, statut, compte/déconnexion) n'a plus de sens et disparaît ;
+//  Stockage, Apparence, l'accès à la Montre (diagnostic BLE local) et, depuis
+//  L6, Profil (servi par `RealLocalPulseBackend`, `GET`/`PUT api/profile`)
+//  restent joignables — cf. `SettingsWatchOnlySection`, `SettingsProfileSection`
+//  et `SettingsViewModel.load()` (court-circuite UNIQUEMENT le chargement
+//  source/statut/inventaire dans ce mode, jamais le profil, pour ne jamais
+//  coincer l'utilisateur derrière un `ErrorView`). Programme a rejoint cette
+//  liste depuis L7a (`GET api/programme` servi en lecture, cf.
+//  `RealLocalPulseBackend`) : les actions d'écriture de l'écran (activer/
+//  arrêter/cocher/envoyer) restent différées et lèvent une erreur si on les
+//  déclenche en mode Téléphone.
 //
 
 import SwiftUI
@@ -82,6 +86,15 @@ struct SettingsView: View {
                 SettingsStorageSection()
                 SettingsAppearanceSection()
                 if storageMode.mode == .phone {
+                    // Démasqué depuis l'incrément L7a (`docs/stockage-local.md`) :
+                    // `GET api/programme` est désormais servi par
+                    // `RealLocalPulseBackend` (lecture seule) — ouvrir
+                    // `ProgrammeView` en mode Téléphone charge donc les trois
+                    // domaines pour de vrai. Les actions d'écriture
+                    // (activer/arrêter/cocher/envoyer) restent différées :
+                    // elles lèvent `LocalPulseUnavailableError`, affichée
+                    // comme n'importe quelle erreur par l'écran.
+                    SettingsProgrammeSection(onOpen: { showProgramme = true })
                     SettingsWatchOnlySection(onWatch: { showWatch = true })
                     SettingsProfileSection(viewModel: viewModel)
                 } else {

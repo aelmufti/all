@@ -193,6 +193,16 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("PUT", "profile"):
             return try encodeProfileUpdate(body: body)
 
+        // MARK: Programme (incrément L7a, LECTURE SEULE — miroir `ProgrammeController.current`/
+        // `domainView`). `activate`/`stop`/`session`/`candidates`/`export`/`push`
+        // ne sont PAS servies : leurs chemins ("programme/activate"…) ne
+        // matchent aucun `case` ci-dessous, retombent donc sur le `default`
+        // (`LocalPulseUnavailableError`) — cf. en-tête de section dédiée plus
+        // bas et rapport d'incrément.
+
+        case ("GET", "programme"):
+            return try encodeProgrammeCurrent(query: query)
+
         case ("GET", "weight"):
             return try encodeWeightList(query: query)
 
@@ -1135,6 +1145,207 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         guard let raw, raw.isFinite, raw > 0, raw <= 2000 else { return nil }
         return (raw * 10).rounded() / 10
     }
+
+    // MARK: - Programme (incrément L7a, LECTURE SEULE — miroir `ProgrammeController.current`/
+    // `domainView`, moteur dans `Local/Programme/` : `ProgrammeCatalogue.swift`
+    // (catalogue statique), `ProgrammeProgress.swift` (rapprochement séances/
+    // activités, avancement alimentation), `ProgrammeSleep.swift` (analyse de
+    // régularité du sommeil). `ProgrammeConstraints.swift` porté mais NON câblé
+    // (cf. son en-tête — sert seulement à `nutrition.controller.ts`, jamais à
+    // cette route).
+    //
+    // Portée : les TROIS domaines (`training`/`nutrition`/`sleep`) sont
+    // FIDÈLES — aucune dégradation nécessaire, `checkDay`/`analyseSleep`
+    // (alimentation/sommeil) ne dépendent d'AUCUN moteur non porté (ni
+    // `Local/NutritionTarget.swift`, ni un cadre de programme quelconque),
+    // juste de `food_log`/`weight_log`/`settings`/`wellness_sleep`/`activities`,
+    // déjà tous disponibles localement. `programme_state`/`programme_plan`/
+    // `programme_done` (ajoutées cet incrément, `LocalDb.swift`) sont TOUJOURS
+    // vides tant qu'aucune route d'activation locale n'existe (cf. plus bas) :
+    // `domainView` retombe alors honnêtement sur `active: null, detail: null`
+    // pour les trois domaines — MÊME comportement que le serveur avec une base
+    // vide, rien de fabriqué.
+    //
+    // Routes d'écriture DÉLIBÉRÉMENT DIFFÉRÉES (déclenchées par une action
+    // utilisateur, pas au chargement de l'écran) : `POST programme/activate`,
+    // `POST programme/stop`, `POST programme/session`, `GET programme/candidates`,
+    // `GET`/`POST programme/export(/:fileName)`, `GET`/`POST programme/push` —
+    // aucun de ces chemins ne matche `case ("GET", "programme")` ci-dessus,
+    // ils retombent tous sur le `default` (`LocalPulseUnavailableError`).
+    // Appuyer sur Activer/Arrêter/Cocher/Envoyer en mode Téléphone affiche donc
+    // une erreur — attendu pour cet incrément, cf. rapport. `ProgrammeViewModel.load()`
+    // appelle aussi `GET programme/push` (statut d'envoi) en second, mais
+    // l'échec y est avalé (`catch` silencieux, statut secondaire) : l'écran se
+    // charge quand même.
+
+    private func encodeProgrammeCurrent(query: [String: String]) throws -> Data {
+        var date = Self.todayDateKey()
+        if let param = query["date"] {
+            let range = NSRange(param.startIndex..<param.endIndex, in: param)
+            if Self.datePattern.firstMatch(in: param, range: range) != nil { date = param }
+        }
+        let domains = try ProgrammeCatalogue.domains.map { try programmeDomainView(kind: $0.kind, date: date) }
+        return try JSONEncoder().encode(LocalProgrammeCurrentDTO(date: date, domains: domains))
+    }
+
+    /// Miroir de `domainView` (TS, privée).
+    private func programmeDomainView(kind: ProgrammeEngineKind, date: String) throws -> LocalProgrammeDomainDTO {
+        let domain = ProgrammeCatalogue.domains.first { $0.kind == kind }!
+        let choices = ProgrammeCatalogue.programmes.filter { $0.kind == kind }.map { p in
+            LocalProgrammeChoiceDTO(
+                id: p.id, name: p.name, goal: p.goal, source: p.source, weeks: p.weeks.count,
+                rules: ProgrammeCatalogue.ruleCount(p), perWeek: ProgrammeProgressEngine.sessionsPerWeek(p))
+        }
+        guard let state = try db.programmeActiveState(kind: kind.rawValue),
+              let programme = ProgrammeCatalogue.programme(byId: state.programmeId)
+        else {
+            return LocalProgrammeDomainDTO(
+                kind: kind.rawValue, label: domain.label, drives: domain.drives, hint: domain.hint,
+                choices: choices, active: nil, detail: nil)
+        }
+        let days = Self.parseProgrammeDays(state.days)
+        let active = LocalProgrammeActiveDTO(
+            programmeId: programme.id, startedOn: state.startedOn, name: programme.name, goal: programme.goal,
+            source: programme.source, week: ProgrammeProgressEngine.weekOf(startedOn: state.startedOn, date: date),
+            weeks: programme.weeks.count, days: days, perWeek: ProgrammeProgressEngine.sessionsPerWeek(programme),
+            notes: programme.notes)
+        let detail = try programmeDetail(programme: programme, state: state, days: days, date: date)
+        return LocalProgrammeDomainDTO(
+            kind: kind.rawValue, label: domain.label, drives: domain.drives, hint: domain.hint,
+            choices: choices, active: active, detail: detail)
+    }
+
+    /// Miroir de `parseDays`/`cleanDays` (TS, privées) réunis : `programme_state.days`
+    /// (`"1,3,5"`) → jours valides (0...6), dédupliqués, triés.
+    private static func parseProgrammeDays(_ raw: String?) -> [Int] {
+        guard let raw, !raw.isEmpty else { return [] }
+        let numbers = raw.split(separator: ",").compactMap { Int($0) }
+        return Array(Set(numbers.filter { $0 >= 0 && $0 <= 6 })).sorted()
+    }
+
+    /// Miroir de `detailFor` (TS, privée) — bascule selon `programme.kind`.
+    private func programmeDetail(
+        programme: ProgrammeEngineProgramme, state: LocalDb.ProgrammeStateRow, days: [Int], date: String
+    ) throws -> LocalProgrammeDetailDTO {
+        switch programme.kind {
+        case .training:
+            return .training(try programmeTrainingDetail(programme: programme, state: state, date: date))
+        case .sleep:
+            return .sleep(try programmeSleepDetail(programme: programme, days: days, date: date))
+        case .nutrition:
+            return .nutrition(try programmeNutritionDetail(programme: programme, date: date))
+        }
+    }
+
+    private func programmeTrainingDetail(
+        programme: ProgrammeEngineProgramme, state: LocalDb.ProgrammeStateRow, date: String
+    ) throws -> LocalProgrammeTrainingDetailDTO {
+        let plan = try db.programmePlanRows(programmeId: programme.id).map {
+            ProgrammeEnginePlannedSession(week: $0.week, session: $0.session, date: $0.date)
+        }
+        let manual = try db.programmeDoneRows(programmeId: programme.id).map {
+            ProgrammeEngineDoneSession(week: $0.week, session: $0.session, date: $0.date, activityId: $0.activityId, manual: true)
+        }
+        let activities = try db.programmeActivitiesSince(state.startedOn).map {
+            ProgrammeEngineActivityHit(id: $0.id, date: $0.date, sport: $0.sport, subSport: $0.subSport, durationS: $0.durationS)
+        }
+        let sessions = ProgrammeProgressEngine.matchSessions(
+            programme: programme, startedOn: state.startedOn, activities: activities, manual: manual, plan: plan, today: date)
+        let sessionDTOs = sessions.map(Self.programmeSessionProgressDTO)
+        return LocalProgrammeTrainingDetailDTO(
+            focus: programme.weeks.map { LocalProgrammeWeekFocusDTO(index: $0.index, focus: $0.focus) },
+            sessions: sessionDTOs,
+            done: sessions.filter { $0.done }.count,
+            total: sessions.count,
+            missed: sessions.filter { $0.status == .missed }.count,
+            today: sessions.filter { $0.plannedOn == date }.map(Self.programmeSessionProgressDTO))
+    }
+
+    private static func programmeSessionProgressDTO(_ s: ProgrammeEngineSessionProgress) -> LocalProgrammeSessionProgressDTO {
+        LocalProgrammeSessionProgressDTO(
+            week: s.week,
+            session: LocalProgrammeSessionDTO(
+                key: s.session.key, name: s.session.name, sport: s.session.sport, subSport: s.session.subSport,
+                minMinutes: s.session.minMinutes,
+                items: s.session.items.map {
+                    LocalProgrammeTrainingItemDTO(name: $0.name, prescription: $0.prescription, note: $0.note)
+                }),
+            plannedOn: s.plannedOn, status: s.status.rawValue, done: s.done, date: s.date, activityId: s.activityId, manual: s.manual)
+    }
+
+    private func programmeSleepDetail(
+        programme: ProgrammeEngineProgramme, days: [Int], date: String
+    ) throws -> LocalProgrammeSleepDetailDTO {
+        let nights = try db.programmeNightsUpTo(date: date, limit: ProgrammeSleepEngine.windowNights).map {
+            ProgrammeEngineSleepNightRow(date: $0.date, startTs: $0.startTs, endTs: $0.endTs, sleepS: $0.sleepS, phases: $0.phases)
+        }
+        let workDays = days.isEmpty ? [1, 2, 3, 4, 5] : days
+        let report = ProgrammeSleepEngine.analyseSleep(
+            programme: programme, rows: nights, workDays: workDays, today: date,
+            offsetOf: { LocalDb.localOffsetSeconds(forDate: $0) })
+        return Self.programmeSleepReportDTO(report)
+    }
+
+    private static func programmeSleepReportDTO(_ r: ProgrammeEngineSleepReport) -> LocalProgrammeSleepDetailDTO {
+        LocalProgrammeSleepDetailDTO(
+            from: r.from, to: r.to, nights: r.nights, spanDays: r.spanDays, staleDays: r.staleDays,
+            workNights: r.workNights, freeNights: r.freeNights, pairs: r.pairs,
+            axis: r.axis.map {
+                LocalProgrammeSleepAxisDTO(onsetMean: $0.onsetMean, onsetSd: $0.onsetSd, wakeMean: $0.wakeMean, wakeSd: $0.wakeSd)
+            },
+            strip: r.strip.map {
+                LocalProgrammeNightPointDTO(date: $0.date, weekday: $0.weekday, workDay: $0.workDay, onset: $0.onset, wake: $0.wake, sleepMin: $0.sleepMin)
+            },
+            metrics: r.metrics.map { m in
+                LocalProgrammeSleepMetricDTO(
+                    key: m.key, label: m.label, detail: m.detail, evidence: m.evidence, unit: m.unit.rawValue,
+                    informative: m.informative, value: m.value, range: LocalProgrammeRangeDTO(min: m.rangeMin, max: m.rangeMax),
+                    scale: LocalProgrammeSleepScaleDTO(min: m.scaleMin, max: m.scaleMax), status: m.status.rawValue,
+                    band: m.band.map { LocalProgrammeSleepBandDTO(upTo: $0.upTo, label: $0.label, risk: $0.risk) },
+                    note: m.note)
+            },
+            hits: r.hits, total: r.total)
+    }
+
+    private func programmeNutritionDetail(programme: ProgrammeEngineProgramme, date: String) throws -> LocalProgrammeNutritionDetailDTO {
+        var days: [LocalProgrammeDayProgressDTO] = []
+        for offset in stride(from: 6, through: 0, by: -1) {
+            let day = ProgrammeProgressEngine.addDays(date, -offset)
+            days.append(try programmeDayProgressDTO(programme: programme, date: day))
+        }
+        let today = try programmeDayProgressDTO(programme: programme, date: date)
+        return LocalProgrammeNutritionDetailDTO(today: today, days: days, weightKg: try programmeWeight(date: date))
+    }
+
+    private func programmeDayProgressDTO(programme: ProgrammeEngineProgramme, date: String) throws -> LocalProgrammeDayProgressDTO {
+        let intakeRow = try db.programmeIntake(date: date)
+        let intake = intakeRow.map {
+            ProgrammeEngineDayIntake(date: date, protein: $0.protein, carbs: $0.carbs, fat: $0.fat, fiber: $0.fiber, kcal: $0.kcal)
+        }
+        let weightKg = try programmeWeight(date: date)
+        let progress = ProgrammeProgressEngine.checkDay(programme: programme, intake: intake, weightKg: weightKg, date: date)
+        return LocalProgrammeDayProgressDTO(
+            date: progress.date, logged: progress.logged,
+            rules: progress.rules.map { rp in
+                LocalProgrammeRuleProgressDTO(
+                    rule: LocalProgrammeRuleRefDTO(
+                        key: rp.rule.key, label: rp.rule.label, detail: rp.rule.detail, metric: rp.rule.metric,
+                        perKg: rp.rule.perKg ? true : nil),
+                    target: LocalProgrammeRangeDTO(min: rp.targetMin, max: rp.targetMax),
+                    value: rp.value, status: rp.status.rawValue)
+            },
+            hits: progress.hits, total: progress.total)
+    }
+
+    /// Miroir de `weight` (TS, privée) — dernière pesée connue au plus tard
+    /// `date` (`weight_log`), repli sur `settings.weightKg` sinon. MÊME
+    /// convention que `profileOn` (moteur nutrition L5-analytics), dupliquée
+    /// ici (fonction privée côté TS aussi, pas de mise en commun côté serveur
+    /// non plus entre `ProgrammeController.weight` et `NutritionController.profileOn`).
+    private func programmeWeight(date: String) throws -> Double? {
+        if let logged = try db.weightOn(date: date) { return logged }
+        return (try db.settingValue(key: "weightKg")).flatMap(Double.init)
+    }
 }
 
 /// `GET api/activities/:id` sur un id inconnu (absent de `activities`, ou
@@ -1349,6 +1560,228 @@ private struct LocalWellnessDayDetailDTO: Encodable {
             main: detail.sleepMain.map { LocalSleepMainDTO(from: $0.from, to: $0.to, durationS: $0.durationS) },
             stages: detail.sleepStages.map { LocalSleepStageDTO(from: $0.from, to: $0.to, stage: $0.stage) },
             score: detail.sleepScore)
+    }
+}
+
+// MARK: - DTO d'encodage JSON — `GET api/programme` (incrément L7a — lecture seule)
+//
+// Mêmes clés que `ProgrammeCurrent`/`ProgrammeChoice`/`ProgrammeActive`/
+// `ProgrammeDomainView`/`ProgrammeTrainingDetail`/`ProgrammeNutritionDetail`/
+// `ProgrammeSleepDetail`/... (`Pulse/Screens/Programme/ProgrammeModels.swift`).
+// `LocalProgrammeDomainDTO` encode `detail` à la main (`encode(to:)`) pour le
+// même motif polymorphe que `ProgrammeDomainView.init(from:)` décode à la
+// main côté écran — `kind` détermine la forme, `Codable` synthétisé ne sait
+// pas faire ça seul.
+
+private struct LocalProgrammeCurrentDTO: Encodable {
+    let date: String
+    let domains: [LocalProgrammeDomainDTO]
+}
+
+private struct LocalProgrammeChoiceDTO: Encodable {
+    let id: String
+    let name: String
+    let goal: String
+    let source: String
+    let weeks: Int
+    let rules: Int
+    let perWeek: Int
+}
+
+private struct LocalProgrammeActiveDTO: Encodable {
+    let programmeId: String
+    let startedOn: String
+    let name: String
+    let goal: String
+    let source: String
+    let week: Int
+    let weeks: Int
+    let days: [Int]
+    let perWeek: Int
+    let notes: [String]
+}
+
+private struct LocalProgrammeTrainingItemDTO: Encodable {
+    let name: String
+    let prescription: String
+    let note: String?
+}
+
+private struct LocalProgrammeSessionDTO: Encodable {
+    let key: String
+    let name: String
+    let sport: String
+    let subSport: String?
+    let minMinutes: Int?
+    let items: [LocalProgrammeTrainingItemDTO]
+}
+
+private struct LocalProgrammeSessionProgressDTO: Encodable {
+    let week: Int
+    let session: LocalProgrammeSessionDTO
+    let plannedOn: String?
+    let status: String
+    let done: Bool
+    let date: String?
+    let activityId: Int?
+    let manual: Bool
+}
+
+private struct LocalProgrammeWeekFocusDTO: Encodable {
+    let index: Int
+    let focus: String?
+}
+
+private struct LocalProgrammeTrainingDetailDTO: Encodable {
+    let focus: [LocalProgrammeWeekFocusDTO]
+    let sessions: [LocalProgrammeSessionProgressDTO]
+    let done: Int
+    let total: Int
+    let missed: Int
+    let today: [LocalProgrammeSessionProgressDTO]
+}
+
+private struct LocalProgrammeRangeDTO: Encodable {
+    let min: Double?
+    let max: Double?
+}
+
+private struct LocalProgrammeRuleRefDTO: Encodable {
+    let key: String
+    let label: String
+    let detail: String
+    let metric: String
+    let perKg: Bool?
+}
+
+private struct LocalProgrammeRuleProgressDTO: Encodable {
+    let rule: LocalProgrammeRuleRefDTO
+    let target: LocalProgrammeRangeDTO
+    let value: Double?
+    let status: String
+}
+
+private struct LocalProgrammeDayProgressDTO: Encodable {
+    let date: String
+    let logged: Bool
+    let rules: [LocalProgrammeRuleProgressDTO]
+    let hits: Int
+    let total: Int
+}
+
+private struct LocalProgrammeNutritionDetailDTO: Encodable {
+    let today: LocalProgrammeDayProgressDTO
+    let days: [LocalProgrammeDayProgressDTO]
+    let weightKg: Double?
+}
+
+private struct LocalProgrammeSleepAxisDTO: Encodable {
+    let onsetMean: Double
+    let onsetSd: Double
+    let wakeMean: Double
+    let wakeSd: Double
+}
+
+private struct LocalProgrammeNightPointDTO: Encodable {
+    let date: String
+    let weekday: Int
+    let workDay: Bool
+    let onset: Double
+    let wake: Double
+    let sleepMin: Double
+}
+
+private struct LocalProgrammeSleepScaleDTO: Encodable {
+    let min: Double
+    let max: Double
+}
+
+private struct LocalProgrammeSleepBandDTO: Encodable {
+    let upTo: Double?
+    let label: String
+    let risk: String
+}
+
+private struct LocalProgrammeSleepMetricDTO: Encodable {
+    let key: String
+    let label: String
+    let detail: String
+    let evidence: String
+    let unit: String
+    let informative: Bool
+    let value: Double?
+    let range: LocalProgrammeRangeDTO
+    let scale: LocalProgrammeSleepScaleDTO
+    let status: String
+    let band: LocalProgrammeSleepBandDTO?
+    let note: String?
+}
+
+private struct LocalProgrammeSleepDetailDTO: Encodable {
+    let from: String?
+    let to: String?
+    let nights: Int
+    let spanDays: Int
+    let staleDays: Int
+    let workNights: Int
+    let freeNights: Int
+    let pairs: Int
+    let axis: LocalProgrammeSleepAxisDTO?
+    let strip: [LocalProgrammeNightPointDTO]
+    let metrics: [LocalProgrammeSleepMetricDTO]
+    let hits: Int
+    let total: Int
+}
+
+/// Détail polymorphe — miroir de l'union TypeScript renvoyée par `detailFor`
+/// (`training`/`nutrition`/`sleep`), encodé à la main par
+/// `LocalProgrammeDomainDTO.encode(to:)`.
+private enum LocalProgrammeDetailDTO {
+    case training(LocalProgrammeTrainingDetailDTO)
+    case nutrition(LocalProgrammeNutritionDetailDTO)
+    case sleep(LocalProgrammeSleepDetailDTO)
+}
+
+private struct LocalProgrammeDomainDTO: Encodable {
+    let kind: String
+    let label: String
+    let drives: String
+    let hint: String
+    let choices: [LocalProgrammeChoiceDTO]
+    let active: LocalProgrammeActiveDTO?
+    let detail: LocalProgrammeDetailDTO?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, label, drives, hint, choices, active, detail
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(label, forKey: .label)
+        try container.encode(drives, forKey: .drives)
+        try container.encode(hint, forKey: .hint)
+        try container.encode(choices, forKey: .choices)
+        // `active: null` explicite (pas une clé omise) — miroir de l'objet
+        // JS `{ ...domain, choices, active: null, detail: null }` (TS,
+        // `domainView`), qui sérialise `null` là où `undefined` serait omis.
+        // Sans effet observable côté décodage (`decodeIfPresent` traite les
+        // deux cas identiquement), gardé pour fidélité au JSON serveur.
+        if let active {
+            try container.encode(active, forKey: .active)
+        } else {
+            try container.encodeNil(forKey: .active)
+        }
+        switch detail {
+        case .none:
+            try container.encodeNil(forKey: .detail)
+        case .training(let d):
+            try container.encode(d, forKey: .detail)
+        case .nutrition(let d):
+            try container.encode(d, forKey: .detail)
+        case .sleep(let d):
+            try container.encode(d, forKey: .detail)
+        }
     }
 }
 

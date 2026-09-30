@@ -162,6 +162,29 @@ final class LocalDb {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_food_log_date ON food_log(date);
+    CREATE TABLE IF NOT EXISTS programme_state (
+      programme_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL DEFAULT 'nutrition',
+      started_on TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      days TEXT
+    );
+    CREATE TABLE IF NOT EXISTS programme_plan (
+      programme_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      session TEXT NOT NULL,
+      date TEXT NOT NULL,
+      PRIMARY KEY (programme_id, week, session)
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS programme_plan_date ON programme_plan (programme_id, date);
+    CREATE TABLE IF NOT EXISTS programme_done (
+      programme_id TEXT NOT NULL,
+      week INTEGER NOT NULL,
+      session TEXT NOT NULL,
+      date TEXT NOT NULL,
+      activity_id INTEGER,
+      PRIMARY KEY (programme_id, week, session)
+    ) WITHOUT ROWID;
     """
 
     // MARK: - Dédup (`imported_files`) — même principe que Pulse : hash du
@@ -460,8 +483,11 @@ final class LocalDb {
 
     /// Décalage fuseau au téléphone à midi local du jour donné — substitut de
     /// `tzOffsetSeconds` (var d'env `DISPLAY_TZ` côté serveur) : ici il n'y a
-    /// qu'un fuseau, celui de l'appareil.
-    private static func localOffsetSeconds(forDate date: String) -> Double {
+    /// qu'un fuseau, celui de l'appareil. Accès relâché à `internal`
+    /// (incrément L7a) : `ProgrammeSleepEngine.analyseSleep` (miroir
+    /// `sleep.ts`) a besoin du même `offsetOf(date)` que `dayDetail`, câblé
+    /// depuis `RealLocalPulseBackend` sans dupliquer la formule.
+    static func localOffsetSeconds(forDate date: String) -> Double {
         let noon = dayStartUnixUTC(date) + 12 * 3600
         return Double(TimeZone.current.secondsFromGMT(for: Date(timeIntervalSince1970: noon)))
     }
@@ -1811,6 +1837,187 @@ final class LocalDb {
             out.append(StatsTopFoodRow(name: name, uses: Int(r.double(1) ?? 0), kcal: r.double(2), protein: r.double(3)))
         }
         return out
+    }
+
+    // MARK: - Programme (incrément L7a, miroir `programme.controller.ts` — LECTURE
+    // SEULE : `programme_state`/`programme_plan`/`programme_done` sont schéma-EXACT
+    // de `db.service.ts` (y compris les colonnes `kind`/`days` de `programme_state`,
+    // ajoutées côté serveur par une migration mais présentes ici directement dans
+    // la création de table). AUCUNE route d'écriture locale (`activate`/`stop`/
+    // `session`) n'existe encore (cf. `RealLocalPulseBackend`) : ces trois tables
+    // restent donc TOUJOURS vides tant que l'utilisateur n'a pas activé un
+    // programme depuis Pulse (mode Les deux) — `GET api/programme` retombe alors
+    // honnêtement sur "aucun programme actif" pour les trois domaines, sans rien
+    // fabriquer (même miroir que le serveur avec une base vide).
+
+    struct ProgrammeStateRow {
+        let programmeId: String
+        let kind: String
+        let startedOn: String
+        let days: String?
+    }
+
+    /// Miroir de `activeState` (TS, privée, `ProgrammeController`).
+    func programmeActiveState(kind: String) throws -> ProgrammeStateRow? {
+        var result: ProgrammeStateRow?
+        try db.run(
+            "SELECT programme_id, kind, started_on, days FROM programme_state WHERE active = 1 AND kind = ? LIMIT 1",
+            [.text(kind)]) { r in
+            guard let id = r.text(0), let k = r.text(1), let started = r.text(2) else { return }
+            result = ProgrammeStateRow(programmeId: id, kind: k, startedOn: started, days: r.text(3))
+        }
+        return result
+    }
+
+    struct ProgrammePlanRow {
+        let week: Int
+        let session: String
+        let date: String
+    }
+
+    /// Miroir de `planRows` (TS, privée).
+    func programmePlanRows(programmeId: String) throws -> [ProgrammePlanRow] {
+        var out: [ProgrammePlanRow] = []
+        try db.run(
+            "SELECT week, session, date FROM programme_plan WHERE programme_id = ?",
+            [.text(programmeId)]) { r in
+            guard let session = r.text(1), let date = r.text(2) else { return }
+            out.append(ProgrammePlanRow(week: Int(r.double(0) ?? 0), session: session, date: date))
+        }
+        return out
+    }
+
+    struct ProgrammeDoneRow {
+        let week: Int
+        let session: String
+        let date: String
+        let activityId: Int?
+    }
+
+    /// Miroir de `doneRows` (TS, privée) — `manual: true` reste à la charge
+    /// de l'appelant (`RealLocalPulseBackend`), pas stocké en base (comme
+    /// côté serveur, qui l'ajoute au vol dans le `.map`).
+    func programmeDoneRows(programmeId: String) throws -> [ProgrammeDoneRow] {
+        var out: [ProgrammeDoneRow] = []
+        try db.run(
+            "SELECT week, session, date, activity_id FROM programme_done WHERE programme_id = ?",
+            [.text(programmeId)]) { r in
+            guard let session = r.text(1), let date = r.text(2) else { return }
+            out.append(ProgrammeDoneRow(
+                week: Int(r.double(0) ?? 0), session: session, date: date,
+                activityId: r.double(3).map { Int($0) }))
+        }
+        return out
+    }
+
+    struct ProgrammeActivityHitRow {
+        let id: Int
+        let date: String
+        let sport: String?
+        let subSport: String?
+        let durationS: Double?
+    }
+
+    /// Miroir de `activitiesSince` (TS, privée).
+    func programmeActivitiesSince(_ startedOn: String) throws -> [ProgrammeActivityHitRow] {
+        var out: [ProgrammeActivityHitRow] = []
+        try db.run(
+            """
+            SELECT id, substr(start_time, 1, 10) AS d, sport, sub_sport, duration_s
+            FROM activities WHERE substr(start_time, 1, 10) >= ? ORDER BY start_time ASC
+            """,
+            [.text(startedOn)]) { r in
+            guard let date = r.text(1) else { return }
+            out.append(ProgrammeActivityHitRow(
+                id: Int(r.double(0) ?? 0), date: date, sport: r.text(2), subSport: r.text(3), durationS: r.double(4)))
+        }
+        return out
+    }
+
+    struct ProgrammeSleepNightRow {
+        let date: String
+        let startTs: Double
+        let endTs: Double
+        let sleepS: Double
+        let phases: String?
+    }
+
+    /// Miroir de `nightsUpTo` (TS, privée) — `limit` = `SLEEP_WINDOW_NIGHTS`
+    /// (14, cf. `ProgrammeSleepEngine.windowNights`), passé par l'appelant.
+    func programmeNightsUpTo(date: String, limit: Int) throws -> [ProgrammeSleepNightRow] {
+        var out: [ProgrammeSleepNightRow] = []
+        try db.run(
+            """
+            SELECT date, start_ts, end_ts, deep_s + light_s + rem_s, phases
+            FROM wellness_sleep WHERE date <= ? AND start_ts IS NOT NULL AND end_ts IS NOT NULL
+            ORDER BY date DESC LIMIT ?
+            """,
+            [.text(date), .int(limit)]) { r in
+            guard let d = r.text(0), let startTs = r.double(1), let endTs = r.double(2), let sleepS = r.double(3)
+            else { return }
+            out.append(ProgrammeSleepNightRow(date: d, startTs: startTs, endTs: endTs, sleepS: sleepS, phases: r.text(4)))
+        }
+        return out
+    }
+
+    struct ProgrammeIntakeRow {
+        let kcal: Double
+        let protein: Double
+        let carbs: Double
+        let fat: Double
+        let fiber: Double
+    }
+
+    /// Miroir de `intake` (TS, privée) — `nil` si aucune ligne (`!row.lines`),
+    /// jamais un jour "loggé" à zéro.
+    func programmeIntake(date: String) throws -> ProgrammeIntakeRow? {
+        var result: ProgrammeIntakeRow?
+        try db.run(
+            "SELECT SUM(kcal), SUM(protein), SUM(carbs), SUM(fat), SUM(fiber), COUNT(*) FROM food_log WHERE date = ?",
+            [.text(date)]) { r in
+            guard let lines = r.double(5), lines > 0 else { return }
+            result = ProgrammeIntakeRow(
+                kcal: r.double(0) ?? 0, protein: r.double(1) ?? 0, carbs: r.double(2) ?? 0,
+                fat: r.double(3) ?? 0, fiber: r.double(4) ?? 0)
+        }
+        return result
+    }
+
+    // MARK: - Programme — écriture de TEST seulement (incrément L7a)
+    //
+    // AUCUNE route HTTP locale n'appelle ces trois méthodes (`activate`/`stop`/
+    // `session` restent `LocalPulseUnavailableError`, cf. `RealLocalPulseBackend`) :
+    // elles existent uniquement pour permettre à `ProgrammeReadLocalTests` de
+    // seeder un programme actif directement dans `programme_state`/
+    // `programme_plan`/`programme_done`, sans passer par une route
+    // d'activation qui n'existe pas encore — même esprit que `storeActivity`
+    // (écrite par l'ingestion, jamais par une route HTTP). Préfixe `debug`
+    // pour signaler l'intention : à ne PAS appeler depuis `RealLocalPulseBackend`.
+
+    func debugActivateProgramme(programmeId: String, kind: String, startedOn: String, days: String?) throws {
+        try db.run(
+            """
+            INSERT INTO programme_state (programme_id, kind, started_on, active, days)
+            VALUES (?, ?, ?, 1, ?)
+            ON CONFLICT(programme_id) DO UPDATE SET kind = excluded.kind, started_on = excluded.started_on,
+                                                     active = 1, days = excluded.days
+            """,
+            [.text(programmeId), .text(kind), .text(startedOn), sqliteOptionalText(days)])
+    }
+
+    func debugInsertProgrammePlan(programmeId: String, week: Int, session: String, date: String) throws {
+        try db.run(
+            "INSERT OR REPLACE INTO programme_plan (programme_id, week, session, date) VALUES (?, ?, ?, ?)",
+            [.text(programmeId), .int(week), .text(session), .text(date)])
+    }
+
+    func debugInsertProgrammeDone(programmeId: String, week: Int, session: String, date: String, activityId: Int?) throws {
+        try db.run(
+            """
+            INSERT INTO programme_done (programme_id, week, session, date, activity_id) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(programme_id, week, session) DO UPDATE SET date = excluded.date, activity_id = excluded.activity_id
+            """,
+            [.text(programmeId), .int(week), .text(session), .text(date), sqliteOptional(activityId.map(Double.init))])
     }
 }
 
