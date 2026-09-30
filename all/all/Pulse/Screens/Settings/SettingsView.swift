@@ -50,6 +50,12 @@ struct SettingsView: View {
     @State private var showWatch = false
     @State private var showProgramme = false
     @State private var storageMode = StorageModeStore.shared
+    /// Mode serveur (Pulse / Les deux) demandé depuis le picker de stockage
+    /// alors qu'aucune session n'est active — présente `PulseModeLoginSheet`.
+    /// Tenu ICI (racine stable de l'écran) et non dans `SettingsStorageSection`
+    /// : ancré sur une `Section`, le `.sheet` se refermait tout seul dès que le
+    /// `Form` se re-diffait (le `@State` de la section était réinitialisé).
+    @State private var pendingServerMode: StorageMode?
 
     var body: some View {
         NavigationStack {
@@ -70,6 +76,11 @@ struct SettingsView: View {
         .sheet(isPresented: $showStatus) { StatusView() }
         .sheet(isPresented: $showWatch) { WatchSectionView() }
         .sheet(isPresented: $showProgramme) { ProgrammeView() }
+        // Ancré à la racine stable (pas sur une Section du Form) — cf. le
+        // commentaire de `pendingServerMode`.
+        .sheet(item: $pendingServerMode) { mode in
+            PulseModeLoginSheet(targetMode: mode)
+        }
     }
 
     @ViewBuilder
@@ -83,7 +94,7 @@ struct SettingsView: View {
             }
         case .loaded:
             Form {
-                SettingsStorageSection()
+                SettingsStorageSection(onRequestServerLogin: { pendingServerMode = $0 })
                 SettingsAppearanceSection()
                 if storageMode.mode == .phone {
                     // Démasqué depuis l'incrément L7a (`docs/stockage-local.md`) :
@@ -122,14 +133,14 @@ struct SettingsView: View {
 
 private struct SettingsStorageSection: View {
     @State private var store = StorageModeStore.shared
-    /// Mode serveur (Pulse / Les deux) demandé depuis le picker alors qu'aucune
-    /// session n'est active : on n'applique PAS le mode tout de suite — on
-    /// présente d'abord la connexion dans une feuille **annulable**
-    /// (`PulseModeLoginSheet`). Le mode ne bascule qu'en cas de connexion
-    /// réussie ; « Annuler » laisse le mode inchangé (Téléphone). Sans ça,
-    /// basculer le picker sur Pulse virait `ContentView` sur un `LoginView`
-    /// plein écran sans retour clair (l'utilisateur se retrouvait coincé).
-    @State private var pendingServerMode: StorageMode?
+    /// Appelée quand l'utilisateur choisit un mode serveur (Pulse / Les deux)
+    /// sans session active : on n'applique PAS le mode tout de suite — le
+    /// parent (`SettingsView`) présente la connexion dans une feuille
+    /// **annulable** (`PulseModeLoginSheet`), ancrée à sa racine stable. Le
+    /// mode ne bascule qu'en cas de connexion réussie ; « Annuler » laisse le
+    /// mode inchangé (Téléphone). Sans ça, basculer le picker sur Pulse virait
+    /// `ContentView` sur un `LoginView` plein écran sans retour clair.
+    let onRequestServerLogin: (StorageMode) -> Void
 
     var body: some View {
         Section {
@@ -144,9 +155,6 @@ private struct SettingsStorageSection: View {
         } footer: {
             Text(Self.footnote(for: store.mode))
         }
-        .sheet(item: $pendingServerMode) { mode in
-            PulseModeLoginSheet(targetMode: mode)
-        }
     }
 
     private var modeBinding: Binding<StorageMode> {
@@ -155,12 +163,13 @@ private struct SettingsStorageSection: View {
             set: { newMode in
                 // Basculer vers un mode qui exige le serveur (Pulse / Les deux)
                 // sans session active : passer par la feuille de connexion
-                // plutôt que d'appliquer le mode (ce qui basculerait
-                // `ContentView` sur `LoginView` plein écran, sans sortie claire).
-                // Vers Téléphone, ou si déjà connecté : appliquer directement.
+                // (gérée par le parent) plutôt que d'appliquer le mode (ce qui
+                // basculerait `ContentView` sur `LoginView` plein écran, sans
+                // sortie claire). Vers Téléphone, ou si déjà connecté :
+                // appliquer directement.
                 if (newMode == .pulse || newMode == .both),
                    AuthStore.shared.username == nil {
-                    pendingServerMode = newMode
+                    onRequestServerLogin(newMode)
                 } else {
                     store.mode = newMode
                 }
