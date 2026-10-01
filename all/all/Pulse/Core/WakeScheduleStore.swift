@@ -13,6 +13,21 @@
 //  Miroir de style `ThemeStore.swift` : `@MainActor @Observable`, persisté
 //  dans `UserDefaults`.
 //
+//  Synchro par profil (planning de réveil) — `minutesByWeekday` reste la
+//  source de vérité EN MÉMOIRE pour l'UI et `WakeAlarmScheduler` ; la
+//  persistance `UserDefaults` devient un CACHE HORS-LIGNE (survit à un
+//  relancement hors-ligne, affiche le dernier état connu dès le boot).
+//  Par-dessus, on synchronise avec le backend routé (`PulseAPIClient`,
+//  serveur ou local selon `StorageMode`) via `GET`/`PUT api/wake-schedule`
+//  (miroir `WakeController`, `wake.controller.ts`). `load()` est appelé au
+//  démarrage et aux changements de mode/connexion (cf. `ContentView.swift`) ;
+//  `set`/`clear`/`clearAll` restent synchrones pour l'UI (optimiste) et
+//  poussent en best-effort en tâche de fond.
+//
+//  Limite connue (cf. `load()`) : un effacement total fait sur un appareil ne
+//  se propage pas tant qu'un AUTRE appareil a un cache local non vide — pas
+//  de réconciliation par horodatage pour l'instant (incrément futur).
+//
 
 import Foundation
 import Observation
@@ -29,6 +44,15 @@ struct AdaptedBedtime: Equatable {
     let weekday: Int
 }
 
+/// DTO d'encodage JSON — `GET`/`PUT api/wake-schedule`, miroir de
+/// `WakeSchedule` (`wake.controller.ts`) et `LocalWakeScheduleDTO`
+/// (`Local/LocalPulseBackend.swift`). Mêmes clés `String` que la persistance
+/// `UserDefaults` existante (`Int` n'est pas codable comme clé de dico par
+/// `JSONEncoder`/`JSONDecoder`).
+struct WakeScheduleDTO: Codable {
+    let schedule: [String: Int]
+}
+
 @MainActor
 @Observable
 final class WakeScheduleStore {
@@ -39,10 +63,12 @@ final class WakeScheduleStore {
     private(set) var minutesByWeekday: [Int: Int]
 
     private let defaults: UserDefaults
+    private let client: PulseAPIClient
     private static let key = "pulse-wake-schedule"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, client: PulseAPIClient = .shared) {
         self.defaults = defaults
+        self.client = client
         if let data = defaults.data(forKey: Self.key),
            let decoded = try? JSONDecoder().decode([String: Int].self, from: data) {
             var restored: [Int: Int] = [:]
@@ -63,18 +89,21 @@ final class WakeScheduleStore {
         for weekday in weekdays { minutesByWeekday[weekday] = minutes }
         persist()
         WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
+        Task { await self.pushToBackend() }
     }
 
     func clear(weekdays: Set<Int>) {
         for weekday in weekdays { minutesByWeekday.removeValue(forKey: weekday) }
         persist()
         WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
+        Task { await self.pushToBackend() }
     }
 
     func clearAll() {
         minutesByWeekday.removeAll()
         persist()
         WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
+        Task { await self.pushToBackend() }
     }
 
     private func persist() {
@@ -84,6 +113,52 @@ final class WakeScheduleStore {
         if let data = try? JSONEncoder().encode(encodable) {
             defaults.set(data, forKey: Self.key)
         }
+    }
+
+    // MARK: - Synchro backend (`api/wake-schedule`)
+
+    /// Best-effort, ne jette jamais — même esprit que `AuthStore.check()` :
+    /// une vérification de routine, pas une action utilisateur à faire
+    /// échouer bruyamment.
+    func load() async {
+        do {
+            let dto: WakeScheduleDTO = try await client.get("api/wake-schedule")
+            var serverMap: [Int: Int] = [:]
+            for (rawWeekday, minutes) in dto.schedule {
+                guard let weekday = Int(rawWeekday), weekday >= 1, weekday <= 7,
+                      minutes >= 0, minutes <= 1439
+                else { continue }
+                serverMap[weekday] = minutes
+            }
+            if serverMap.isEmpty && !minutesByWeekday.isEmpty {
+                // Anti-écrasement / migration : le serveur (ou le backend
+                // local, selon le mode) n'a encore aucun planning alors que ce
+                // cache a déjà des réveils — on ne l'adopte PAS (ce serait
+                // effacer silencieusement ce que l'utilisateur a réglé ici) ;
+                // on pousse plutôt le cache local vers le backend. Limite
+                // connue (cf. en-tête de fichier) : un effacement total fait
+                // sur un AUTRE appareil ne se propage donc pas tant que ce
+                // cache-ci reste non vide — pas de réconciliation par
+                // horodatage pour l'instant.
+                await pushToBackend()
+                return
+            }
+            // Adopte la map serveur, même vide quand le cache l'était déjà
+            // (vide → vide n'est jamais un effacement délibéré observable).
+            minutesByWeekday = serverMap
+            persist()
+            WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
+        } catch {
+            // Hors-ligne / `.notConfigured` / `.unauthorized` : no-op, on
+            // garde le cache tel quel.
+        }
+    }
+
+    /// PUT la map complète courante — best-effort, avale l'erreur.
+    private func pushToBackend() async {
+        let encodable = Dictionary(uniqueKeysWithValues: minutesByWeekday.map { (String($0.key), $0.value) })
+        let dto = WakeScheduleDTO(schedule: encodable)
+        let _: WakeScheduleDTO? = try? await client.put("api/wake-schedule", body: dto)
     }
 
     /// "HH:mm" zero-paddé — même format que les heures reçues du serveur

@@ -193,6 +193,14 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("PUT", "profile"):
             return try encodeProfileUpdate(body: body)
 
+        // MARK: Planning de réveil (miroir `WakeController` — `wake.controller.ts`)
+
+        case ("GET", "wake-schedule"):
+            return try encodeWakeScheduleGet()
+
+        case ("PUT", "wake-schedule"):
+            return try encodeWakeScheduleUpdate(body: body)
+
         // MARK: Programme (incrément L7a LECTURE + L7b ÉCRITURE — miroir
         // `ProgrammeController.current`/`domainView`/`activate`/`stop`/
         // `toggleSession`). `candidates`/`export`/`push` restent délibérément
@@ -372,6 +380,57 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             try db.setSetting(key: "heightCm", value: String(heightCm))
         }
         return try JSONEncoder().encode(readProfile())
+    }
+
+    // MARK: - Planning de réveil (miroir `WakeController` — `wake.controller.ts`)
+    //
+    // Une seule clé `settings` (`wakeSchedule`), valeur = `JSON.stringify` de
+    // la map interne seule (`{"1":420,...}`), pas l'objet enveloppé — même
+    // contrat que le serveur. `GET` filtre/ignore silencieusement toute
+    // entrée invalide/corrompue (robustesse à la lecture, miroir de
+    // `WakeController.read`). `PUT` valide champ par champ (clé entier 1..7,
+    // valeur entier 0..1439) et remplace entièrement le planning.
+
+    private func encodeWakeScheduleGet() throws -> Data {
+        try JSONEncoder().encode(readWakeSchedule())
+    }
+
+    private func readWakeSchedule() throws -> LocalWakeScheduleDTO {
+        guard let raw = try db.settingValue(key: "wakeSchedule"),
+              let data = raw.data(using: .utf8),
+              let parsed = try? JSONDecoder().decode([String: Int].self, from: data)
+        else {
+            return LocalWakeScheduleDTO(schedule: [:])
+        }
+        var schedule: [String: Int] = [:]
+        for (key, value) in parsed {
+            guard let weekday = Int(key), weekday >= 1, weekday <= 7,
+                  value >= 0, value <= 1439
+            else { continue }
+            schedule[key] = value
+        }
+        return LocalWakeScheduleDTO(schedule: schedule)
+    }
+
+    private func encodeWakeScheduleUpdate(body: Data?) throws -> Data {
+        guard let body else { throw LocalWakeScheduleValidationError(reason: "Corps de requête manquant") }
+        let req = try JSONDecoder().decode(LocalWakeScheduleDTO.self, from: body)
+        var cleaned: [String: Int] = [:]
+        for (key, value) in req.schedule {
+            guard let weekday = Int(key), weekday >= 1, weekday <= 7 else {
+                throw LocalWakeScheduleValidationError(reason: "Invalid wake schedule")
+            }
+            guard value >= 0, value <= 1439 else {
+                throw LocalWakeScheduleValidationError(reason: "Invalid wake schedule")
+            }
+            cleaned[key] = value
+        }
+        let data = try JSONEncoder().encode(cleaned)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw LocalWakeScheduleValidationError(reason: "Invalid wake schedule")
+        }
+        try db.setSetting(key: "wakeSchedule", value: json)
+        return try JSONEncoder().encode(readWakeSchedule())
     }
 
     // MARK: - Poids (incrément L5, miroir `WeightController` — `weight.controller.ts`)
@@ -1498,6 +1557,14 @@ struct LocalProfileValidationError: Error, LocalizedError {
     var errorDescription: String? { reason }
 }
 
+/// `PUT api/wake-schedule` sur une entrée invalide — miroir du
+/// `BadRequestException` côté Nest (`WakeController.update`). Message
+/// diagnostique seulement.
+struct LocalWakeScheduleValidationError: Error, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
+}
+
 // MARK: - DTO d'encodage JSON — `GET`/`PUT api/profile` (incrément L6)
 //
 // Mêmes clés que `SettingsProfile` (`Pulse/Screens/Settings/SettingsModels.swift`)
@@ -1522,6 +1589,13 @@ private struct LocalProfileUpdateRequestDTO: Decodable {
     let sex: String?
     let weightKg: Double?
     let heightCm: Double?
+}
+
+/// DTO d'encodage JSON — `GET`/`PUT api/wake-schedule`, miroir de
+/// `WakeSchedule` (`wake.controller.ts`). Même forme en lecture et en
+/// écriture (`{ "schedule": { "<weekday>": <minutes>, ... } }`).
+private struct LocalWakeScheduleDTO: Codable {
+    let schedule: [String: Int]
 }
 
 /// DTO d'encodage JSON — mêmes clés que `WellnessDayRow`

@@ -101,9 +101,11 @@ struct ContentView: View {
             // `api/auth/me` (qui échouerait de toute façon sans `baseURL`).
             guard storageMode.mode != .phone else {
                 auth.isChecking = false
+                await WakeScheduleStore.shared.load()
                 return
             }
             _ = await auth.check()
+            await WakeScheduleStore.shared.load()
         }
         // Basculement du mode Stockage vers Pulse/Les deux : rattrape tout de
         // suite le retard éventuel (fichiers collectés en Téléphone, jamais
@@ -120,6 +122,19 @@ struct ContentView: View {
             // Si une insertion a lieu, `LocalIngestor` reposte lui-même
             // `.allLocalDataDidChange` → second rechargement, sans redémarrage.
             LocalIngestor.ingestIfNeeded()
+            // Changement de mode Stockage : le planning de réveil vient d'une
+            // source différente (serveur vs backend local) — re-fetch (cf.
+            // `WakeScheduleStore.load()`).
+            Task { await WakeScheduleStore.shared.load() }
+        }
+        // Connexion réussie (depuis `LoginView` ou `PulseModeLoginSheet`) : le
+        // cookie de session vient d'être posé, le planning serveur est
+        // désormais accessible — re-fetch. Ne se déclenche PAS au logout
+        // (`newValue == nil`) : on garde le cache tel quel.
+        .onChange(of: auth.username) { _, newValue in
+            if newValue != nil {
+                Task { await WakeScheduleStore.shared.load() }
+            }
         }
     }
 }
