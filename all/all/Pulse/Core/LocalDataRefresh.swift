@@ -29,6 +29,36 @@
 
 import SwiftUI
 
+/// Poste `.allLocalDataDidChange` (signal « tes données ont changé, recharge »)
+/// en **coalescant** les demandes rapprochées : une synchro Pulse pousse N
+/// fichiers d'affilée, chacun livré (2xx) à quelques dizaines de ms d'écart —
+/// on ne veut pas N rechargements complets, mais UN seul peu après le dernier.
+///
+/// Pourquoi ce signal est nécessaire en mode Pulse : `LocalIngestor` (le seul
+/// autre émetteur de `.allLocalDataDidChange`) est un no-op en `.pulse`. Sans
+/// ce pont, une fois les `.fit` ingérés CÔTÉ PULSE, rien ne disait aux écrans
+/// de re-fetch — ils restaient figés jusqu'au redémarrage de l'app.
+enum DataRefreshNotifier {
+    /// Accès sérialisé sur le main : toutes les méthodes dispatchent sur
+    /// `DispatchQueue.main`, donc pas de course malgré `unsafe`.
+    nonisolated(unsafe) private static var pending: DispatchWorkItem?
+
+    /// À appeler dès qu'une donnée visible par les écrans est devenue
+    /// disponible (ex. fichier livré/ingéré côté Pulse). Reporte le post de
+    /// ~0,6 s et annule le report précédent : plusieurs appels rapprochés
+    /// fusionnent en un seul rechargement.
+    static func postDataDidChangeDebounced() {
+        DispatchQueue.main.async {
+            pending?.cancel()
+            let work = DispatchWorkItem {
+                NotificationCenter.default.post(name: .allLocalDataDidChange, object: nil)
+            }
+            pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+        }
+    }
+}
+
 extension View {
     func reloadsOnLocalDataChange(_ onChange: @escaping () async -> Void) -> some View {
         modifier(NotificationReloadModifier(name: .allLocalDataDidChange, onChange: onChange))

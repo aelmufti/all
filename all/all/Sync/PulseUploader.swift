@@ -276,6 +276,12 @@ final class RoutingSpoolUploader: SpoolUploading {
             pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename) { [spoolStore] outcome in
                 if outcome == .delivered {
                     spoolStore?.markPushedToPulse(forFileAt: fileURL)
+                    // Pulse a ingéré ce fichier (2xx = accusé, contrat §4) :
+                    // prévenir les écrans ouverts pour qu'ils re-fetch depuis
+                    // Pulse, sans redémarrage de l'app. Coalescé (grosse synchro
+                    // multi-fichiers → un seul rechargement). C'est LE pont qui
+                    // manquait en mode Pulse (`LocalIngestor` n'y poste jamais).
+                    DataRefreshNotifier.postDataDidChangeDebounced()
                 }
                 completion(outcome)
             }

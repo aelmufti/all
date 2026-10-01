@@ -77,6 +77,32 @@ struct WeightLocalTests {
         #expect(weight.series.map { $0.date } == ["2026-09-20", "2026-09-25"])
     }
 
+    /// REPRODUCTION du bug « les écrans ne se rafraîchissent qu'après relance » :
+    /// une connexion LECTRICE (comme `RealLocalPulseBackend`, ouverte au
+    /// lancement) doit voir une écriture faite par une SECONDE connexion
+    /// indépendante (comme `LocalIngestor.ingestIfNeeded`, qui ouvre sa propre
+    /// `LocalDb`) — sans être rouverte. Si ça échoue, le live ne peut PAS
+    /// s'actualiser (la lectrice sert un état figé jusqu'au redémarrage de
+    /// l'app, qui rouvre une connexion neuve).
+    @Test func readerConnectionSeesWritesFromASeparateConnection() async throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("weight-xconn-\(UUID().uuidString).sqlite").path
+
+        // Lectrice ouverte EN PREMIER, avant toute écriture (ordre réel).
+        let reader = RealLocalPulseBackend(db: try LocalDb(path: path))
+        let before = try await getWeight(reader)
+        #expect(before.entries == 0)
+
+        // Écriture via une connexion SÉPARÉE.
+        let writer = RealLocalPulseBackend(db: try LocalDb(path: path))
+        _ = try await post(writer, date: "2026-09-20", kg: 70.4)
+
+        // La lectrice (déjà ouverte) voit-elle l'écriture ?
+        let after = try await getWeight(reader)
+        #expect(after.entries == 1)
+        #expect(after.current == 70.4)
+    }
+
     /// Re-POST sur la MÊME date : upsert (`ON CONFLICT(date) DO UPDATE`), pas
     /// une deuxième ligne — `entries` doit rester à 1.
     @Test func postOnSameDateUpserts() async throws {
