@@ -276,13 +276,11 @@ final class RoutingSpoolUploader: SpoolUploading {
             pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename) { [spoolStore] outcome in
                 if outcome == .delivered {
                     spoolStore?.markPushedToPulse(forFileAt: fileURL)
-                    // Pulse a ingéré ce fichier (2xx = accusé, contrat §4) :
-                    // prévenir les écrans ouverts pour qu'ils re-fetch depuis
-                    // Pulse, sans redémarrage de l'app. Coalescé (grosse synchro
-                    // multi-fichiers → un seul rechargement). C'est LE pont qui
-                    // manquait en mode Pulse (`LocalIngestor` n'y poste jamais).
-                    DataRefreshNotifier.postDataDidChangeDebounced()
                 }
+                // Le rafraîchissement des écrans après livraison Pulse n'est PAS
+                // posté ici (ce serait un refresh par fichier) : `GarminSession`
+                // le poste UNE fois quand toute la synchro est retombée, cf.
+                // `maybePostDataRefreshIfSettled`.
                 completion(outcome)
             }
         }

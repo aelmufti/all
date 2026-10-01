@@ -166,6 +166,16 @@ final class GarminSession: ObservableObject {
     @Published private(set) var deliveredFileIndexes: Set<Int> = []
     /// État de la traversée `syncNewFiles()` — cf. `GarminSyncState`.
     @Published private(set) var syncState: GarminSyncState = .idle
+
+    /// Nombre d'uploads Pulse en vol (dispatched mais sans issue encore reçue) —
+    /// sert à ne poster QU'UN rafraîchissement d'écrans quand la synchro est
+    /// entièrement retombée (plus aucun upload en vol ET traversée terminée),
+    /// au lieu d'un refresh par fichier livré. Manipulé uniquement sur le main
+    /// (dispatch/completion d'upload), cf. `maybePostDataRefreshIfSettled`.
+    private var outstandingUploads = 0
+    /// Vrai si au moins un fichier a été livré à Pulse (2xx) depuis le dernier
+    /// rafraîchissement posté — évite de rafraîchir quand rien n'a changé.
+    private var deliveredSinceLastRefresh = false
     /// État de l'écriture du poids vers la montre (cf. `writeWeight`).
     @Published private(set) var weightWriteState: WatchWeightWriteState = .idle
 
@@ -631,6 +641,12 @@ final class GarminSession: ObservableObject {
             // traversée plus canonique ; à revalider si un futur incrément en
             // introduit un (cf. rapport d'incrément L2).
             LocalIngestor.ingestIfNeeded()
+            // Fin de traversée : si tous les uploads Pulse ont déjà abouti
+            // (réseau plus rapide que le BLE), `handleUploadOutcome` ne sera
+            // plus rappelé — c'est donc ICI qu'on poste le rafraîchissement
+            // unique. S'il reste des uploads en vol, le dernier
+            // `handleUploadOutcome` s'en chargera (même garde).
+            maybePostDataRefreshIfSettled()
             // Slot désormais libre : rejouer une re-list différée (FILTER reçu
             // pendant qu'un transfert l'occupait, cf. `requestDirectoryListing`).
             // `requestDirectoryListing` remet le drapeau à false → pas de boucle.
@@ -719,17 +735,20 @@ final class GarminSession: ObservableObject {
         guard let uploader, let spoolStore else { return }
         let fileURL = spoolStore.fileURL(for: entry)
         let filename = entry.id.name
+        outstandingUploads += 1
         uploader.upload(fileURL: fileURL, watchFilename: filename) { [weak self] outcome in
             DispatchQueue.main.async { self?.handleUploadOutcome(outcome, for: entry.id) }
         }
     }
 
     private func handleUploadOutcome(_ outcome: PulseUploadOutcome, for id: WatchFileID) {
+        outstandingUploads = max(0, outstandingUploads - 1)
         switch outcome {
         case .delivered:
             spoolStore?.markDelivered(id)
             deliveredFileIndexes.insert(id.index)
             archivePendingDeliveries()
+            deliveredSinceLastRefresh = true
         case .keepConfigError:
             log.error("Upload Pulse: token/URL absent ou invalide — fichier gardé, pas de retry auto (renseigner les réglages)")
         case .keepRetryLater:
@@ -739,6 +758,26 @@ final class GarminSession: ObservableObject {
         case .quarantine:
             log.error("Upload Pulse: fichier rejeté (400/413/415/422) — gardé en spool, à investiguer")
         }
+        maybePostDataRefreshIfSettled()
+    }
+
+    /// Poste UN rafraîchissement d'écrans quand la synchro est entièrement
+    /// retombée : plus aucun upload Pulse en vol ET plus rien à télécharger.
+    /// Évite le « deux (ou N) refresh » causé par un post par fichier livré
+    /// (deux fichiers livrés à >0,8 s d'écart ne se coalescaient pas).
+    ///
+    /// Gardé au mode ≠ `.phone` : en Téléphone, rien ne part vers Pulse et la
+    /// fraîcheur vient de l'ingestion LOCALE, qui poste elle-même son
+    /// rafraîchissement APRÈS écriture en base (`LocalIngestor`) — poster ici
+    /// rafraîchirait avant que la base locale soit à jour. En `.both`, les deux
+    /// chemins postent ; `DataRefreshNotifier` (coalescé) fusionne s'ils sont
+    /// proches dans le temps.
+    private func maybePostDataRefreshIfSettled() {
+        guard StorageModeStore.current != .phone else { return }
+        guard outstandingUploads == 0, downloadQueue.isEmpty, currentDownload == nil else { return }
+        guard deliveredSinceLastRefresh else { return }
+        deliveredSinceLastRefresh = false
+        DataRefreshNotifier.postDataDidChangeDebounced()
     }
 
     /// Repousse tout ce qui est déjà `acquired` mais pas encore `delivered` :
