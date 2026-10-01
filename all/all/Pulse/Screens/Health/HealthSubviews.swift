@@ -472,12 +472,13 @@ struct SampleLineChart: View {
     /// une date continue ; on recale sur l'échantillon le plus proche.
     @State private var selectedDate: Date?
 
-    /// Progression du tracé gauche→droite (0 = rien, 1 = courbe complète) —
-    /// animée à chaque arrivée de nouvelles données (synchro, changement de
-    /// source, de jour). Rend visible « les données qui se chargent petit à
-    /// petit » : un masque de largeur `width * drawProgress` dévoile la courbe
-    /// (ligne + aire) du début de journée vers le plus récent. Cf. `animateDraw`.
-    @State private var drawProgress: CGFloat = 0
+    /// Révélation « flou → net » à chaque arrivée de nouvelles données
+    /// (synchro, changement de source, de jour) : la courbe apparaît d'abord
+    /// floue et pâle, puis se défloute/s'opacifie sur les bonnes valeurs. Plus
+    /// adapté qu'un re-tracé pour un simple rafraîchissement (la donnée change,
+    /// elle ne « se charge » pas de zéro). Cf. `animateReveal`.
+    @State private var blurRadius: CGFloat = 0
+    @State private var revealOpacity: Double = 1
 
     var body: some View {
         if samples.isEmpty {
@@ -522,18 +523,11 @@ struct SampleLineChart: View {
                 guard let newValue, let sample = nearest(to: newValue) else { hover = nil; return }
                 hover = ChartHoverPoint(value: sample.value, timeLabel: HealthViewModel.clock(Int(sample.ts)))
             }
-            // Dévoilement gauche→droite : masque dont la largeur suit
-            // `drawProgress`. `GeometryReader` place son contenu en haut-gauche,
-            // donc le rectangle part du bord gauche (début de journée). Une fois
-            // à 1, le masque couvre toute la largeur → aucun rognage résiduel
-            // (survol/hit-test intacts).
-            .mask(alignment: .leading) {
-                GeometryReader { geo in
-                    Rectangle().frame(width: geo.size.width * drawProgress)
-                }
-            }
-            .onAppear { animateDraw() }
-            .onChange(of: dataSignature) { _, _ in animateDraw() }
+            // Révélation « flou → net » (cf. `blurRadius`/`revealOpacity`).
+            .blur(radius: blurRadius)
+            .opacity(revealOpacity)
+            .onAppear { animateReveal() }
+            .onChange(of: dataSignature) { _, _ in animateReveal() }
         }
     }
 
@@ -545,14 +539,19 @@ struct SampleLineChart: View {
         "\(samples.count)-\(samples.first?.ts ?? 0)-\(samples.last?.ts ?? 0)"
     }
 
-    /// Relance le tracé : remet la progression à 0 (sans animation), puis anime
-    /// jusqu'à 1 au tour de boucle suivant. Le `DispatchQueue.main.async`
-    /// garantit que la frame à 0 est bien appliquée avant l'animation — sinon
-    /// SwiftUI fusionne les deux mutations et il n'y a aucun balayage visible.
-    private func animateDraw() {
-        drawProgress = 0
+    /// Relance la révélation : pose l'état « flou + pâle » (sans animation),
+    /// puis anime vers « net + opaque » au tour de boucle suivant. Le
+    /// `DispatchQueue.main.async` garantit que la frame floue est appliquée
+    /// avant l'animation — sinon SwiftUI fusionne les deux mutations et il n'y
+    /// a aucune transition visible.
+    private func animateReveal() {
+        blurRadius = 7
+        revealOpacity = 0.35
         DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.65)) { drawProgress = 1 }
+            withAnimation(.easeOut(duration: 0.45)) {
+                blurRadius = 0
+                revealOpacity = 1
+            }
         }
     }
 

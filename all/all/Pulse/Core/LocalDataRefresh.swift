@@ -44,9 +44,10 @@ enum DataRefreshNotifier {
     nonisolated(unsafe) private static var pending: DispatchWorkItem?
 
     /// À appeler dès qu'une donnée visible par les écrans est devenue
-    /// disponible (ex. fichier livré/ingéré côté Pulse). Reporte le post de
-    /// ~0,6 s et annule le report précédent : plusieurs appels rapprochés
-    /// fusionnent en un seul rechargement.
+    /// disponible (ex. fichier livré/ingéré côté Pulse, ou inséré en local).
+    /// Reporte le post de ~0,8 s et annule le report précédent : plusieurs
+    /// appels rapprochés (synchro multi-fichiers, ingestion locale + livraison
+    /// Pulse en mode « Les deux ») fusionnent en UN seul rechargement.
     static func postDataDidChangeDebounced() {
         DispatchQueue.main.async {
             pending?.cancel()
@@ -54,7 +55,7 @@ enum DataRefreshNotifier {
                 NotificationCenter.default.post(name: .allLocalDataDidChange, object: nil)
             }
             pending = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
         }
     }
 }

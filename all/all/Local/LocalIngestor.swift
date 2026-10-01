@@ -173,8 +173,12 @@ enum LocalIngestor {
             // éviter un rechargement pour rien à chaque rejeu (idempotent la
             // plupart du temps, tout le spool étant déjà dans `imported_files`).
             guard hasNewInsertion(results) else { return }
+            // Passe par le MÊME coalesceur que la livraison Pulse
+            // (`DataRefreshNotifier`) : en mode « Les deux », ingestion locale
+            // ET livraison Pulse arrivent quasi en même temps — sans coalescer,
+            // ça faisait DEUX rechargements d'écran au lieu d'un.
             await MainActor.run {
-                NotificationCenter.default.post(name: .allLocalDataDidChange, object: nil)
+                DataRefreshNotifier.postDataDidChangeDebounced()
             }
         }
     }
