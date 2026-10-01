@@ -2,26 +2,36 @@
 //  LocalDataRefresh.swift
 //  all (bridge-connect)
 //
-//  Rafraîchissement des écrans après une ingestion locale réussie (mode
-//  Téléphone/Les deux) — cf. `LocalIngestor.ingestIfNeeded`, qui poste
-//  `.allLocalDataDidChange` sur le main actor dès qu'au moins un fichier du
-//  spool a été réellement inséré (pas un doublon/skip/erreur,
-//  `LocalIngestor.hasNewInsertion`). Sans ce pont, un écran déjà ouvert au
-//  moment d'une synchro montre n'affichait la nouvelle donnée qu'au
-//  redémarrage de l'app.
+//  Rafraîchissement des écrans sans redémarrage de l'app, sur deux signaux :
 //
-//  `.reloadsOnLocalDataChange { … }` — même forme que `.refreshesAtDayChange`
-//  (`DayRollover.swift`) : chaque écran fournit la fermeture qui recharge SA
-//  sélection courante, pas seulement « le dernier jour ». Là où l'écran a déjà
-//  un garde-fou « jour du jour » (`reloadForNewDay`), on le réutilise tel quel
-//  — pas la peine d'arracher l'utilisateur qui consulte un jour passé.
+//  - `.reloadsOnLocalDataChange` ← `.allLocalDataDidChange`, posté par
+//    `LocalIngestor.ingestIfNeeded` dès qu'au moins un fichier du spool a été
+//    réellement inséré en base (fin de traversée BLE en mode Téléphone/Les
+//    deux, cf. `GarminSession.advanceDownloadQueue`). Sans ce pont, un écran
+//    déjà ouvert pendant une synchro n'affichait la nouvelle donnée qu'au
+//    redémarrage.
+//  - `.reloadsOnStorageModeChange` ← `.storageModeDidChange`, posté par
+//    `StorageModeStore` au changement de source (Pulse ↔ Téléphone ↔ Les deux).
+//
+//  Chaque écran fournit la fermeture qui recharge SA sélection courante. Là où
+//  l'écran a un garde-fou « jour du jour » (`reloadForNewDay`), on le réutilise
+//  pour l'ingestion (la nouvelle donnée concerne aujourd'hui) ; au changement
+//  de SOURCE, en revanche, on passe la fermeture complète (`load()`) car toute
+//  la source bascule — cf. l'appelant.
+//
+//  Réception via `.onReceive(NotificationCenter.publisher(for:))` et NON via
+//  `for await … in NotificationCenter.notifications(named:)` dans un `.task` :
+//  cette seconde forme ratait en pratique les notifications (l'écran ne se
+//  mettait à jour qu'après avoir tué puis rouvert l'app — bug constaté en mode
+//  Téléphone, synchro reçue pendant qu'on regardait un graph). `.onReceive`
+//  (Combine) est le canal SwiftUI fiable et idiomatique pour ça.
 //
 
 import SwiftUI
 
 extension View {
     func reloadsOnLocalDataChange(_ onChange: @escaping () async -> Void) -> some View {
-        modifier(LocalDataChangeModifier(onChange: onChange))
+        modifier(NotificationReloadModifier(name: .allLocalDataDidChange, onChange: onChange))
     }
 
     /// Recharge l'écran quand la SOURCE de données change (`Stockage` :
@@ -29,45 +39,28 @@ extension View {
     /// différence de `reloadsOnLocalDataChange` (qui réutilise le garde-fou
     /// « jour du jour » des écrans), on passe ici la fermeture de rechargement
     /// **complète** (`load()`) : la source bascule entièrement, donc même une
-    /// sélection sur un jour passé doit être re-tirée du nouveau backend, sinon
-    /// l'écran resterait figé sur les données de l'ancienne source jusqu'au
-    /// redémarrage de l'app.
+    /// sélection sur un jour passé doit être re-tirée du nouveau backend.
     func reloadsOnStorageModeChange(_ onChange: @escaping () async -> Void) -> some View {
-        modifier(StorageModeChangeModifier(onChange: onChange))
+        modifier(NotificationReloadModifier(name: .storageModeDidChange, onChange: onChange))
     }
 }
 
-private struct LocalDataChangeModifier: ViewModifier {
+/// Déclenche `onChange` à la réception d'une `Notification.Name`. `.onReceive`
+/// (publisher Combine) plutôt que l'AsyncSequence `.notifications(named:)` dans
+/// un `.task` — cf. en-tête de fichier pour la raison (notifications ratées).
+private struct NotificationReloadModifier: ViewModifier {
+    let name: Notification.Name
     let onChange: () async -> Void
 
     func body(content: Content) -> some View {
         content
-            .task {
-                // Flux async, annulé automatiquement par SwiftUI à la
-                // disparition de l'écran — même mécanisme que le `.task` de
-                // rafraîchissement périodique de `HomeView`. Pas de
-                // debounce : chaque notification correspond déjà à un rejeu
-                // de spool complet côté `LocalIngestor` (pas de rafale).
-                for await _ in NotificationCenter.default.notifications(named: .allLocalDataDidChange) {
-                    await onChange()
-                }
-            }
-    }
-}
-
-private struct StorageModeChangeModifier: ViewModifier {
-    let onChange: () async -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .task {
-                // Même mécanisme que `LocalDataChangeModifier` : flux async
-                // annulé par SwiftUI à la disparition de l'écran. Un changement
-                // de mode est un événement rare (action utilisateur) — pas de
-                // rafale, pas de debounce nécessaire.
-                for await _ in NotificationCenter.default.notifications(named: .storageModeDidChange) {
-                    await onChange()
-                }
+            .onReceive(NotificationCenter.default.publisher(for: name)) { _ in
+                // La notification est postée sur le main actor (cf.
+                // `LocalIngestor`/`StorageModeStore`) ; `onChange` cible un
+                // view-model `@MainActor`. Pas de debounce : chaque notification
+                // correspond déjà à un événement discret (fin de traversée,
+                // changement de mode), pas à une rafale.
+                Task { await onChange() }
             }
     }
 }
