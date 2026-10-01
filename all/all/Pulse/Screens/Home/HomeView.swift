@@ -169,7 +169,7 @@ private struct HomeLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10, design: .monospaced))
+            .font(.system(size: 10, design: .rounded))
             // `.12em` de 10px ≈ 1.2pt.
             .tracking(1.2)
             .foregroundStyle(Color.pulseTextSecondary)
@@ -185,7 +185,7 @@ private struct StalePill: View {
         HStack(spacing: 6) {
             Circle().fill(Color.pulseStress).frame(width: 6, height: 6)
             Text(label)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextPrimary)
         }
         .padding(.horizontal, 11)
@@ -300,7 +300,7 @@ private struct NowSection: View {
             // `hover` (survol du mini-graphe) prime sur `shownHr` tant que le
             // doigt est posé sur la courbe — revient à `shownHr` au relâcher.
             Text(hover.map(String.init) ?? (viewModel.shownHr.map(String.init) ?? "—"))
-                .font(.system(size: 60, weight: .semibold, design: .monospaced))
+                .font(.system(size: 60, weight: .semibold, design: .rounded))
                 .foregroundStyle(bpmColor)
                 .contentTransition(.numericText())
                 // Largeur réservée pour 3 chiffres (mono 60pt ≈ 36pt/chiffre) :
@@ -408,7 +408,7 @@ private struct NowSection: View {
                         .foregroundStyle(Color.pulseTextSecondary)
                     HStack(alignment: .lastTextBaseline, spacing: 0) {
                         Text(vital.value.map(String.init) ?? "—")
-                            .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 19, weight: .semibold, design: .rounded))
                             .foregroundStyle(vitalValueColor)
                         if vital.value != nil, !vital.unit.isEmpty {
                             Text(" \(vital.unit)")
@@ -532,7 +532,7 @@ private struct WeekTrainingSection: View {
                 HomeLabel(text: "Entraînement de la semaine")
                 Spacer()
                 Text(viewModel.weekRangeLabel)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 
@@ -541,7 +541,7 @@ private struct WeekTrainingSection: View {
                 HomeLabel(text: lead.label)
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(lead.value)
-                        .font(.system(size: 42, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 42, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                         // `letter-spacing:.01em` de 42px ≈ 0.42pt.
                         .tracking(0.42)
@@ -557,7 +557,7 @@ private struct WeekTrainingSection: View {
 
             // `.week-note { font-family:mono; font-size:10px; line-height:1.65; }`.
             Text(viewModel.weekNote)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .lineSpacing(6.5)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
@@ -574,7 +574,7 @@ private struct WeekTrainingSection: View {
                 ForEach(Self.dayLetters.indices, id: \.self) { index in
                     let today = index == todayIndex
                     Text(Self.dayLetters[index])
-                        .font(.system(size: 10, weight: today ? .semibold : .regular, design: .monospaced))
+                        .font(.system(size: 10, weight: today ? .semibold : .regular, design: .rounded))
                         .foregroundStyle(today ? Color.pulseTextPrimary : Color.pulseTextSecondary)
                         .frame(maxWidth: .infinity)
                 }
@@ -616,7 +616,7 @@ private struct WeekTrainingSection: View {
                         .lineLimit(1)
                     DotLeader()
                     Text(fact.value)
-                        .font(.system(size: 15, design: .monospaced))
+                        .font(.system(size: 15, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
                 }
@@ -763,7 +763,7 @@ private struct WeekChartLegend: View {
                 Rectangle().fill(color).frame(width: 14, height: 2)
             }
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -787,7 +787,7 @@ private struct SessionSection: View {
                 Spacer()
                 if let when = session.when {
                     Text(when)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(session.late ? Color.pulseDanger : Color.pulseTextPrimary)
                 }
             }
@@ -799,13 +799,13 @@ private struct SessionSection: View {
                 Spacer()
                 if let duration = session.duration {
                     Text(duration)
-                        .font(.system(size: 15, design: .monospaced))
+                        .font(.system(size: 15, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                 }
             }
 
             Text(session.meta)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .tracking(0.4)
                 .foregroundStyle(Color.pulseTextSecondary)
 
@@ -880,12 +880,12 @@ private struct WakeMetricView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(metric.label.uppercased())
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, design: .rounded))
                     // `.08em` de 10px ≈ 0.8pt.
                     .tracking(0.8)
                     .foregroundStyle(Color.pulseTextSecondary)
                 Text(metric.value.map(HomeNumberFormat.grouped) ?? "—")
-                    .font(.system(size: 21, weight: .medium, design: .monospaced))
+                    .font(.system(size: 21, weight: .medium, design: .rounded))
                     .foregroundStyle(metric.value == nil ? Color.pulseTextSecondary : Color.pulseTextPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -894,7 +894,7 @@ private struct WakeMetricView: View {
                     // même choix que `.wake-delta`/`.wake-delta.hit` côté web
                     // (couleur d'écart, pas la couleur de la métrique).
                     Text("\(delta.sign)\(Int(delta.value))")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12, design: .rounded))
                         .foregroundStyle(delta.hit ? Color.pulseSuccess : Color.pulseStress)
                 }
             }
@@ -916,7 +916,7 @@ private struct NightSection: View {
             if let duration = viewModel.nightDurationLabel {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(duration)
-                        .font(.system(size: 36, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 36, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .tracking(-0.72)  // `-0.02em` de 36px.
                     if let delta = viewModel.nightDelta {
@@ -945,12 +945,12 @@ private struct NightSection: View {
                         HomeLabel(text: "Coucher moyen")
                         Spacer()
                         Text(bedtime.clock)
-                            .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 19, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.pulseTextPrimary)
                     }
                     BedtimeSpread(bedtime: bedtime)
                     Text(bedtime.note)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: .rounded))
                         .lineSpacing(5)
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
@@ -1043,7 +1043,7 @@ private struct BedtimeSpread: View {
                 ZStack(alignment: .topLeading) {
                     ForEach(bedtime.ticks) { tick in
                         Text(tick.label)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 10, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                             .position(x: geo.size.width * CGFloat(tick.at), y: geo.size.height / 2)
                     }

@@ -224,7 +224,7 @@ private struct Spo2NightCard: View {
                 .font(PulseFont.metricLabel)
                 .foregroundStyle(Color.pulseTextSecondary)
             Text(value)
-                .font(.system(size: 14, weight: highlighted ? .bold : .medium, design: .monospaced))
+                .font(.system(size: 14, weight: highlighted ? .bold : .medium, design: .rounded))
                 .foregroundStyle(highlighted ? Color.pulseDanger : Color.pulseTextPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

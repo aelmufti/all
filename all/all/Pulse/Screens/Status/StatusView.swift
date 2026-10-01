@@ -137,15 +137,15 @@ private struct StatusFact: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased())
-                .font(.system(.caption2, design: .monospaced))
+                .font(.system(.caption2, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
                 .tracking(0.6)
             Text(value)
-                .font(.system(.body, design: .monospaced))
+                .font(.system(.body, design: .rounded))
                 .foregroundStyle(Color.pulseTextPrimary)
             if !note.isEmpty {
                 Text(note)
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(.system(.caption2, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
@@ -168,7 +168,7 @@ private struct StatusAutoSyncCard: View {
                         .foregroundStyle(Color.pulseTextPrimary)
                     if let sub = viewModel.autoSyncStallNote {
                         Text(sub)
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                 }
@@ -176,13 +176,13 @@ private struct StatusAutoSyncCard: View {
 
             StatusRow(label: "Fichiers en attente") {
                 Text("\(viewModel.autoSync?.pending ?? 0)")
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
             }
 
             StatusRow(label: "Dernier sync réussi") {
                 Text(viewModel.autoSyncLastSuccessLabel)
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
             }
 
@@ -190,16 +190,16 @@ private struct StatusAutoSyncCard: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     if let next = viewModel.autoSyncNextAttemptLabel {
                         Text(next)
-                            .font(.system(.subheadline, design: .monospaced))
+                            .font(.system(.subheadline, design: .rounded))
                             .foregroundStyle(Color.pulseTextPrimary)
                         if let countdown = viewModel.autoSyncCountdown {
                             Text("dans \(countdown)")
-                                .font(.system(.caption2, design: .monospaced))
+                                .font(.system(.caption2, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                     } else {
                         Text("désactivé")
-                            .font(.system(.subheadline, design: .monospaced))
+                            .font(.system(.subheadline, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                 }
@@ -207,7 +207,7 @@ private struct StatusAutoSyncCard: View {
 
             StatusRow(label: "Cadence") {
                 Text(viewModel.autoSyncCadence)
-                    .font(.system(.subheadline, design: .monospaced))
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
             }
         }
@@ -246,21 +246,21 @@ private struct StatusSyncStatusCard: View {
 
                     if let fresh = viewModel.syncFreshLabel {
                         Text("Données à jour il y a \(fresh)")
-                            .font(.system(.footnote, design: .monospaced))
+                            .font(.system(.footnote, design: .rounded))
                             .foregroundStyle(Color.pulseTextPrimary)
                     } else {
                         Text("Aucune donnée de santé enregistrée")
-                            .font(.system(.footnote, design: .monospaced))
+                            .font(.system(.footnote, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
 
                     if let lastSync = viewModel.syncLastSuccessLabel {
                         Text("Dernière synchro réussie : \(lastSync)")
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     } else {
                         Text("Aucune synchro enregistrée")
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
 
@@ -270,17 +270,17 @@ private struct StatusSyncStatusCard: View {
                                 .tint(Color.pulseTextPrimary)
                         }
                         Text(running)
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(Color.pulseSuccess)
                     } else if let waiting = viewModel.syncWaitingLabel {
                         Text(waiting)
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
 
                     if let message = viewModel.syncStatus?.message {
                         Text(message)
-                            .font(.system(.caption2, design: .monospaced))
+                            .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(
                                 viewModel.syncStatus?.state == .error
                                     ? Color.pulseDanger : Color.pulseSuccess

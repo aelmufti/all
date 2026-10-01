@@ -168,7 +168,7 @@ private struct ActivitiesHeader: View {
                 .foregroundStyle(Color.pulseTextPrimary)
             Spacer()
             Text(countLabel)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -189,7 +189,7 @@ private struct ActivitiesDayGroup: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.sm) {
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .tracking(1.0)
                 .foregroundStyle(Color.pulseTextSecondary)
 
@@ -222,13 +222,13 @@ private struct ActivityRow: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Color.pulseTextPrimary)
                 Text(ActivityDateFormatting.clock(ActivityDateFormatting.date(from: activity.startTime)))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(trailingValue)
-                .font(.system(size: 14, design: .monospaced))
+                .font(.system(size: 14, design: .rounded))
                 .foregroundStyle(Color.pulseTextPrimary)
         }
         .padding(EdgeInsets(top: 14, leading: 12, bottom: 14, trailing: 14))

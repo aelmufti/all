@@ -466,7 +466,7 @@ private struct SettingsIngestTokenRow: View {
                 .font(.caption)
                 .foregroundStyle(Color.pulseTextSecondary)
             Text(token ?? "—")
-                .font(.system(.footnote, design: .monospaced))
+                .font(.system(.footnote, design: .rounded))
                 .textSelection(.enabled)
             HStack(spacing: PulseSpacing.sm) {
                 Button("Copier") {

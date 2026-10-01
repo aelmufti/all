@@ -169,7 +169,7 @@ private struct ActivityHeaderRow: View {
                     .tracking(-0.2)
                     .foregroundStyle(Color.pulseTextPrimary)
                 Text(ActivityDateFormatting.rangeLabel(ActivityDateFormatting.date(from: detail.startTime)))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
@@ -226,12 +226,12 @@ private struct ActivityStatTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
                 .foregroundStyle(accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .tracking(0.8)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
@@ -288,7 +288,7 @@ private struct ActivityMapCard: View {
                     .background(Circle().fill(Color.pulseSurface))
                     .frame(width: 8, height: 8)
                 Text("départ")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             HStack(spacing: 6) {
@@ -296,7 +296,7 @@ private struct ActivityMapCard: View {
                     .fill(Color.pulseTextPrimary)
                     .frame(width: 8, height: 8)
                 Text("arrivée")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
@@ -394,16 +394,16 @@ private struct ActivityMetricChartCard: View {
                     HStack(alignment: .lastTextBaseline) {
                         HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
                             Text(head.value)
-                                .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 32, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Color.pulseTextPrimary)
                             Text(head.unit)
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(.system(size: 13, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                         Spacer()
                         if !head.range.isEmpty {
                             Text(head.range)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.system(size: 12, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                     }
@@ -496,7 +496,7 @@ private struct ActivityMetricChartCard: View {
             Spacer()
             Text(elapsedLabel(maxTime))
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(.system(size: 10, design: .rounded))
         .foregroundStyle(Color.pulseTextSecondary)
     }
 
@@ -789,7 +789,7 @@ private struct ActivityLapsCard: View {
         if laps.count > 1 {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Tours".uppercased())
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
                     .tracking(1.32)
                     .foregroundStyle(Color.pulseTextSecondary)
                     .padding(.horizontal, 16)
@@ -806,7 +806,7 @@ private struct ActivityLapsCard: View {
                     Text("bpm")
                         .frame(width: 52, alignment: .trailing)
                 }
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .tracking(0.8)
                 .foregroundStyle(Color.pulseTextSecondary)
                 .padding(.horizontal, 16)
@@ -815,7 +815,7 @@ private struct ActivityLapsCard: View {
                 ForEach(laps) { lap in
                     HStack(spacing: 10) {
                         Text("\(lap.index)")
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.system(size: 13, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                             .frame(width: 26, alignment: .leading)
                         Text(ActivityFormat.clock(lap.durationS ?? 0))
@@ -825,7 +825,7 @@ private struct ActivityLapsCard: View {
                         Text(lap.avgHr != nil ? "\(Int(lap.avgHr!.rounded()))" : "—")
                             .frame(width: 52, alignment: .trailing)
                     }
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.system(size: 14, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)

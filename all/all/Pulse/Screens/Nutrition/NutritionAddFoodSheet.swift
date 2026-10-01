@@ -102,7 +102,7 @@ private struct NutritionAddMenu: View {
 
                     if !viewModel.results.isEmpty {
                         Text(viewModel.searchSource == "online" ? "Open Food Facts" : "Ta bibliothèque")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
                             .tracking(0.6)
                             .foregroundStyle(Color.pulseTextSecondary)
 
@@ -119,7 +119,7 @@ private struct NutritionAddMenu: View {
                                         Spacer()
                                         if let kcal = food.kcal {
                                             Text("\(Int(kcal.rounded())) kcal/100 g")
-                                                .font(.system(size: 12, design: .monospaced))
+                                                .font(.system(size: 12, design: .rounded))
                                                 .foregroundStyle(Color.pulseTextSecondary)
                                         }
                                     }
@@ -180,7 +180,7 @@ private struct NutritionAddMenu: View {
                                 .foregroundStyle(Color.pulseTextPrimary)
                             Spacer()
                             Text("\(viewModel.frequent.count)")
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.system(size: 12, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                         .padding(.vertical, PulseSpacing.xs)
@@ -264,7 +264,7 @@ private struct NutritionAddFrequentList: View {
                                             .foregroundStyle(Color.pulseTextPrimary)
                                             .lineLimit(1)
                                         Text(nutritionAddFrequentSub(food))
-                                            .font(.system(size: 11, design: .monospaced))
+                                            .font(.system(size: 11, design: .rounded))
                                             .foregroundStyle(Color.pulseTextSecondary)
                                             .lineLimit(1)
                                     }
@@ -323,7 +323,7 @@ private func nutritionAddFrequentSub(_ food: NutritionFrequentFood) -> String {
 private struct NutritionAddManualForm: View {
     @Bindable var viewModel: NutritionViewModel
 
-    private let labelFont = Font.system(size: 10, weight: .medium, design: .monospaced)
+    private let labelFont = Font.system(size: 10, weight: .medium, design: .rounded)
 
     var body: some View {
         ScrollView {
@@ -355,7 +355,7 @@ private struct NutritionAddManualForm: View {
                                     viewModel.toggleUnit()
                                 } label: {
                                     Text(viewModel.amountUnitText())
-                                        .font(.system(size: 13, design: .monospaced))
+                                        .font(.system(size: 13, design: .rounded))
                                 }
                                 .buttonStyle(.bordered)
                                 .disabled(viewModel.pUnitGrams == nil)

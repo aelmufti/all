@@ -124,12 +124,14 @@ enum PulseRadius {
 // MARK: - Typo
 
 /// Échelle inspirée des classes utilitaires `.metric-*` du SCSS Pulse
-/// (valeur en gros chiffres monospacés + unité + libellé discret en petites
-/// capitales) — la base des `StatTile`.
+/// (grande valeur + unité + libellé discret en petites capitales) — la base
+/// des `StatTile`. Typo globale SF Rounded (posée à la racine, cf.
+/// `ContentView`) ; les chiffres restent alignés via le `.monospacedDigit()`
+/// global, donc inutile de le répéter ici.
 enum PulseFont {
-    static let metricValue = Font.system(size: 36, weight: .semibold, design: .monospaced)
-    static let metricUnit = Font.system(size: 13, weight: .medium, design: .monospaced)
-    static let metricLabel = Font.system(size: 11, weight: .medium, design: .monospaced)
+    static let metricValue = Font.system(size: 36, weight: .semibold, design: .rounded)
+    static let metricUnit = Font.system(size: 13, weight: .medium, design: .rounded)
+    static let metricLabel = Font.system(size: 11, weight: .medium, design: .rounded)
     static let sectionTitle = Font.system(.headline, weight: .semibold)
     static let body = Font.system(.body)
 }

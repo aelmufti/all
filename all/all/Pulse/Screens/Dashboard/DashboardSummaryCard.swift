@@ -40,7 +40,7 @@ struct DashboardSummaryCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             Text(summary.title.uppercased())
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .tracking(1.0)
                 .foregroundStyle(Color.pulseTextSecondary)
 
@@ -60,13 +60,13 @@ struct DashboardSummaryCard: View {
         HStack(alignment: .center, spacing: PulseSpacing.md) {
             HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
                 Text(summary.heroValue)
-                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 30, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 if !summary.heroUnit.isEmpty {
                     Text(summary.heroUnit)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
@@ -85,11 +85,11 @@ struct DashboardSummaryCard: View {
             HStack(spacing: PulseSpacing.sm) {
                 if let delta = summary.delta {
                     Text(delta.text)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(delta.tone.color)
                 }
                 Text(summary.footNote)
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .font(.system(size: 11.5, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -108,7 +108,7 @@ private struct DashboardFlagBadge: View {
         HStack(spacing: 4) {
             Circle().fill(flag.level.color).frame(width: 6, height: 6)
             Text(flag.text)
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .font(.system(size: 10.5, weight: .medium, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
                 .lineLimit(1)
         }

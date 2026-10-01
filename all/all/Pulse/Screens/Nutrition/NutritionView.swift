@@ -161,12 +161,12 @@ private struct NutritionDayHeader: View {
                 Button {
                     viewModel.shiftDay(by: -1)
                 } label: {
-                    Text("‹").font(.system(size: 14, design: .monospaced))
+                    Text("‹").font(.system(size: 14, design: .rounded))
                 }
                 .buttonStyle(NutritionDayPillStyle())
 
                 Text(nutritionShortDateLabel(isToday: viewModel.isToday, date: viewModel.date))
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 13, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
                     .lineLimit(1)
                     .fixedSize()
@@ -182,7 +182,7 @@ private struct NutritionDayHeader: View {
                 Button {
                     viewModel.shiftDay(by: 1)
                 } label: {
-                    Text("›").font(.system(size: 14, design: .monospaced))
+                    Text("›").font(.system(size: 14, design: .rounded))
                 }
                 .buttonStyle(NutritionDayPillStyle())
                 .disabled(viewModel.isToday)
@@ -251,7 +251,7 @@ private struct NutritionSectionLabel<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(Color.pulseTextSecondary)
             Spacer()
@@ -284,17 +284,17 @@ private struct NutritionMacrosCard: View {
                     HStack {
                         Spacer()
                         Text(nutritionKcalRangeLabel(kcalBar))
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
 
                     HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                         Text(nutritionValueText(kcalBar.consumed))
-                            .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 44, weight: .semibold, design: .rounded))
                             .foregroundStyle(kcalBar.consumed == nil ? Color.pulseTextSecondary : Color.pulseTextPrimary)
                         Spacer()
                         Text("kcal")
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.system(size: 13, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
 
@@ -336,15 +336,15 @@ private struct NutritionMacroCell: View {
         let hit = nutritionInRange(bar)
         VStack(alignment: .leading, spacing: 6) {
             Text(bar.label.uppercased())
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .tracking(0.8)
                 .foregroundStyle(Color.pulseTextSecondary)
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(nutritionValueText(bar.consumed))
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(.system(size: 14, design: .rounded))
                     .foregroundStyle(hit ? Color.pulseSuccess : Color.pulseTextPrimary)
                 Text(bar.unit)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             NutritionGaugeBar(
@@ -357,7 +357,7 @@ private struct NutritionMacroCell: View {
                 }
                 Text(bar.rangeText)
             }
-            .font(.system(size: 10, design: .monospaced))
+            .font(.system(size: 10, design: .rounded))
             .foregroundStyle(hit ? Color.pulseSuccess : Color.pulseTextSecondary)
         }
     }
@@ -518,14 +518,14 @@ private struct NutritionObjectiveCard: View {
         PulseCard {
             NutritionSectionLabel("Objectif du jour") {
                 Text(sourceLabel)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 
             if target.auto.status == "ok" {
                 HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
                     Text(nutritionValueText(target.auto.targetKcal))
-                        .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 40, weight: .semibold, design: .rounded))
                     Text("kcal")
                         .font(PulseFont.metricUnit)
                         .foregroundStyle(Color.pulseTextSecondary)
@@ -545,7 +545,7 @@ private struct NutritionObjectiveCard: View {
             } else {
                 HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.xs) {
                     Text(nutritionValueText(target.targets.kcal))
-                        .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 40, weight: .semibold, design: .rounded))
                     Text("kcal")
                         .font(PulseFont.metricUnit)
                         .foregroundStyle(Color.pulseTextSecondary)
@@ -587,9 +587,9 @@ private struct NutritionFigure: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(nutritionValueText(value))
-                .font(.system(.body, design: .monospaced)).fontWeight(.semibold)
+                .font(.system(.body, design: .rounded)).fontWeight(.semibold)
             Text(label.uppercased())
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -605,7 +605,7 @@ private struct NutritionPill: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, design: .monospaced))
+            .font(.system(size: 11, design: .rounded))
             .padding(.horizontal, PulseSpacing.sm)
             .padding(.vertical, 4)
             .background(tone == .warn ? Color.pulseDanger.opacity(0.14) : Color.pulseSurfaceAlt)
@@ -633,7 +633,7 @@ private struct NutritionJournalCard: View {
         PulseCard {
             NutritionSectionLabel("Journée") {
                 Text("\(nutritionValueText(day.totals.kcal)) kcal")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 
@@ -655,7 +655,7 @@ private struct NutritionJournalCard: View {
                             } label: {
                                 HStack(alignment: .top, spacing: PulseSpacing.md) {
                                     Text(entry.ts.map(nutritionClock) ?? "—:—")
-                                        .font(.system(size: 12, design: .monospaced))
+                                        .font(.system(size: 12, design: .rounded))
                                         .foregroundStyle(Color.pulseTextSecondary)
                                         .frame(width: 38, alignment: .leading)
                                     VStack(alignment: .leading, spacing: 3) {
@@ -664,12 +664,12 @@ private struct NutritionJournalCard: View {
                                             .foregroundStyle(Color.pulseTextPrimary)
                                             .multilineTextAlignment(.leading)
                                         Text("\(nutritionValueText(entry.protein)) P · \(nutritionValueText(entry.carbs)) G · \(nutritionValueText(entry.fiber)) F")
-                                            .font(.system(size: 11, design: .monospaced))
+                                            .font(.system(size: 11, design: .rounded))
                                             .foregroundStyle(Color.pulseTextSecondary)
                                     }
                                     Spacer(minLength: PulseSpacing.sm)
                                     Text(nutritionValueText(entry.kcal))
-                                        .font(.system(size: 14, design: .monospaced))
+                                        .font(.system(size: 14, design: .rounded))
                                         .foregroundStyle(Color.pulseTextPrimary)
                                 }
                                 .contentShape(Rectangle())
@@ -741,7 +741,7 @@ private struct NutritionFrequentCard: View {
                                     .foregroundStyle(Color.pulseTextPrimary)
                                     .lineLimit(1)
                                 Text(nutritionFrequentPortion(food))
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(.system(size: 11, design: .rounded))
                                     .foregroundStyle(Color.pulseTextSecondary)
                             }
                             .padding(PulseSpacing.sm)
@@ -808,7 +808,7 @@ private struct NutritionFriseView: View {
                     Spacer()
                     Text("00:00")
                 }
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
                 .frame(width: width)
 
@@ -827,7 +827,7 @@ private struct NutritionFriseView: View {
                 }
 
                 Text(note)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
                     .offset(y: 40)
             }
@@ -885,7 +885,7 @@ private struct NutritionSuggestionsCard: View {
         PulseCard {
             NutritionSectionLabel("Pour finir la journée") {
                 Text(nutritionSuggestSummary(count: top.count, remainingProtein: day?.remaining.protein))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: PulseSpacing.sm) {
@@ -900,7 +900,7 @@ private struct NutritionSuggestionsCard: View {
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                             Text("\(Int(item.kcal.rounded())) kcal · \(Int(item.protein.rounded())) P")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                         .padding(PulseSpacing.sm)

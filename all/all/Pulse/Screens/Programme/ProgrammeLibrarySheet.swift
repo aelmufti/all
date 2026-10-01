@@ -36,7 +36,7 @@ struct ProgrammeLibrarySheet: View {
                     Section {
                         // Web `.u11 { font-family:mono; font-size:11px }`.
                         Text(domain.hint)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                     Section {
@@ -71,18 +71,18 @@ struct ProgrammeLibrarySheet: View {
         // textes ci-dessous (intro, consigne, note de sélection).
         Section {
             Text(pickIntro(choice))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
             Text(domain.kind == .sleep
                  ? "Coche les jours où tu dois te lever à heure imposée. Les autres servent de référence pour le décalage social et le rattrapage."
                  : "Choisis les jours où tu peux t’entraîner.")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
             ProgrammeDayPicker(order: Self.pickerOrder, picked: $pickedDays)
                 .listRowInsets(EdgeInsets())
                 .padding(.vertical, PulseSpacing.xs)
             Text(pickNote(choice))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(pickShort(choice) ? Color.pulseDanger : Color.pulseTextSecondary)
             Button("Commencer aujourd’hui") {
                 onActivate(choice.id, pickedDays.sorted())
@@ -161,7 +161,7 @@ private struct ProgrammeChoiceRow: View {
                 // Web `.pick-goal { font-size:13px }`.
                 Text(choice.goal).font(.system(size: 13)).foregroundStyle(Color.pulseTextSecondary)
                 Text("\(meta) · \(choice.source)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Spacer()
@@ -193,7 +193,7 @@ private struct ProgrammeDayPicker: View {
                     if isOn { picked.remove(day) } else { picked.insert(day) }
                 } label: {
                     Text(ProgrammeDate.weekdayLetters[day])
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .frame(maxWidth: .infinity, minHeight: 46)
                         .background(isOn ? Color.pulseTextPrimary : Color.pulseSurface)
                         .foregroundStyle(isOn ? Color.pulseSurface : Color.pulseTextSecondary)

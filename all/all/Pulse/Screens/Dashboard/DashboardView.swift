@@ -141,7 +141,7 @@ private struct DashboardMapRow: View {
             // séances, pas les tracés) — note générique plutôt qu'un chiffre
             // inventé.
             Text("tracés GPS")
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
 
             Image(systemName: "chevron.right")
@@ -205,7 +205,7 @@ private struct DashboardPeriodTrack: View {
                     selection = period
                 } label: {
                     Text(period.shortLabel)
-                        .font(.system(size: 11, weight: period == selection ? .semibold : .regular, design: .monospaced))
+                        .font(.system(size: 11, weight: period == selection ? .semibold : .regular, design: .rounded))
                         .foregroundStyle(period == selection ? Color.pulseTextPrimary : Color.pulseTextSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -256,21 +256,21 @@ struct DashboardFigureRow: View {
                 let overridden = highlights[index]
                 VStack(alignment: .leading, spacing: 2) {
                     Text(tile.label.uppercased())
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
                         .tracking(0.8)
                         .foregroundStyle(Color.pulseTextSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                     HStack(alignment: .lastTextBaseline, spacing: 2) {
                         Text(overridden ?? tile.value)
-                            .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 19, weight: .semibold, design: .rounded))
                             .foregroundStyle(overridden != nil ? Color.pulseTextPrimary : tile.accent)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .contentTransition(.numericText())
                         if let unit = tile.unit {
                             Text(unit)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .font(.system(size: 11, weight: .regular, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                     }
@@ -317,7 +317,7 @@ struct DashboardCardHeader<Trailing: View>: View {
     var body: some View {
         HStack {
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                .font(.system(size: 11, weight: .regular, design: .rounded))
                 .tracking(1.3)
                 .foregroundStyle(Color.pulseTextSecondary)
             Spacer()

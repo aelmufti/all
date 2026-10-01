@@ -48,12 +48,12 @@ struct HealthDayNavigator: View {
                     Button {
                         Task { await viewModel.shiftDay(by: -1) }
                     } label: {
-                        Text("‹").font(.system(size: 14, design: .monospaced))
+                        Text("‹").font(.system(size: 14, design: .rounded))
                     }
                     .buttonStyle(HealthDayPillStyle())
 
                     Text(shortLabel)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 13, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
                         .fixedSize()
@@ -69,7 +69,7 @@ struct HealthDayNavigator: View {
                     Button {
                         Task { await viewModel.shiftDay(by: 1) }
                     } label: {
-                        Text("›").font(.system(size: 14, design: .monospaced))
+                        Text("›").font(.system(size: 14, design: .rounded))
                     }
                     .buttonStyle(HealthDayPillStyle())
                     .disabled(viewModel.isLastDay)
@@ -153,13 +153,13 @@ struct SleepCard: View {
                     // plus grand que `PulseFont.metricValue` (36, générique
                     // StatTile), sans toucher à `DesignSystem.swift`.
                     Text(HealthViewModel.sleepShort(main.durationS))
-                        .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 44, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                     Spacer()
                     if let score = sleep.score {
                         HStack(alignment: .firstTextBaseline, spacing: 3) {
                             Text("\(Int(score.rounded()))")
-                                .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 20, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Color.pulseSleep)
                             Text("/100")
                                 .font(PulseFont.metricUnit)
@@ -250,7 +250,7 @@ struct SleepCard: View {
             HStack(spacing: 0) {
                 ForEach(Array(ticks.enumerated()), id: \.offset) { index, label in
                     Text(label)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                     if index < ticks.count - 1 {
                         Spacer(minLength: 0)
@@ -281,7 +281,7 @@ struct SleepCard: View {
                     Spacer(minLength: 0)
                     if let breakdown {
                         Text("\(breakdown.percent(part(of: stage, in: breakdown)))%")
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.pulseTextPrimary)
                     }
                 }
@@ -359,7 +359,7 @@ struct HealthMetricChartCard: View {
                     // Maquette « Santé » : classe `.hero-n` = 32px (pas
                     // `PulseFont.metricValue`, 36 — jeton générique StatTile).
                     Text(value)
-                        .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 32, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
                         .contentTransition(.numericText())
@@ -445,7 +445,7 @@ private extension View {
                         if let date = value.as(Date.self) {
                             let hour = Int(date.timeIntervalSince(domain.lowerBound) / 3_600)
                             Text("\(hour)h")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
                     }
@@ -707,7 +707,7 @@ private struct StressZoneChart: View {
                 HStack {
                     Text("0h"); Spacer(); Text("6h"); Spacer(); Text("12h"); Spacer(); Text("18h"); Spacer(); Text("24h")
                 }
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
             }
         }
@@ -787,7 +787,7 @@ struct CaloriesSummary: View {
                 HStack {
                     Text("0h"); Spacer(); Text("6h"); Spacer(); Text("12h"); Spacer(); Text("18h"); Spacer(); Text("24h")
                 }
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
             }
         } else {
@@ -991,7 +991,7 @@ struct WeightCard: View {
                 if let shown = weightHover?.kg ?? viewModel.shownWeight {
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
                         Text(String(format: "%.1f", shown))
-                            .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 44, weight: .semibold, design: .rounded))
                             .foregroundStyle(
                                 (weightHover == nil && viewModel.dayWeight == nil) ? Color.pulseTextSecondary : Color.pulseTextPrimary
                             )
@@ -1002,7 +1002,7 @@ struct WeightCard: View {
                     }
                 } else {
                     Text("—")
-                        .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 44, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                 }
                 Spacer()
@@ -1038,13 +1038,13 @@ struct WeightCard: View {
                         } label: {
                             HStack {
                                 Text(HealthViewModel.shortDateLabel(point.date))
-                                    .font(.system(size: 12, design: .monospaced))
+                                    .font(.system(size: 12, design: .rounded))
                                     .foregroundStyle(
                                         point.date == viewModel.date ? Color.pulseTextPrimary : Color.pulseTextSecondary
                                     )
                                 Spacer()
                                 Text("\(String(format: "%.1f", point.kg)) kg")
-                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
                                     .foregroundStyle(Color.pulseTextPrimary)
                             }
                             .padding(.vertical, 7)
@@ -1071,7 +1071,7 @@ struct WeightCard: View {
                     .keyboardType(.decimalPad)
                     #endif
                     .focused($weightFieldFocused)
-                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
                     .padding(.horizontal, PulseSpacing.md)
                     .padding(.vertical, 10)

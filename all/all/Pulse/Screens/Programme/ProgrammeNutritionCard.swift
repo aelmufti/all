@@ -27,16 +27,16 @@ struct ProgrammeNutritionCard: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(programmeNutritionSummary(detail.today))
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 13, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Text("\(domain.label) · \(programmeBadge(domain)) · pilote \(domain.drives.lowercased())")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
 
             weekStrip
             Text("Sept derniers jours · part des cibles tenues, pointillés quand rien n’est saisi.")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
 
             VStack(alignment: .leading, spacing: PulseSpacing.md) {
@@ -80,7 +80,7 @@ struct ProgrammeNutritionCard: View {
                         }
                     }
                     Text(programmeWeekdayLetter(day.date))
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -104,7 +104,7 @@ private struct ProgrammeMacroGaugeRow: View {
                 Spacer()
                 // `.val { font-family:mono; font-size:19px; font-weight:600 }`.
                 Text(valueText)
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 19, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
             }
             GeometryReader { geo in
@@ -128,10 +128,10 @@ private struct ProgrammeMacroGaugeRow: View {
             HStack(spacing: 6) {
                 Circle().fill(color).frame(width: 7, height: 7)
                 Text(stateText)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                 Spacer()
                 Text(goalText)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }

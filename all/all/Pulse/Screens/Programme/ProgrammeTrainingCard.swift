@@ -70,12 +70,12 @@ struct ProgrammeTrainingSection: View {
                     // Web `.prog-name { font-size:17px; font-weight:600 }`.
                     .font(.system(size: 17, weight: .semibold))
                 Text(domain.active?.source ?? "")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Spacer()
             Text(programmeBadge(domain))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(programmeFinished(domain) ? Color.pulseAccent : Color.pulseTextSecondary)
         }
     }
@@ -86,11 +86,11 @@ struct ProgrammeTrainingSection: View {
                 // Web `.hero-n { font-size:44px; font-weight:600 }` — plus
                 // grand que `PulseFont.metricValue` (36), gardé ici tel quel.
                 Text("\(weekSessions.filter(\.done).count)")
-                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
                 // `.hero-of` hérite la famille mono + le poids 600 de `.hero-n`
                 // (pas de reset dans le SCSS), seule la taille (22px) change.
                 Text("/\(weekSessions.count)")
-                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Text(heroLabel)
@@ -172,7 +172,7 @@ struct ProgrammeTrainingSection: View {
                         )
                         .accessibilityLabel(Text(cell.title))
                     Text(cell.letter)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -201,7 +201,7 @@ struct ProgrammeTrainingSection: View {
             ProgrammeLegendDot(color: .pulseDanger.opacity(0.55), label: "en retard", outlined: true)
             ProgrammeLegendDot(color: .pulseTextSecondary, label: "aujourd’hui", dashed: true)
         }
-        .font(.system(size: 11, design: .monospaced))
+        .font(.system(size: 11, design: .rounded))
     }
 
     /// `<app-seg variant="track">` — piste `--surface-2` (pas de défilement :
@@ -217,7 +217,7 @@ struct ProgrammeTrainingSection: View {
                     viewModel.shownWeek = index
                 } label: {
                     Text("S\(index)")
-                        .font(.system(size: 12, weight: selected ? .semibold : .regular, design: .monospaced))
+                        .font(.system(size: 12, weight: selected ? .semibold : .regular, design: .rounded))
                         .frame(maxWidth: .infinity, minHeight: 34)
                         .background(selected ? Color.pulseSurface : Color.clear)
                         .foregroundStyle(selected ? Color.pulseTextPrimary : Color.pulseTextSecondary)
@@ -239,7 +239,7 @@ struct ProgrammeTrainingSection: View {
         VStack(alignment: .leading, spacing: PulseSpacing.sm) {
             Divider()
             Text("\(detail.done) séances sur \(detail.total) pointées sur les \(active.weeks) semaines.")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
             Button("Relancer un cycle aujourd’hui") {
                 Task { await viewModel.restart(domain) }
@@ -256,7 +256,7 @@ struct ProgrammeTrainingSection: View {
         // `.next { gap:10px; padding:0 2px }`.
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text("Prochaine")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .tracking(1.3)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.pulseTextSecondary)
@@ -271,11 +271,11 @@ struct ProgrammeTrainingSection: View {
         PulseCard {
             HStack(alignment: .firstTextBaseline) {
                 Text("Séances sur la montre")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
                 Spacer()
                 Text(programmePushSummary(filesSent: viewModel.pushFilesSent))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Button {
@@ -287,7 +287,7 @@ struct ProgrammeTrainingSection: View {
             .buttonStyle(.bordered)
             .disabled(viewModel.isBusy || viewModel.pushStatus?.state == "running")
             Text(programmePushHint(status: viewModel.pushStatus))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -303,7 +303,7 @@ struct ProgrammeTrainingSection: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(domain.active?.goal ?? "")
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 13, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -353,7 +353,7 @@ private struct ProgrammeSessionRow: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(session.done ? Color.pulseTextSecondary : Color.pulseTextPrimary)
                         Text(programmeSessionMeta(session))
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -377,7 +377,7 @@ private struct ProgrammeSessionRow: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.name).font(.system(size: 14))
                             Text(item.prescription)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                             if let note = item.note {
                                 Text(note)

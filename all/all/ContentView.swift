@@ -60,6 +60,20 @@ struct ContentView: View {
                 LoginView()
             }
         }
+        // Typo globale « premium doux » (choix produit 2026-10-01) : toute
+        // l'app en SF Rounded plutôt que le monospace « labo » d'origine. Posé
+        // une seule fois ici, à la racine, et hérité par toute la hiérarchie —
+        // y compris les feuilles (`.sheet`) et les destinations de navigation,
+        // qui héritent de l'environnement du présentateur. Les écrans qui
+        // fixaient `design: .rounded` en dur ont été repassés en `.rounded`
+        // pour ne pas court-circuiter cette cascade (un `design:` explicite
+        // prime sur `.fontDesign`).
+        .fontDesign(.rounded)
+        // `.monospacedDigit()` global : chiffres à largeur fixe partout, donc
+        // les colonnes de valeurs (grilles de métriques, tableaux) restent
+        // alignées et ne « sautent » pas quand un chiffre change — l'alignement
+        // qu'assurait le monospace, conservé sans le reste de son allure.
+        .monospacedDigit()
         // `nil` (auto) laisse le système décider ; `.light`/`.dark` force le
         // thème — propage à l'`UITraitCollection` de la fenêtre, donc les
         // `Color(light:dark:)` dynamiques de `DesignSystem.swift` se

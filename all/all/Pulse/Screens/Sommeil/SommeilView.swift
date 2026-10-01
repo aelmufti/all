@@ -83,12 +83,12 @@ private struct SommeilDayNavigator: View {
                 Spacer()
                 HStack(spacing: 6) {
                     Button { Task { await viewModel.shiftDay(by: -1) } } label: {
-                        Text("‹").font(.system(size: 14, design: .monospaced))
+                        Text("‹").font(.system(size: 14, design: .rounded))
                     }
                     .buttonStyle(SommeilDayPillStyle())
 
                     Text(viewModel.shortLabel)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 13, design: .rounded))
                         .foregroundStyle(Color.pulseTextPrimary)
                         .lineLimit(1)
                         .fixedSize()
@@ -102,7 +102,7 @@ private struct SommeilDayNavigator: View {
                         .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
                     Button { Task { await viewModel.shiftDay(by: 1) } } label: {
-                        Text("›").font(.system(size: 14, design: .monospaced))
+                        Text("›").font(.system(size: 14, design: .rounded))
                     }
                     .buttonStyle(SommeilDayPillStyle())
                     .disabled(viewModel.isLastDay)
@@ -242,11 +242,11 @@ private struct WakeAlarmCard: View {
                             .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                         if let minutes = store.minutes(for: weekday) {
                             Text(WakeScheduleStore.hhmm(minutes))
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(.system(size: 9, design: .rounded))
                                 .foregroundStyle(isSelected ? Color.pulseSurface.opacity(0.85) : Color.pulseSleep)
                         } else {
                             Text("—")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(.system(size: 9, design: .rounded))
                                 .foregroundStyle(isSelected ? Color.pulseSurface.opacity(0.6) : Color.pulseAbsent)
                         }
                     }
@@ -353,13 +353,13 @@ private struct SommeilNightCard: View {
             }
             HStack(alignment: .lastTextBaseline) {
                 Text(HealthViewModel.sleepShort(main.durationS))
-                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
                 Spacer()
                 if let score = viewModel.day?.sleep.score {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text("\(Int(score.rounded()))")
-                            .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.pulseSleep)
                         Text("/100")
                             .font(PulseFont.metricUnit)
@@ -448,7 +448,7 @@ private struct SommeilNightCard: View {
             HStack(spacing: 0) {
                 ForEach(Array(ticks.enumerated()), id: \.offset) { index, label in
                     Text(label)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                     if index < ticks.count - 1 { Spacer(minLength: 0) }
                 }
@@ -473,7 +473,7 @@ private struct SommeilNightCard: View {
                     Spacer(minLength: 0)
                     if let breakdown {
                         Text("\(breakdown.percent(part(of: stage, in: breakdown)))%")
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundStyle(Color.pulseTextPrimary)
                     }
                 }
@@ -529,20 +529,20 @@ private struct SommeilAnalysisCard: View {
     private func figure(_ label: String, _ value: String, unit: String? = nil, tint: Color = .pulseTextPrimary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .font(.system(size: 10, weight: .regular, design: .rounded))
                 .tracking(0.8)
                 .foregroundStyle(Color.pulseTextSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 19, weight: .semibold, design: .rounded))
                     .foregroundStyle(tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 if let unit {
                     Text(unit)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
@@ -587,7 +587,7 @@ private struct SommeilCompositionCard: View {
                     ForEach(rows) { row in
                         HStack(spacing: PulseSpacing.sm) {
                             Text(row.label)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                                 .frame(width: 74, alignment: .leading)
                             GeometryReader { proxy in
@@ -604,7 +604,7 @@ private struct SommeilCompositionCard: View {
                             }
                             .frame(height: 8)
                             Text("\(row.pct) %")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11, design: .rounded))
                                 .foregroundStyle(row.out ? Color.pulseDanger : Color.pulseTextPrimary)
                                 .frame(width: 34, alignment: .trailing)
                         }

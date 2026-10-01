@@ -52,12 +52,12 @@ struct ProgrammeSleepSection: View {
                     // Web `.prog-name { font-size:17px; font-weight:600 }`.
                     .font(.system(size: 17, weight: .semibold))
                 Text(domain.active?.source ?? "")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Spacer()
             Text(programmeBadge(domain))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -68,10 +68,10 @@ struct ProgrammeSleepSection: View {
         HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
             HStack(alignment: .lastTextBaseline, spacing: 2) {
                 Text(detail.nights > 0 ? "\(detail.hits)" : "—")
-                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
                     .foregroundStyle(detail.nights > 0 ? Color.pulseTextPrimary : Color.pulseAbsent)
                 Text("/\(detail.total)")
-                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Text("critères tenus · \(programmeSleepWindowLabel(detail))")
@@ -88,7 +88,7 @@ struct ProgrammeSleepSection: View {
                         .fill(night.workDay ? Color.pulseSleep : Color.pulseSleep.opacity(0.42))
                         .frame(height: max(4, CGFloat(night.sleepMin) / 8))
                     Text(ProgrammeDate.weekdayLetters[max(0, min(6, night.weekday))])
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: 9, design: .rounded))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -103,7 +103,7 @@ struct ProgrammeSleepSection: View {
             ProgrammeLegendDot(color: .pulseSleep, label: "avant un jour travaillé")
             ProgrammeLegendDot(color: .pulseSleep.opacity(0.42), label: "avant un jour libre")
         }
-        .font(.system(size: 11, design: .monospaced))
+        .font(.system(size: 11, design: .rounded))
     }
 
     // Web `.metrics { gap:14px }`.
@@ -127,7 +127,7 @@ struct ProgrammeSleepSection: View {
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text("\(detail.metrics.count) critères")
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: 13, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             ForEach(domain.active?.notes ?? [], id: \.self) { note in
@@ -151,7 +151,7 @@ struct ProgrammeSleepSection: View {
             }
 
             Text(programmeWorkDaysLabel(domain))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -180,7 +180,7 @@ private struct ProgrammeSleepMetricRow: View {
                 Text(metric.label).font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Text(programmeSleepValueText(metric))
-                    .font(.system(size: 19, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 19, weight: .semibold, design: .rounded))
             }
 
             GeometryReader { geo in
@@ -204,10 +204,10 @@ private struct ProgrammeSleepMetricRow: View {
                     Circle().fill(programmeSleepMarkerColor(metric)).frame(width: 7, height: 7)
                 }
                 Text(programmeSleepStateText(metric))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                 Spacer()
                 Text(programmeSleepTargetText(metric))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 

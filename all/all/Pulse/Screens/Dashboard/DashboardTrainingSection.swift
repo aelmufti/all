@@ -196,7 +196,7 @@ private struct DashboardStreakCard: View {
             }
             HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                 Text("\(streak.best)")
-                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseTextPrimary)
                 Text("semaines sans coupure")
                     .font(PulseFont.metricUnit)
@@ -304,7 +304,7 @@ private struct DashboardRecordRow: View {
                 .foregroundStyle(Color.pulseTextPrimary)
             Spacer()
             Text(value)
-                .font(.system(.body, design: .monospaced).weight(.medium))
+                .font(.system(.body, design: .rounded).weight(.medium))
                 .foregroundStyle(Color.pulseTextPrimary)
             if let caption {
                 Text(caption)

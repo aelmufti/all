@@ -66,7 +66,7 @@ struct DashboardSleepRecommendationCard: View {
 
             HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                 Text(adapted?.bedtime ?? reco.recommendedBedtime ?? "—")
-                    .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 44, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.pulseSleep)
                 if let target = reco.targetHours {
                     Text("pour viser ~\(dashboardHoursHM(target))")
@@ -298,19 +298,19 @@ private struct DashboardSleepTileRow: View {
             ForEach(tiles) { tile in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(tile.label.uppercased())
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
                         .tracking(0.6)
                         .foregroundStyle(Color.pulseTextSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     Text(tile.value)
-                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
                         .foregroundStyle(tile.tint)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     if !tile.sub.isEmpty {
                         Text(tile.sub)
-                            .font(.system(size: 10.5, design: .monospaced))
+                            .font(.system(size: 10.5, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                             .lineLimit(2)
                     }
@@ -340,7 +340,7 @@ private struct DashboardSleepCompositionCard: View {
                 ForEach(dashboardCompositionRows(composition), id: \.label) { row in
                     HStack(spacing: PulseSpacing.sm) {
                         Text(row.label)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                             .frame(width: 74, alignment: .leading)
                         GeometryReader { proxy in
@@ -359,7 +359,7 @@ private struct DashboardSleepCompositionCard: View {
                         }
                         .frame(height: 8)
                         Text("\(Int(row.pct.rounded())) %")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(row.out ? Color.pulseDanger : Color.pulseTextPrimary)
                             .frame(width: 34, alignment: .trailing)
                     }
@@ -391,15 +391,15 @@ private struct DashboardSleepRegularityTiles: View {
     private func regularityTile(label: String, value: String, sub: String, tint: Color = .pulseTextPrimary) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .tracking(0.6)
                 .foregroundStyle(Color.pulseTextSecondary)
             Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
             if !sub.isEmpty {
                 Text(sub)
-                    .font(.system(size: 10.5, design: .monospaced))
+                    .font(.system(size: 10.5, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
@@ -470,7 +470,7 @@ private struct DashboardSleepDebtCard: View {
                     }
                     HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                         Text(String(format: "%.1f", abs(sleepDebt.debtHours)))
-                            .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 44, weight: .semibold, design: .rounded))
                             .foregroundStyle(sleepDebt.debtHours <= 0 ? Color.pulseSuccess : Color.pulseTextPrimary)
                         Text("h")
                             .font(PulseFont.metricUnit)
@@ -525,10 +525,10 @@ private struct DashboardMiniFigure: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(.body, design: .monospaced).weight(.medium))
+                .font(.system(.body, design: .rounded).weight(.medium))
                 .foregroundStyle(Color.pulseTextPrimary)
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -548,18 +548,18 @@ private struct DashboardNightsDetailCard: View {
                 ForEach(viewModel.debtDetail) { night in
                     HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                         Text(dashboardLongDate(night.date))
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.system(.caption, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                             .frame(minWidth: 90, alignment: .leading)
                         Text(dashboardFormatHM(night.sleepS))
-                            .font(.system(.body, design: .monospaced).weight(.medium))
+                            .font(.system(.body, design: .rounded).weight(.medium))
                             .foregroundStyle(Color.pulseTextPrimary)
                         Spacer()
                         Text(dashboardFormatSignedHM(night.deltaS))
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.system(.caption, design: .rounded))
                             .foregroundStyle(night.deltaS < 0 ? Color.pulseDanger : Color.pulseSuccess)
                         Text(dashboardFormatSignedHours(night.cumulativeS))
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.system(.caption, design: .rounded))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                     .padding(.vertical, PulseSpacing.xs)
@@ -612,7 +612,7 @@ private struct DashboardSleepInsightsCard: View {
                                 }
                                 .frame(height: 12)
                                 Text(String(format: "%.1f", avgStress))
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(.system(.caption, design: .rounded))
                                     .foregroundStyle(Color.pulseTextPrimary)
                                 Text("\(bucket.nights) n")
                                     .font(.caption2)
@@ -658,7 +658,7 @@ private struct DashboardSleepInsightsCard: View {
                             }
                             .frame(height: 12)
                             Text(String(format: "%.1f %%", row.pct))
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(.caption, design: .rounded))
                                 .foregroundStyle(row.out ? Color.pulseDanger : Color.pulseTextPrimary)
                             Text("réf. \(Int(row.lo))–\(Int(row.hi)) %")
                                 .font(.caption2)
@@ -709,7 +709,7 @@ private struct DashboardSleepRegularityCard: View {
             if let score = regularity.score {
                 HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
                     Text("\(score)")
-                        .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 44, weight: .semibold, design: .rounded))
                         .foregroundStyle(dashboardRegularityColor(score: score))
                     Text("/100")
                         .font(PulseFont.metricUnit)

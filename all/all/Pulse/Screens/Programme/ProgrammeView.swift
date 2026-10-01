@@ -103,7 +103,7 @@ struct ProgrammeView: View {
         HStack {
             Spacer()
             Text(programmeActiveNote(viewModel.domains))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
     }
@@ -146,13 +146,13 @@ private struct ProgrammeLibraryCard: View {
             // ce libellé est délibérément discret côté web.
             HStack {
                 Text("Bibliothèque")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .tracking(1.3)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.pulseTextSecondary)
                 Spacer()
                 Text("\(domains.reduce(0) { $0 + $1.choices.count }) programmes")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -168,7 +168,7 @@ private struct ProgrammeLibraryCard: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(domain.label).font(.subheadline.weight(.semibold))
                                 Text(programmeLibraryNote(domain))
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(.system(size: 11, design: .rounded))
                                     .foregroundStyle(Color.pulseTextSecondary)
                             }
                             Spacer()
