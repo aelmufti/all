@@ -93,31 +93,40 @@ struct SettingsView: View {
                 Task { await viewModel.retry() }
             }
         case .loaded:
+            // Organisé en blocs nets (évite l'effet « fourre-tout ») : données
+            // (le mode Stockage, colonne vertébrale, reconfigure tout le reste),
+            // puis réglages personnels (profil / réveil / apparence), puis
+            // montre & synchronisation, puis compte. Chaque `Section` garde son
+            // propre en-tête — c'est lui qui matérialise la séparation entre
+            // groupes dans un `Form` groupé.
             Form {
+                // — Données —
                 SettingsStorageSection(onRequestServerLogin: { pendingServerMode = $0 })
-                SettingsAppearanceSection()
+
+                // — Personnel —
+                SettingsProfileSection(viewModel: viewModel)
                 SettingsWakeSection()
+                SettingsAppearanceSection()
+
+                // — Montre & synchronisation —
+                // Programme : démasqué depuis L7a (`docs/stockage-local.md`) —
+                // `GET api/programme` est servi par `RealLocalPulseBackend`
+                // (lecture seule), donc `ProgrammeView` s'ouvre pour de vrai même
+                // en mode Téléphone ; les actions d'écriture (activer / arrêter /
+                // cocher / envoyer) restent différées et lèvent
+                // `LocalPulseUnavailableError` dans ce mode.
+                SettingsProgrammeSection(onOpen: { showProgramme = true })
                 if storageMode.mode == .phone {
-                    // Démasqué depuis l'incrément L7a (`docs/stockage-local.md`) :
-                    // `GET api/programme` est désormais servi par
-                    // `RealLocalPulseBackend` (lecture seule) — ouvrir
-                    // `ProgrammeView` en mode Téléphone charge donc les trois
-                    // domaines pour de vrai. Les actions d'écriture
-                    // (activer/arrêter/cocher/envoyer) restent différées :
-                    // elles lèvent `LocalPulseUnavailableError`, affichée
-                    // comme n'importe quelle erreur par l'écran.
-                    SettingsProgrammeSection(onOpen: { showProgramme = true })
                     SettingsWatchOnlySection(onWatch: { showWatch = true })
-                    SettingsProfileSection(viewModel: viewModel)
                 } else {
-                    SettingsProgrammeSection(onOpen: { showProgramme = true })
                     SettingsSyncSourceSection(
                         viewModel: viewModel,
                         onStatus: { showStatus = true },
                         onWatch: { showWatch = true }
                     )
                     SettingsStatusSection(viewModel: viewModel)
-                    SettingsProfileSection(viewModel: viewModel)
+
+                    // — Compte —
                     SettingsApplicationSection(viewModel: viewModel, username: auth.username)
                 }
             }
@@ -360,6 +369,12 @@ private struct SettingsWakeSection: View {
     /// fait redessiner la section après chaque `set`/`clear`.
     @State private var store = WakeScheduleStore.shared
 
+    /// Accès au lien BLE courant (état de connexion + `GarminSession` active)
+    /// pour le bouton « Envoyer à la montre » — même point d'entrée que le
+    /// reste de l'app (`BLEManager.shared`, ex. `WeightCard` dans
+    /// `HealthSubviews.swift`, qui observe `ble.weightWriteState`).
+    @ObservedObject private var ble = BLEManager.shared
+
     private var pickedMinutes: Int {
         let c = Calendar.current.dateComponents([.hour, .minute], from: time)
         return (c.hour ?? 7) * 60 + (c.minute ?? 0)
@@ -415,16 +430,24 @@ private struct SettingsWakeSection: View {
             }
             .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
                                       bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
-        } header: {
-            HStack {
-                Text("Réveil")
-                Spacer()
-                Text(wakeScheduleSummary(store.minutesByWeekday))
-                    .textCase(nil)
-                    .foregroundStyle(Color.pulseTextSecondary)
+
+            // Envoi manuel du planning courant vers la montre (alarme native,
+            // `GarminSession.writeAlarms`) — jamais automatique. Déclenché
+            // indépendamment du rappel téléphone ci-dessus (qui, lui, reste
+            // inchangé).
+            if let session = ble.garminSession {
+                WatchAlarmUploadRow(
+                    session: session,
+                    schedule: store.minutesByWeekday,
+                    isLinkActive: ble.connectionState == .connected
+                )
+            } else {
+                WatchAlarmUploadRow.disconnectedPlaceholder
             }
+        } header: {
+            Text("Réveil")
         } footer: {
-            Text("Rappel téléphone (son à l'heure réglée) — pas l'alarme Horloge iOS : sans les alertes critiques, il ne sonne ni en silencieux ni en boucle. L'heure de coucher conseillée de l'écran Sommeil s'adapte à l'heure de lever réglée ici pour le prochain lever.")
+            Text("Rappel téléphone (son à l'heure réglée) — pas l'alarme Horloge iOS : sans les alertes critiques, il ne sonne ni en silencieux ni en boucle. L'heure de coucher conseillée de l'écran Sommeil s'adapte à l'heure de lever réglée ici pour le prochain lever. « Envoyer à la montre » règle en plus une alarme native sur la Venu 2, à partir du même planning.")
         }
     }
 
@@ -468,42 +491,95 @@ private struct SettingsWakeSection: View {
     }
 }
 
-/// Résumé compact du planning courant pour l'en-tête de la section — regroupe
-/// les jours consécutifs partageant la même heure (ex. « Lun–Ven 07:00 · Sam
-/// 08:30 »). `"aucun"` si aucun réveil n'est réglé.
-private func wakeScheduleSummary(_ schedule: [Int: Int]) -> String {
-    guard !schedule.isEmpty else { return "aucun" }
-    let order = [2, 3, 4, 5, 6, 7, 1] // Lun … Dim
-    let labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+// MARK: - Envoi du planning d'alarmes vers la montre (upload FIT Settings)
+//
+// Bouton manuel (jamais automatique) qui pousse `store.minutesByWeekday` vers
+// la montre via `GarminSession.writeAlarms` (canal d'upload partagé avec le
+// poids, cf. `GarminSession.swift`). Observe directement la `GarminSession`
+// active plutôt que `BLEManager` : contrairement au poids
+// (`BLEManager.weightWriteState`, relayé par un abonnement existant côté
+// `BLEManager`), rien ne relaie encore `GarminSession.$alarmWriteState`
+// jusqu'à `BLEManager` — un `@Published` d'un `ObservableObject` ENFANT ne
+// remonte pas automatiquement à l'`objectWillChange` du parent en
+// SwiftUI/Combine (cf. le commentaire de
+// `BLEManager.garminSessionChangeForwarder`). Ajouter ce relais appartient à
+// `BLEManager.swift`, hors périmètre de cette tâche (lot parallélisé) : cette
+// ligne s'abonne donc elle-même à la session, ce qui suffit à rester à jour
+// sans y toucher.
+private struct WatchAlarmUploadRow: View {
+    @ObservedObject var session: GarminSession
+    let schedule: [Int: Int]
+    let isLinkActive: Bool
 
-    var parts: [String] = []
-    var groupStart: Int?
-    var groupMinutes: Int?
-    var previousIndex: Int?
-
-    func flush(endIndex: Int) {
-        guard let start = groupStart, let minutes = groupMinutes else { return }
-        let time = WakeScheduleStore.hhmm(minutes)
-        parts.append(start == endIndex ? "\(labels[start]) \(time)" : "\(labels[start])–\(labels[endIndex]) \(time)")
+    /// Rendu quand aucune `GarminSession` n'est active (pas de lien BLE) —
+    /// bouton désactivé, pas de session à observer.
+    static var disconnectedPlaceholder: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
+            sendButtonLabel(enabled: false)
+            Text("aucun lien BLE actif")
+                .font(.caption)
+                .foregroundStyle(Color.pulseAbsent)
+        }
+        .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
+                                  bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
     }
 
-    for (index, weekday) in order.enumerated() {
-        guard let minutes = schedule[weekday] else {
-            if let previousIndex { flush(endIndex: previousIndex) }
-            groupStart = nil; groupMinutes = nil; previousIndex = nil
-            continue
+    var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
+            Button {
+                session.writeAlarms(schedule: schedule)
+            } label: {
+                Self.sendButtonLabel(enabled: canSend)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+
+            if session.alarmWriteState != .idle {
+                HStack(spacing: PulseSpacing.xs) {
+                    Image(systemName: statusIcon)
+                        .font(.system(size: 11))
+                    Text("Montre : \(session.alarmWriteState.label)")
+                        .font(.caption)
+                }
+                .foregroundStyle(statusColor)
+            }
         }
-        if groupStart != nil, groupMinutes == minutes, previousIndex == index - 1 {
-            previousIndex = index
-        } else {
-            if let previousIndex { flush(endIndex: previousIndex) }
-            groupStart = index
-            groupMinutes = minutes
-            previousIndex = index
+        .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
+                                  bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
+    }
+
+    private var canSend: Bool {
+        isLinkActive && session.alarmWriteState != .uploading
+    }
+
+    private static func sendButtonLabel(enabled: Bool) -> some View {
+        Text("Envoyer à la montre")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(enabled ? Color.pulseOnAccent : Color.pulseTextSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                    .fill(enabled ? Color.pulseAccent : Color.pulseEmpty)
+            )
+    }
+
+    private var statusIcon: String {
+        switch session.alarmWriteState {
+        case .sent: return "checkmark.circle.fill"
+        case .refused, .failed: return "exclamationmark.triangle.fill"
+        case .uploading: return "arrow.up.circle"
+        default: return "clock"
         }
     }
-    if let previousIndex { flush(endIndex: previousIndex) }
-    return parts.joined(separator: " · ")
+
+    private var statusColor: Color {
+        switch session.alarmWriteState {
+        case .sent: return Color.pulseSteps
+        case .refused, .failed: return Color.pulseCalories
+        default: return Color.pulseTextSecondary
+        }
+    }
 }
 
 // MARK: - Programme
