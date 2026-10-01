@@ -96,6 +96,7 @@ struct SettingsView: View {
             Form {
                 SettingsStorageSection(onRequestServerLogin: { pendingServerMode = $0 })
                 SettingsAppearanceSection()
+                SettingsWakeSection()
                 if storageMode.mode == .phone {
                     // Démasqué depuis l'incrément L7a (`docs/stockage-local.md`) :
                     // `GET api/programme` est désormais servi par
@@ -320,6 +321,189 @@ private struct SettingsAppearanceSection: View {
     private var themeBinding: Binding<ThemeStore.Theme> {
         Binding(get: { theme.theme }, set: { theme.theme = $0 })
     }
+}
+
+// MARK: - Réveil (heure de lever, lié au profil)
+//
+// Déplacé depuis l'onglet Sommeil (où il n'avait pas sa place) vers les
+// Paramètres. Réglage réglé DANS l'app — pas une alarme de l'app Horloge iOS
+// (illisible et non pilotable depuis une app tierce). Double rôle : programme
+// un rappel sonore (`WakeAlarmScheduler`) et pilote l'adaptation de la carte
+// « Heure de coucher conseillée » de l'écran Sommeil : dès qu'un réveil est
+// réglé pour le prochain lever, celle-ci se recalcule sur cette heure plutôt
+// que sur l'heure de lever habituelle renvoyée par le serveur.
+//
+// Présenté dans TOUS les modes de stockage (lié au profil, pas à la source de
+// synchro). Restylé en `Form`/`Section` pour cet écran — l'ancienne carte
+// `PulseCard` de l'onglet Sommeil n'aurait pas le bon vocabulaire visuel ici.
+//
+// NOTE (incrément A) : la persistance reste pour l'instant le store global
+// `WakeScheduleStore` (`UserDefaults`, device-wide). Le passage à un stockage
+// lié au profil (serveur en mode Pulse/Les deux via `GET`/`PUT
+// api/wake-schedule`, SQLite local en mode Téléphone) se fait dans les
+// incréments suivants, sans changer l'API lue ici (`store.minutesByWeekday`,
+// `set`, `clear`).
+
+private struct SettingsWakeSection: View {
+    private static let weekdays = [2, 3, 4, 5, 6, 7, 1] // Lun … Dim (Calendar weekday, 1 = dim.)
+    private static let labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+
+    @State private var time: Date = {
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        components.hour = 7
+        components.minute = 0
+        return Calendar.current.date(from: components) ?? Date()
+    }()
+    @State private var selected: Set<Int> = []
+
+    /// `WakeScheduleStore` étant `@Observable`, lire `minutesByWeekday` ici
+    /// fait redessiner la section après chaque `set`/`clear`.
+    @State private var store = WakeScheduleStore.shared
+
+    private var pickedMinutes: Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
+        return (c.hour ?? 7) * 60 + (c.minute ?? 0)
+    }
+
+    var body: some View {
+        Section {
+            DatePicker("Heure", selection: $time, displayedComponents: .hourAndMinute)
+
+            weekdayChips
+
+            HStack(spacing: PulseSpacing.sm) {
+                Button {
+                    let minutes = pickedMinutes
+                    let weekdays = selected
+                    Task {
+                        _ = await WakeAlarmScheduler.shared.requestAuthorizationIfNeeded()
+                        WakeScheduleStore.shared.set(minutes: minutes, weekdays: weekdays)
+                    }
+                } label: {
+                    Text("Régler à \(WakeScheduleStore.hhmm(pickedMinutes))")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.pulseOnAccent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                                .fill(selected.isEmpty ? Color.pulseEmpty : Color.pulseAccent)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(selected.isEmpty)
+
+                Button {
+                    WakeScheduleStore.shared.clear(weekdays: selected)
+                } label: {
+                    Text("Désactiver")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(selected.isEmpty ? Color.pulseAbsent : Color.pulseTextPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                                .fill(Color.pulseSurface)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(selected.isEmpty)
+            }
+            .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
+                                      bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
+        } header: {
+            HStack {
+                Text("Réveil")
+                Spacer()
+                Text(wakeScheduleSummary(store.minutesByWeekday))
+                    .textCase(nil)
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+        } footer: {
+            Text("Rappel téléphone (son à l'heure réglée) — pas l'alarme Horloge iOS : sans les alertes critiques, il ne sonne ni en silencieux ni en boucle. L'heure de coucher conseillée de l'écran Sommeil s'adapte à l'heure de lever réglée ici pour le prochain lever.")
+        }
+    }
+
+    private var weekdayChips: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(Self.weekdays.enumerated()), id: \.offset) { index, weekday in
+                let isSelected = selected.contains(weekday)
+                Button {
+                    if isSelected { selected.remove(weekday) } else { selected.insert(weekday) }
+                } label: {
+                    VStack(spacing: 3) {
+                        Text(Self.labels[index])
+                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        if let minutes = store.minutes(for: weekday) {
+                            Text(WakeScheduleStore.hhmm(minutes))
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(isSelected ? Color.pulseSurface.opacity(0.85) : Color.pulseSleep)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(isSelected ? Color.pulseSurface.opacity(0.6) : Color.pulseAbsent)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 42)
+                    .foregroundStyle(isSelected ? Color.pulseSurface : Color.pulseTextSecondary)
+                    .background(isSelected ? Color.pulseTextPrimary : Color.pulseSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(isSelected ? Color.clear : Color.pulseBorder, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
+                                  bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
+    }
+}
+
+/// Résumé compact du planning courant pour l'en-tête de la section — regroupe
+/// les jours consécutifs partageant la même heure (ex. « Lun–Ven 07:00 · Sam
+/// 08:30 »). `"aucun"` si aucun réveil n'est réglé.
+private func wakeScheduleSummary(_ schedule: [Int: Int]) -> String {
+    guard !schedule.isEmpty else { return "aucun" }
+    let order = [2, 3, 4, 5, 6, 7, 1] // Lun … Dim
+    let labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+
+    var parts: [String] = []
+    var groupStart: Int?
+    var groupMinutes: Int?
+    var previousIndex: Int?
+
+    func flush(endIndex: Int) {
+        guard let start = groupStart, let minutes = groupMinutes else { return }
+        let time = WakeScheduleStore.hhmm(minutes)
+        parts.append(start == endIndex ? "\(labels[start]) \(time)" : "\(labels[start])–\(labels[endIndex]) \(time)")
+    }
+
+    for (index, weekday) in order.enumerated() {
+        guard let minutes = schedule[weekday] else {
+            if let previousIndex { flush(endIndex: previousIndex) }
+            groupStart = nil; groupMinutes = nil; previousIndex = nil
+            continue
+        }
+        if groupStart != nil, groupMinutes == minutes, previousIndex == index - 1 {
+            previousIndex = index
+        } else {
+            if let previousIndex { flush(endIndex: previousIndex) }
+            groupStart = index
+            groupMinutes = minutes
+            previousIndex = index
+        }
+    }
+    if let previousIndex { flush(endIndex: previousIndex) }
+    return parts.joined(separator: " · ")
 }
 
 // MARK: - Programme
