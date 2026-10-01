@@ -472,6 +472,13 @@ struct SampleLineChart: View {
     /// une date continue ; on recale sur l'échantillon le plus proche.
     @State private var selectedDate: Date?
 
+    /// Progression du tracé gauche→droite (0 = rien, 1 = courbe complète) —
+    /// animée à chaque arrivée de nouvelles données (synchro, changement de
+    /// source, de jour). Rend visible « les données qui se chargent petit à
+    /// petit » : un masque de largeur `width * drawProgress` dévoile la courbe
+    /// (ligne + aire) du début de journée vers le plus récent. Cf. `animateDraw`.
+    @State private var drawProgress: CGFloat = 0
+
     var body: some View {
         if samples.isEmpty {
             emptyState
@@ -515,6 +522,37 @@ struct SampleLineChart: View {
                 guard let newValue, let sample = nearest(to: newValue) else { hover = nil; return }
                 hover = ChartHoverPoint(value: sample.value, timeLabel: HealthViewModel.clock(Int(sample.ts)))
             }
+            // Dévoilement gauche→droite : masque dont la largeur suit
+            // `drawProgress`. `GeometryReader` place son contenu en haut-gauche,
+            // donc le rectangle part du bord gauche (début de journée). Une fois
+            // à 1, le masque couvre toute la largeur → aucun rognage résiduel
+            // (survol/hit-test intacts).
+            .mask(alignment: .leading) {
+                GeometryReader { geo in
+                    Rectangle().frame(width: geo.size.width * drawProgress)
+                }
+            }
+            .onAppear { animateDraw() }
+            .onChange(of: dataSignature) { _, _ in animateDraw() }
+        }
+    }
+
+    /// Change dès que la série affichée change (nouveau jour, données
+    /// synchronisées, bascule de source) — déclencheur du re-tracé. Basé sur le
+    /// cardinal + les bornes temporelles : suffisant pour distinguer deux séries
+    /// sans hacher toutes les valeurs à chaque rendu.
+    private var dataSignature: String {
+        "\(samples.count)-\(samples.first?.ts ?? 0)-\(samples.last?.ts ?? 0)"
+    }
+
+    /// Relance le tracé : remet la progression à 0 (sans animation), puis anime
+    /// jusqu'à 1 au tour de boucle suivant. Le `DispatchQueue.main.async`
+    /// garantit que la frame à 0 est bien appliquée avant l'animation — sinon
+    /// SwiftUI fusionne les deux mutations et il n'y a aucun balayage visible.
+    private func animateDraw() {
+        drawProgress = 0
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.65)) { drawProgress = 1 }
         }
     }
 

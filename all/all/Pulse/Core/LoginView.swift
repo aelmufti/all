@@ -196,13 +196,18 @@ struct PulseCredentialsForm: View {
             Button(action: onSubmit) {
                 if isSubmitting {
                     ProgressView()
+                        .tint(Color.pulseOnAccent)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, PulseSpacing.xs)
                 } else {
                     Text(submitLabel)
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, PulseSpacing.xs)
                 }
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .tint(Color.pulseAccent)
             .disabled(isSubmitDisabled)
             .padding(.top, PulseSpacing.xs)
