@@ -295,10 +295,4 @@ struct HomeViewModelFormattingTests {
         #expect(mondayComponents.day == 21)
         #expect(mondayComponents.month == 9)
     }
-
-    @Test func goalReasonLabelsAreNonEmptyForEveryCase() {
-        for reason: IntensityGoalReason in [.seed, .raised, .lowered, .light, .held, .pinned, .skipped] {
-            #expect(!HomeViewModel.goalReasonLabel(reason).isEmpty)
-        }
-    }
 }

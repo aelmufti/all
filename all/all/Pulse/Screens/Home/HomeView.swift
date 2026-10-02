@@ -255,7 +255,9 @@ private struct NowSection: View {
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 HeartRateSparkline(
-                    samples: viewModel.day?.hr ?? [], stale: viewModel.staleLabel != nil, hover: $hover
+                    samples: viewModel.hrSparkline,
+                    stale: viewModel.staleLabel != nil && !viewModel.isLiveNow,
+                    hover: $hover
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -554,12 +556,6 @@ private struct WeekTrainingSection: View {
             plot
 
             facts
-
-            // `.week-note { font-family:mono; font-size:10px; line-height:1.65; }`.
-            Text(viewModel.weekNote)
-                .font(.system(size: 10, design: .rounded))
-                .lineSpacing(6.5)
-                .foregroundStyle(Color.pulseTextSecondary)
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 22)

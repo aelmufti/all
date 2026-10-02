@@ -169,14 +169,14 @@ final class WakeScheduleStore {
         String(format: "%02d:%02d", minutes / 60, minutes % 60)
     }
 
-    /// Recalcule localement l'heure de coucher conseillée à partir du **prochain
-    /// réveil à venir** réglé dans l'app — exactement la sémantique d'un réveil :
-    /// on cherche la première occurrence future d'un réveil programmé, à partir
-    /// de maintenant. À 1 h du lundi, le réveil de lundi matin (07:00) est encore
-    /// à venir → c'est LUI (la nuit dim.→lun. en cours), pas mardi. À 10 h, une
-    /// fois lundi passé, ce sera le prochain jour réglé (mardi, etc.). On garde
-    /// volontairement cette sémantique « par alarme » (pas un ancrage stable) :
-    /// c'est un réveil qu'on adapte, pas une moyenne.
+    /// Recalcule localement l'heure de coucher conseillée à partir du réveil qui
+    /// cadre la **nuit à venir** réglé dans l'app. On ne considère que le réveil
+    /// restant d'aujourd'hui puis celui de demain matin (cf. `nextWake`) : à 1 h
+    /// du lundi, le réveil de lundi 07:00 est encore devant → c'est LUI (nuit
+    /// dim.→lun. en cours) ; un vendredi après-midi sans réveil samedi, on ne
+    /// cale PAS le coucher sur le lundi — on renvoie `nil` et l'appelant montre
+    /// la reco serveur (lever habituel). C'est un réveil imminent qu'on adapte,
+    /// pas une moyenne ni une alarme lointaine.
     ///
     /// On applique ensuite la formule de la reco serveur (bedtime = lever −
     /// (durée cible + éveil habituel + délai d'endormissement)), mais avec
@@ -186,8 +186,9 @@ final class WakeScheduleStore {
     /// de `stepMin` ce soir — mais seulement si le serveur envoie `stepMin`
     /// (contrat v2) ; un serveur v1 (pas de `stepMin`) ne déclenche jamais de
     /// palier ici, pour rester compatible. `nil` si aucun réveil n'est
-    /// programmé dans les 7 prochains jours, ou si le serveur n'a pas encore de
-    /// durée cible exploitable (nuits insuffisantes).
+    /// programmé pour la nuit à venir (aujourd'hui restant ou demain matin), ou
+    /// si le serveur n'a pas encore de durée cible exploitable (nuits
+    /// insuffisantes).
     func adaptedBedtime(
         reco: DashboardSleepRecommendation,
         calendar: Calendar = .current,
@@ -234,11 +235,14 @@ final class WakeScheduleStore {
         (((a - b) % 1_440 + 1_440 + 720) % 1_440) - 720
     }
 
-    /// Prochaine occurrence future d'un réveil programmé (minutes + weekday) —
-    /// balaie aujourd'hui puis les 6 jours suivants et retient le premier
-    /// instant `startOfDay + réveil` strictement après `now`.
+    /// Réveil qui cadre la **nuit à venir** (minutes + weekday) — on ne regarde
+    /// que le réveil restant d'aujourd'hui (ex. il est 1 h, le réveil de 7 h est
+    /// encore devant) puis celui de demain matin. Au-delà (aucun réveil demain),
+    /// on renvoie `nil` : l'appelant retombe alors sur la reco serveur (lever
+    /// habituel), au lieu de caler le coucher de ce soir sur un réveil situé à
+    /// plusieurs jours (ex. un vendredi soir vers le lundi matin).
     private func nextWake(calendar: Calendar, now: Date) -> (minutes: Int, weekday: Int)? {
-        for offset in 0...6 {
+        for offset in 0...1 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
             let weekday = calendar.component(.weekday, from: day)
             guard let wakeMinutes = minutes(for: weekday) else { continue }

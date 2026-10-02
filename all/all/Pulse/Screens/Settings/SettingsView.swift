@@ -49,6 +49,7 @@ struct SettingsView: View {
     @State private var showStatus = false
     @State private var showWatch = false
     @State private var showProgramme = false
+    @State private var showHelp = false
     @State private var storageMode = StorageModeStore.shared
     /// Mode serveur (Pulse / Les deux) demandé depuis le picker de stockage
     /// alors qu'aucune session n'est active — présente `PulseModeLoginSheet`.
@@ -76,6 +77,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showStatus) { StatusView() }
         .sheet(isPresented: $showWatch) { WatchSectionView() }
         .sheet(isPresented: $showProgramme) { ProgrammeView() }
+        .sheet(isPresented: $showHelp) { HelpView() }
         // Ancré à la racine stable (pas sur une Section du Form) — cf. le
         // commentaire de `pendingServerMode`.
         .sheet(item: $pendingServerMode) { mode in
@@ -107,6 +109,7 @@ struct SettingsView: View {
                 SettingsProfileSection(viewModel: viewModel)
                 SettingsWakeSection()
                 SettingsAppearanceSection()
+                SettingsHelpSection(onOpen: { showHelp = true })
 
                 // — Montre & synchronisation —
                 // Programme : démasqué depuis L7a (`docs/stockage-local.md`) —
@@ -603,6 +606,31 @@ private struct SettingsProgrammeSection: View {
             }
         } header: {
             Text("Programme")
+        }
+    }
+}
+
+// MARK: - Aide
+//
+// Sous-page de lecture (`HelpView`) : les explications d'utilisation qui
+// alourdissaient les écrans de contenu (comment c'est calculé, comment lire un
+// repère) sont regroupées là, pour garder les écrans épurés. Présentée dans
+// tous les modes de stockage (ne dépend d'aucun serveur).
+
+private struct SettingsHelpSection: View {
+    let onOpen: () -> Void
+
+    var body: some View {
+        Section {
+            Button(action: onOpen) {
+                SettingsNavRow(
+                    icon: "questionmark.circle",
+                    title: "Aide",
+                    subtitle: "Comment lire et utiliser les écrans"
+                )
+            }
+        } header: {
+            Text("Aide")
         }
     }
 }

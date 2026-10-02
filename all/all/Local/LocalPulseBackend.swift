@@ -163,9 +163,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         // `stats/tab-health`/`stats/sleep-debt`/`stats/sleep-insights`/
         // `stats/sleep-regularity`/`stats/tab-nutrition` : miroir fidèle.
         // `stats/tab-training` : miroir partiel (`zones` toujours vide, cf.
-        // en-tête de `DashboardStats.swift`). `stats/sleep-recommendation`
-        // n'est PAS servi (best-effort côté `DashboardViewModel`, `try?`) :
-        // retombe sur le `default` ci-dessous, `LocalPulseUnavailableError`.
+        // en-tête de `DashboardStats.swift`). `stats/sleep-recommendation` :
+        // porté (`docs/duree-ideale-sommeil.md`), cf. en-tête de
+        // `DashboardStats.swift`.
 
         case ("GET", "stats/tab-health"):
             return try DashboardStatsBackend.tabHealth(db: db, query: query)
@@ -184,6 +184,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
 
         case ("GET", "stats/sleep-regularity"):
             return try DashboardStatsBackend.sleepRegularity(db: db, query: query)
+
+        case ("GET", "stats/sleep-recommendation"):
+            return try DashboardStatsBackend.sleepRecommendation(db: db, query: query)
 
         // MARK: Profil (incrément L6, miroir `ProfileController` — `profile.controller.ts`)
 

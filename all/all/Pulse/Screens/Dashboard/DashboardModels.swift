@@ -422,13 +422,19 @@ struct DashboardSleepRegularity: Decodable, Equatable {
 /// Heure de coucher conseillée pour « aller un peu mieux » : heure de lever
 /// habituelle − (durée cible + éveil habituel + délai d'endormissement).
 /// `status == "insufficient"` (moins de 3 nuits) → seuls `nights` et `status`
-/// sont présents. `basis` indique si la durée cible vient de l'objectif ou du
-/// lien stress observé. v2 (champs en plus, tous optionnels pour rester
-/// compatible avec un serveur v1) : `recommendedBedtime` est le coucher DE CE
+/// sont présents. `basis` = `"modele"` (≥ 14 nuits dans le modèle de durée
+/// idéale) ou `"prior"` (a priori littérature, peu/pas de nuits — cf.
+/// `docs/duree-ideale-sommeil.md`). `recommendedBedtime` est le coucher DE CE
 /// SOIR (avec palier appliqué si besoin), `targetBedtime` la cible finale sans
 /// palier ; `stepped` indique si un palier a été appliqué ; `latencyMin` est
 /// le délai d'endormissement retranché ; `debtHours`/`debtBonusMin` reflètent
-/// le bonus de durée dû à une dette de sommeil récente.
+/// le bonus de durée dû à une dette de sommeil récente. `idealHours`/
+/// `idealLowHours`/`idealHighHours` : durée idéale (+ intervalle 10-90 %) du
+/// modèle bayésien, bornée [7, 9.5] h et arrondie au quart d'heure ;
+/// `belowFloor` : l'estimation brute est sous le plancher de 7 h ;
+/// `modelNights` : nuits utilisées par le modèle (fenêtre de 180 nuits,
+/// distincte de `nights`) ; `trial` : « nuit d'essai » (exploration dosée),
+/// `targetHours` vise alors un point d'incertitude plutôt que l'idéal connu.
 struct DashboardSleepRecommendation: Decodable, Equatable {
     let nights: Int
     let status: String
@@ -444,10 +450,14 @@ struct DashboardSleepRecommendation: Decodable, Equatable {
     let latencyMin: Int?
     let shiftMin: Int?
     let avgAwakeMin: Int?
-    let stressSignificant: Bool?
-    let stressR: Double?
     let debtHours: Double?
     let debtBonusMin: Int?
+    let idealHours: Double?
+    let idealLowHours: Double?
+    let idealHighHours: Double?
+    let belowFloor: Bool?
+    let modelNights: Int?
+    let trial: Bool?
 
     var isActionable: Bool { status == "ok" && recommendedBedtime != nil }
 }

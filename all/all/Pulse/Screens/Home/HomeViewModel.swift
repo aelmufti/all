@@ -132,6 +132,15 @@ final class HomeViewModel {
     private(set) var programme: [HomeProgrammeDomain] = []
     private(set) var intensity: HomeIntensityReport?
     private(set) var live: HomeLiveHeartRate?
+
+    /// Échantillons FC mesurés en direct pendant la session, accumulés au fil
+    /// des trames. Servent à faire pousser le mini-graphe « Maintenant » en
+    /// temps réel même quand l'historique du jour (`day.hr`, alimenté par
+    /// ingestion `.fit` par lots) est encore vide — compte neuf, ou début de
+    /// journée avant la première ingestion. Borné aux derniers points.
+    private(set) var liveSamples: [HomeSample] = []
+    private static let liveSamplesCap = 300
+
     private(set) var sleepDebt: HomeSleepDebt?
     private(set) var dayTarget: HomeDayTargetAuto?
     private(set) var intake: HomeNutritionAmount?
@@ -251,6 +260,7 @@ final class HomeViewModel {
         guard StorageModeStore.current == .phone else {
             do {
                 live = try await client.get("api/live/hr")
+                recordLiveSampleIfPresent()
             } catch {
                 live = nil
             }
@@ -313,6 +323,36 @@ final class HomeViewModel {
             connected: BLEManager.shared.connectionState == .connected,
             wantsRealtime: BLEManager.shared.isRealtimeWanted
         )
+        recordLiveSampleIfPresent()
+    }
+
+    /// Ajoute l'échantillon courant à `liveSamples` dès qu'une FC en direct
+    /// exploitable est présente (mêmes critères que `isLiveNow`). Déduplique
+    /// par horodatage à la seconde : l'abonnement Combine et le rafraîchissement
+    /// périodique peuvent livrer la même lecture sans qu'il faille la recompter.
+    private func recordLiveSampleIfPresent() {
+        guard let live, live.enabled, live.reachable, !live.stale,
+              let bpm = live.heartRate else { return }
+        let ts = live.measuredAt.flatMap { Self.parseISODate($0) }.map { Int($0.timeIntervalSince1970) }
+            ?? Int(Date().timeIntervalSince1970)
+        if let last = liveSamples.last, last.ts == ts { return }
+        liveSamples.append(HomeSample(ts: ts, value: Double(bpm)))
+        if liveSamples.count > Self.liveSamplesCap {
+            liveSamples.removeFirst(liveSamples.count - Self.liveSamplesCap)
+        }
+    }
+
+    /// Série du mini-graphe FC : l'historique du jour, prolongé par TOUTES les
+    /// mesures prises en direct pendant la session. On retire de l'historique
+    /// ce qui est postérieur au début du direct (évite de tracer deux fois les
+    /// mêmes battements au raccord), mais le live est TOUJOURS ajouté — jamais
+    /// filtré — pour que la courbe pousse réellement au fil des mesures. Un
+    /// historique vide (compte neuf, début de journée) part donc de rien et se
+    /// remplit battement par battement, au lieu de rester blanc.
+    var hrSparkline: [HomeSample] {
+        let history = day?.hr ?? []
+        guard let firstLiveTs = liveSamples.first?.ts else { return history }
+        return history.filter { $0.ts < firstLiveTs } + liveSamples
     }
 
     /// Mapping PUR `BLEManager.liveHeartRate` (+ état du lien) → `HomeLiveHeartRate`
@@ -540,19 +580,6 @@ final class HomeViewModel {
                 name: "Séances faites",
                 value: plan.planned > 0 ? "\(plan.done) sur \(plan.planned)" : "\(count)"))
         return facts
-    }
-
-    var weekNote: String {
-        let planned = weekPlan.minutes > 0
-        guard let week = intensity?.current else {
-            return planned
-                ? "Le trait plein monte avec les minutes déjà faites, le pointillé oblique donne le rythme régulier."
-                : "Le trait plein monte avec les minutes déjà faites ; aucun objectif n'est fixé cette semaine."
-        }
-        let goalNote = "Objectif d'intensité \(Self.goalReasonLabel(week.reason))."
-        return planned
-            ? "Chaque trait monte vers son propre objectif, le pointillé oblique donne le rythme régulier. \(goalNote)"
-            : "Le trait monte vers l'objectif, le pointillé oblique donne le rythme régulier. \(goalNote) Aucune séance n'est programmée cette semaine."
     }
 
     // MARK: - Séance (jour ou à venir)
@@ -881,15 +908,4 @@ final class HomeViewModel {
         return parts.joined(separator: " · ")
     }
 
-    static func goalReasonLabel(_ reason: IntensityGoalReason) -> String {
-        switch reason {
-        case .seed: return "par défaut, faute de semaine assez mesurée"
-        case .raised: return "en hausse : vos six dernières semaines montent"
-        case .lowered: return "en baisse : vos six dernières semaines baissent"
-        case .light: return "allégé après trois semaines tenues de justesse"
-        case .held: return "stable, au niveau de vos six dernières semaines"
-        case .pinned: return "fixé à la main"
-        case .skipped: return "inchangé, faute de mesures récentes"
-        }
-    }
 }

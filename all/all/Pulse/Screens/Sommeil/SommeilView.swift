@@ -434,7 +434,7 @@ private struct SommeilCompositionCard: View {
                         }
                     }
                 }
-                Text("Le trait vertical marque la fourchette de référence (indicative, varie avec l'âge). En part du sommeil réel de cette nuit.")
+                Text("En part du sommeil réel de cette nuit.")
                     .font(.footnote)
                     .foregroundStyle(Color.pulseTextSecondary)
             }

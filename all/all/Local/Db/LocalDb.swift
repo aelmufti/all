@@ -196,6 +196,21 @@ final class LocalDb {
         return found
     }
 
+    struct ImportedFileRow { let hash: String; let fileName: String }
+
+    /// Fichiers déjà importés d'un `kind` donné (`wellness`/`sleep`) — miroir
+    /// de la requête `files` de `reparseCounters`/`reparseSleep` (TS,
+    /// `ingest.service.ts`) : sert aux relectures versionnées ponctuelles
+    /// (rétro-remplissage, cf. `LocalIngestor.backfillBodyBatteryIfNeeded`).
+    func importedFiles(kind: String) throws -> [ImportedFileRow] {
+        var out: [ImportedFileRow] = []
+        try db.run("SELECT hash, file_name FROM imported_files WHERE kind = ?", [.text(kind)]) { r in
+            guard let hash = r.text(0), let fileName = r.text(1) else { return }
+            out.append(ImportedFileRow(hash: hash, fileName: fileName))
+        }
+        return out
+    }
+
     // MARK: - Ingestion bien-être (miroir `IngestService.storeWellness`)
 
     func storeWellness(_ data: FitWellnessData, hash: String, fileName: String) throws {
@@ -243,6 +258,23 @@ final class LocalDb {
             }
 
             for sample in data.samples {
+                try db.run(
+                    "INSERT OR IGNORE INTO wellness_samples (metric, ts, value) VALUES (?, ?, ?)",
+                    [.text(sample.metric), .double(sample.ts), .double(sample.value)])
+            }
+        }
+    }
+
+    /// Insertion brute d'échantillons `bb` SEULS — utilisée par le
+    /// rétro-remplissage unique (`LocalIngestor.backfillBodyBatteryIfNeeded`,
+    /// `docs/duree-ideale-sommeil.md` §1). Ne touche à aucune autre table
+    /// (`imported_files` déjà peuplée pour ces fichiers, pas de re-upsert des
+    /// jours/compteurs). `INSERT OR IGNORE`, comme `storeWellness` — idempotent
+    /// si rejoué.
+    func insertBodyBatterySamples(_ samples: [FitWellnessSample]) throws {
+        guard !samples.isEmpty else { return }
+        try db.transaction {
+            for sample in samples where sample.metric == "bb" {
                 try db.run(
                     "INSERT OR IGNORE INTO wellness_samples (metric, ts, value) VALUES (?, ?, ?)",
                     [.text(sample.metric), .double(sample.ts), .double(sample.value)])
@@ -1583,6 +1615,70 @@ final class LocalDb {
             [.text(metric), .double(from), .double(to)]) { r in
             guard let ts = r.double(0), let value = r.double(1) else { return }
             out.append((ts, value))
+        }
+        return out
+    }
+
+    struct SleepOptimumNightRow {
+        let date: String
+        let startTs: Double
+        let endTs: Double
+        let deepS: Double
+        let lightS: Double
+        let remS: Double
+    }
+
+    /// Fenêtre du MODÈLE de durée idéale (`docs/duree-ideale-sommeil.md` §2) —
+    /// 180 dernières nuits, INDÉPENDANTE du `days` de l'endpoint
+    /// `sleep-recommendation` (cf. `sleepRecommendationWindowNights`, qui lui
+    /// respecte `days`). Le filtre `S ∈ [3, 12] h` (spec §2) se fait côté Swift
+    /// (`DashboardStatsBackend.sleepRecommendation`), pas en SQL.
+    func sleepOptimumModelNights(limit: Int = 180) throws -> [SleepOptimumNightRow] {
+        var out: [SleepOptimumNightRow] = []
+        try db.run(
+            """
+            SELECT date, start_ts, end_ts, deep_s, light_s, rem_s
+            FROM wellness_sleep
+            WHERE duration_s IS NOT NULL AND duration_s > 0 AND start_ts IS NOT NULL AND end_ts IS NOT NULL
+            ORDER BY date DESC LIMIT ?
+            """,
+            [.int(limit)]) { r in
+            guard let date = r.text(0), let s = r.double(1), let e = r.double(2),
+                  let deepS = r.double(3), let lightS = r.double(4), let remS = r.double(5) else { return }
+            out.append(SleepOptimumNightRow(date: date, startTs: s, endTs: e, deepS: deepS, lightS: lightS, remS: remS))
+        }
+        return out
+    }
+
+    struct SleepRecommendationWindowRow {
+        let date: String
+        let deepS: Double
+        let lightS: Double
+        let remS: Double
+        let awakeS: Double
+        let startTs: Double
+        let endTs: Double
+    }
+
+    /// Fenêtre de l'ENDPOINT `sleep-recommendation` (`days` query) — miroir
+    /// exact de la requête `rows` de `stats.controller.ts`
+    /// (`sleepRecommendation`), distincte de la fenêtre du modèle (180 nuits
+    /// fixes, `sleepOptimumModelNights`).
+    func sleepRecommendationWindowNights(since: String, limit: Int) throws -> [SleepRecommendationWindowRow] {
+        var out: [SleepRecommendationWindowRow] = []
+        try db.run(
+            """
+            SELECT date, deep_s, light_s, rem_s, awake_s, start_ts, end_ts
+            FROM wellness_sleep
+            WHERE duration_s > 0 AND start_ts IS NOT NULL AND end_ts IS NOT NULL AND date >= ?
+            ORDER BY date DESC LIMIT ?
+            """,
+            [.text(since), .int(limit)]) { r in
+            guard let date = r.text(0), let deepS = r.double(1), let lightS = r.double(2),
+                  let remS = r.double(3), let awakeS = r.double(4), let startTs = r.double(5), let endTs = r.double(6)
+            else { return }
+            out.append(SleepRecommendationWindowRow(
+                date: date, deepS: deepS, lightS: lightS, remS: remS, awakeS: awakeS, startTs: startTs, endTs: endTs))
         }
         return out
     }

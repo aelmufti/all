@@ -198,8 +198,19 @@ enum FitWellnessExtractor {
         }
 
         for stress in messages where stress.globalMessageNumber == FitProfile.mesgStressLevel {
-            guard let ts = stress.double(1), let value = stress.double(0), value >= 0 else { continue }
-            samples.append(FitWellnessSample(metric: "stress", ts: toUtcUnix(ts), value: value))
+            guard let ts = stress.double(1) else { continue }
+            if let value = stress.double(0), value >= 0 {
+                samples.append(FitWellnessSample(metric: "stress", ts: toUtcUnix(ts), value: value))
+            }
+            // Body Battery RÉELLE de la montre (`docs/duree-ideale-sommeil.md`
+            // §1) — même message (227), champ 3 (uint8, 0-100 ; 127 = invalide,
+            // ignorer toute valeur > 100), même `ts` que le stress (champ 1).
+            // Distincte de la Body Battery SIMULÉE (`BodyBattery.swift`), non
+            // utilisée pour la durée idéale de sommeil (circulaire : elle
+            // récompense mécaniquement la durée de sommeil).
+            if let bb = stress.double(3), bb >= 0, bb <= 100 {
+                samples.append(FitWellnessSample(metric: "bb", ts: toUtcUnix(ts), value: bb))
+            }
         }
 
         for spo2 in messages where spo2.globalMessageNumber == FitProfile.mesgSpo2Data {

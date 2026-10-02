@@ -169,10 +169,11 @@ enum LocalIngestor {
             } else {
                 log.error("ingestIfNeeded: \(errors.count, privacy: .public)/\(results.count, privacy: .public) entrée(s) en erreur")
             }
+            let bbBackfilled = backfillBodyBatteryIfNeeded(spool: spool, db: db)
             // N'avertir les écrans QUE si quelque chose a réellement changé —
             // éviter un rechargement pour rien à chaque rejeu (idempotent la
             // plupart du temps, tout le spool étant déjà dans `imported_files`).
-            guard hasNewInsertion(results) else { return }
+            guard hasNewInsertion(results) || bbBackfilled else { return }
             // Passe par le MÊME coalesceur que la livraison Pulse
             // (`DataRefreshNotifier`) : en mode « Les deux », ingestion locale
             // ET livraison Pulse arrivent quasi en même temps — sans coalescer,
@@ -181,5 +182,52 @@ enum LocalIngestor {
                 DataRefreshNotifier.postDataDidChangeDebounced()
             }
         }
+    }
+
+    // MARK: - Rétro-remplissage Body Battery (`docs/duree-ideale-sommeil.md` §1)
+
+    private static let bodyBatteryBackfillVersion = "1"
+    private static let bodyBatteryBackfillSettingKey = "bb_backfill_version"
+
+    /// Rétro-remplissage UNIQUE de la Body Battery RÉELLE (`metric = 'bb'`)
+    /// dans les fichiers wellness déjà importés AVANT que
+    /// `FitWellnessExtractor.extractWellness` l'en extraie — `ingest(fileURL:)`
+    /// ne les relit jamais spontanément (dédup par hash, `db.isImported`, qui
+    /// renvoie `.duplicate` avant même de décoder). Même patron que
+    /// `reparseCounters` (TS, `ingest.service.ts`) : clé de version dans
+    /// `settings`, relecture une seule fois (gardée par `LocalDb.settingValue`),
+    /// n'insère QUE les échantillons `bb` — aucune autre table retouchée.
+    /// S'appuie sur `imported_files WHERE kind = 'wellness'` (les hashes déjà
+    /// connus) plutôt que de redécoder tout le spool : seuls les fichiers
+    /// wellness sont relus. Retourne `true` si au moins un échantillon a été
+    /// inséré (pour notifier les écrans comme `ingestIfNeeded`).
+    @discardableResult
+    static func backfillBodyBatteryIfNeeded(spool: SpoolStore, db: LocalDb) -> Bool {
+        guard (try? db.settingValue(key: bodyBatteryBackfillSettingKey)) != bodyBatteryBackfillVersion else {
+            return false
+        }
+        let wellnessHashes = Set((try? db.importedFiles(kind: "wellness"))?.map(\.hash) ?? [])
+        var insertedAny = false
+        if !wellnessHashes.isEmpty {
+            for entry in spool.entries.values {
+                let url = spool.fileURL(for: entry)
+                guard let hash = try? PulseUploader.sha256Hex(ofFileAt: url), wellnessHashes.contains(hash),
+                      let data = try? Data(contentsOf: url), let file = try? FitDecoder.decode(data)
+                else { continue }
+                let bbSamples = FitWellnessExtractor.extractWellness(messages: file.messages)
+                    .samples.filter { $0.metric == "bb" }
+                guard !bbSamples.isEmpty else { continue }
+                if (try? db.insertBodyBatterySamples(bbSamples)) != nil { insertedAny = true }
+            }
+        }
+        // Version posée même si `wellnessHashes` est vide ou si tout a échoué :
+        // une relecture ultérieure du MÊME spool ne produirait rien de plus
+        // (même logique que `reparseSleep`, qui pose la version même sur un
+        // spool vide) — un spool qui grossit ensuite est couvert par
+        // l'extraction `bb` désormais intégrée à `extractWellness` pour tout
+        // NOUVEL import, pas par ce rétro-remplissage.
+        try? db.setSetting(key: bodyBatteryBackfillSettingKey, value: bodyBatteryBackfillVersion)
+        log.info("Rétro-remplissage Body Battery (v\(bodyBatteryBackfillVersion, privacy: .public)) : \(wellnessHashes.count, privacy: .public) fichier(s) wellness connus")
+        return insertedAny
     }
 }

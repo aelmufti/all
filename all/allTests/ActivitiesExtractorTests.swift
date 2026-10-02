@@ -390,11 +390,12 @@ struct SommeilRouteCoverageTests {
         #expect(day.sleep.stages.isEmpty)
         #expect(day.sleep.main == nil)
 
-        // `stats/sleep-recommendation` : jamais servie localement (`try?`
-        // côté `SommeilViewModel`) — `RealLocalPulseBackend` doit échouer
-        // proprement, pas planter, sur cette route non portée.
-        await #expect(throws: LocalPulseUnavailableError.self) {
-            try await backend.handle(method: "GET", path: "api/stats/sleep-recommendation", query: ["days": "30"], body: nil)
-        }
+        // `stats/sleep-recommendation` : servie (`docs/duree-ideale-sommeil.md`)
+        // — aucune nuit de sommeil dans cet échantillon (CAVEAT ci-dessus),
+        // retombe sur la branche `insufficient`, sans planter.
+        let recoData = try await backend.handle(
+            method: "GET", path: "api/stats/sleep-recommendation", query: ["days": "30"], body: nil)
+        let reco = try PulseAPIClient.decoder.decode(DashboardSleepRecommendation.self, from: recoData)
+        #expect(reco.status == "insufficient")
     }
 }

@@ -638,7 +638,7 @@ private struct NutritionJournalCard: View {
             }
 
             if day.entries.isEmpty {
-                Text("Aucun repas saisi — la journée reste vide, elle ne compte pas comme un zéro.")
+                Text("Aucun repas saisi.")
                     .font(.footnote)
                     .foregroundStyle(Color.pulseTextSecondary)
             } else {

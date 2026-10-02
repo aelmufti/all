@@ -148,13 +148,18 @@ struct DashboardStatsLocalTests {
         #expect(regularity.waketime == nil)
     }
 
-    /// `sleep-recommendation` n'est PAS servi par le backend local (best-effort
-    /// côté `DashboardViewModel`, `try?`) — retombe sur `LocalPulseUnavailableError`.
-    @Test func sleepRecommendationIsNotServedLocally() async throws {
+    /// `sleep-recommendation` est servi (`docs/duree-ideale-sommeil.md`) —
+    /// sans nuit de sommeil, retombe sur la branche `insufficient` (< 3 nuits),
+    /// comme `sleep-debt`/`sleep-regularity` au même endroit.
+    @Test func sleepRecommendationWithoutSleepDataReturnsInsufficientBranch() async throws {
         let backend = RealLocalPulseBackend(db: try makeDb())
-        await #expect(throws: LocalPulseUnavailableError.self) {
-            _ = try await backend.handle(method: "GET", path: "api/stats/sleep-recommendation", query: ["days": "30"], body: nil)
-        }
+        let data = try await backend.handle(method: "GET", path: "api/stats/sleep-recommendation", query: ["days": "30"], body: nil)
+        let reco = try PulseAPIClient.decoder.decode(DashboardSleepRecommendation.self, from: data)
+
+        #expect(reco.nights == 0)
+        #expect(reco.status == "insufficient")
+        #expect(reco.targetHours == nil)
+        #expect(reco.idealHours == nil)
     }
 
     // MARK: - `tab-training` (PARTIEL — `zones` toujours vide)

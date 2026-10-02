@@ -33,10 +33,12 @@
 //  ça honnêtement (`DashboardZonesCard` : « Pas de zone d'effort calculée sur
 //  la période. », un message d'ABSENCE DE CALCUL, pas un zéro trompeur).
 //
-//  `sleep-recommendation` : PAS porté (best-effort côté `DashboardViewModel`,
-//  `try?` — l'écran masque juste la carte, cf. tâche d'incrément). La route
-//  continue donc de lever `LocalPulseUnavailableError` (défaut de
-//  `RealLocalPulseBackend.handle`).
+//    - `GET api/stats/sleep-recommendation` — porté (`docs/duree-ideale-sommeil.md`) :
+//      lever/coucher/latence/paliers restent le portage de
+//      `sleep-recommendation.ts` (`Local/SleepRecommendationLocal.swift`),
+//      mais `targetHours`/`basis`/l'intervalle viennent désormais du NOUVEL
+//      optimum bayésien (`Local/SleepOptimum.swift`), ajusté sur une fenêtre
+//      SÉPARÉE de 180 nuits (indépendante du `days` de l'endpoint).
 //
 
 import Foundation
@@ -269,6 +271,46 @@ private struct StatsSleepInsightsDTO: Encodable {
     let fragmentation: StatsFragmentationDTO
     let composition: StatsCompositionDTO
     let spo2Arousal: StatsSpo2ArousalDTO?
+}
+
+private struct StatsSleepRecommendationDTO: Encodable {
+    var nights: Int
+    var status: String
+    var basis: String? = nil
+    var targetHours: Double? = nil
+    var avgSleepHours: Double? = nil
+    var waketime: String? = nil
+    var currentBedtime: String? = nil
+    var recommendedBedtime: String? = nil
+    var targetBedtime: String? = nil
+    var stepped: Bool? = nil
+    var stepMin: Int? = nil
+    var latencyMin: Int? = nil
+    var shiftMin: Int? = nil
+    var avgAwakeMin: Int? = nil
+    var debtHours: Double? = nil
+    var debtBonusMin: Int? = nil
+    var idealHours: Double? = nil
+    var idealLowHours: Double? = nil
+    var idealHighHours: Double? = nil
+    var belowFloor: Bool? = nil
+    var modelNights: Int? = nil
+    var trial: Bool? = nil
+
+    static func insufficient(nights: Int) -> StatsSleepRecommendationDTO {
+        StatsSleepRecommendationDTO(nights: nights, status: "insufficient")
+    }
+
+    static func ok(_ ok: SleepRecommendationLocal.OK) -> StatsSleepRecommendationDTO {
+        StatsSleepRecommendationDTO(
+            nights: ok.nights, status: "ok", basis: ok.basis, targetHours: ok.targetHours,
+            avgSleepHours: ok.avgSleepHours, waketime: ok.waketime, currentBedtime: ok.currentBedtime,
+            recommendedBedtime: ok.recommendedBedtime, targetBedtime: ok.targetBedtime, stepped: ok.stepped,
+            stepMin: ok.stepMin, latencyMin: ok.latencyMin, shiftMin: ok.shiftMin, avgAwakeMin: ok.avgAwakeMin,
+            debtHours: ok.debtHours, debtBonusMin: ok.debtBonusMin, idealHours: ok.idealHours,
+            idealLowHours: ok.idealLowHours, idealHighHours: ok.idealHighHours, belowFloor: ok.belowFloor,
+            modelNights: ok.modelNights, trial: ok.trial)
+    }
 }
 
 private struct StatsSleepRegularityDTO: Encodable {
@@ -518,6 +560,96 @@ enum DashboardStatsBackend {
             waketime: DashboardStatsTime.minToClock(DashboardStatsMath.mean(wake)),
             bedStdMin: Int(bedStd.rounded()), wakeStdMin: Int(wakeStd.rounded()))
         return try JSONEncoder().encode(dto)
+    }
+
+    // MARK: sleep-recommendation (§7, `docs/duree-ideale-sommeil.md`)
+    //
+    // Deux fenêtres DISTINCTES : `windowRows` (fenêtre de l'ENDPOINT, `days`
+    // query — lever/coucher/latence/paliers + dette, miroir exact de l'ancien
+    // comportement) et `modelRows` (180 dernières nuits FIXES, spec §2 — le
+    // modèle bayésien de durée idéale). `targetHours`/`basis`/l'intervalle
+    // viennent du modèle ; tout le reste (lever/coucher/paliers) de la fenêtre
+    // de l'endpoint.
+
+    static func sleepRecommendation(db: LocalDb, query: [String: String]) throws -> Data {
+        let window = DashboardStatsTime.rangeDays(query["days"])
+        let since = DashboardStatsTime.sinceDateAnchored(days: window, anchor: nil)
+        let windowRows = try db.sleepRecommendationWindowNights(since: since, limit: window)
+
+        guard windowRows.count >= 3 else {
+            return try JSONEncoder().encode(StatsSleepRecommendationDTO.insufficient(nights: windowRows.count))
+        }
+
+        let nowS = Date().timeIntervalSince1970
+        let fit = try sleepOptimumFit(db: db, nowS: nowS)
+
+        let recoNights = windowRows.map { row in
+            SleepRecommendationLocal.RecoNight(
+                date: row.date, startTs: row.startTs, endTs: row.endTs,
+                deepS: row.deepS, lightS: row.lightS, remS: row.remS, awakeS: row.awakeS,
+                offsetS: LocalDb.localOffsetSeconds(forDate: row.date))
+        }
+        let todayKey = FitWellnessExtractor.isoDate(nowS)
+        let result = SleepRecommendationLocal.computeSleepRecommendation(nights: recoNights, fit: fit, todayKey: todayKey)
+
+        switch result {
+        case .insufficient(let n):
+            return try JSONEncoder().encode(StatsSleepRecommendationDTO.insufficient(nights: n))
+        case .ok(let ok):
+            return try JSONEncoder().encode(StatsSleepRecommendationDTO.ok(ok))
+        }
+    }
+
+    /// Ajuste le modèle bayésien de durée idéale (spec §2-6) sur les 180
+    /// dernières nuits (`S ∈ [3, 12]` h), indépendamment de `days`. Charge les
+    /// échantillons `bb`/`stress`/activités sur UNE plage englobant toutes les
+    /// fenêtres par-nuit nécessaires (§3-4), puis délègue l'agrégation (PURE)
+    /// à `SleepRecommendationLocal.buildModelNights`.
+    private static func sleepOptimumFit(db: LocalDb, nowS: Double) throws -> SleepOptimumModel.Fit {
+        let modelRowsRaw = try db.sleepOptimumModelNights(limit: 180)
+        let modelRows = modelRowsRaw.filter { row in
+            let s = (row.deepS + row.lightS + row.remS) / 3600
+            return s >= 3 && s <= 12
+        }
+        guard !modelRows.isEmpty else { return SleepOptimumModel.fit(X: [], y: []) }
+
+        let modelNights: [SleepRecommendationLocal.ModelRawNight] = modelRows.map { row in
+            SleepRecommendationLocal.ModelRawNight(
+                date: row.date, startTs: row.startTs, endTs: row.endTs,
+                S: (row.deepS + row.lightS + row.remS) / 3600,
+                offsetS: LocalDb.localOffsetSeconds(forDate: row.date))
+        }
+
+        let minStartTs = modelNights.map(\.startTs).min()!
+        let maxEndTs = modelNights.map(\.endTs).max()!
+
+        // Plage englobant §3 (bbMorning [wk,wk+2h], bbEvening ~wk+10h±30min,
+        // wakeStress jusqu'à +16h) et §4 (bbBed [on-60min,on], stressPrevDay
+        // [on-14h,on-30min], sportPrev [on-24h,on], sportNext [wk,wk+12h]).
+        let stressRaw = try db.statsRawSamplesBetween(
+            metric: "stress", from: minStartTs - 14 * 3600, to: maxEndTs + 16 * 3600 + 1)
+        let bbRaw = try db.statsRawSamplesBetween(
+            metric: "bb", from: minStartTs - 3600, to: maxEndTs + 11 * 3600)
+        let activityRows = try db.statsActivitiesSince(
+            DashboardStatsTime.isoDateTime(minStartTs - 24 * 3600))
+
+        let windows = modelNights.map { SleepRecommendationLocal.NightWindow(startTs: $0.startTs, endTs: $0.endTs) }
+        let stressForWake = stressRaw.map { SleepRecommendationLocal.StressSample(ts: $0.ts, value: $0.value) }
+        let wakeStresses = SleepRecommendationLocal.wakeStressByNight(nights: windows, samples: stressForWake, nowS: nowS)
+
+        let bbSamples = bbRaw.map { SleepRecommendationLocal.Sample(ts: $0.ts, value: $0.value) }
+        let stressSamples = stressRaw.map { SleepRecommendationLocal.Sample(ts: $0.ts, value: $0.value) }
+        let activities: [SleepRecommendationLocal.ActivityWindow] = activityRows.compactMap { row in
+            guard let date = DashboardStatsTime.activityDate(row.startTime) else { return nil }
+            return SleepRecommendationLocal.ActivityWindow(
+                startTs: date.timeIntervalSince1970, durationMin: (row.durationS ?? 0) / 60)
+        }
+
+        let nightInputs = SleepRecommendationLocal.buildModelNights(
+            nights: modelNights, bbSamples: bbSamples, stressSamples: stressSamples,
+            activities: activities, wakeStresses: wakeStresses)
+        let built = SleepOptimumFeatures.build(nights: nightInputs)
+        return SleepOptimumModel.fit(X: built.X, y: built.y)
     }
 
     // MARK: tab-health

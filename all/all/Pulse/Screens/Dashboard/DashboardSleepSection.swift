@@ -48,18 +48,6 @@ struct DashboardSleepRecommendationCard: View {
         WakeScheduleStore.shared.adaptedBedtime(reco: reco)
     }
 
-    /// Palier en cours ce soir — recalcul local s'il existe, sinon celui du
-    /// serveur (reco basée sur le lever habituel).
-    private var stepped: Bool {
-        adapted?.stepped ?? (reco.stepped ?? false)
-    }
-
-    /// Cible finale à afficher sur la ligne de palier (recalcul local en
-    /// priorité, sinon celle envoyée par le serveur).
-    private var steppedTargetLabel: String? {
-        adapted?.targetBedtime ?? reco.targetBedtime
-    }
-
     var body: some View {
         PulseCard {
             DashboardCardHeader("Heure de coucher conseillée")
@@ -75,64 +63,32 @@ struct DashboardSleepRecommendationCard: View {
                 }
             }
 
+            // Ligne de contexte seulement quand un réveil cadre la nuit à venir.
+            // Sans réveil, le titre (« conseillée ») se suffit : la reco repose
+            // alors sur le lever habituel, inutile de l'écrire.
             if let adapted {
-                Text("pour te réveiller à \(WakeScheduleStore.hhmm(adapted.wakeMinutes)) \(dashboardWeekdayShort(adapted.weekday)) — réglé sur ton téléphone")
-                    .font(PulseFont.body)
-                    .foregroundStyle(Color.pulseTextPrimary)
-            } else {
-                Text(shiftLine)
-                    .font(PulseFont.body)
-                    .foregroundStyle(shiftTint)
-            }
-
-            if stepped, let target = steppedTargetLabel {
-                Text("Palier de ce soir — cible \(target), à atteindre par paliers de 15 min tous les 2-3 soirs.")
+                Text("Pour te réveiller à \(WakeScheduleStore.hhmm(adapted.wakeMinutes)) — réglé sur ton téléphone")
                     .font(PulseFont.body)
                     .foregroundStyle(Color.pulseTextPrimary)
             }
 
-            Text(rationale)
-                .font(.footnote)
-                .foregroundStyle(Color.pulseTextSecondary)
+            // Une seule ligne discrète (détail dans Paramètres › Aide) :
+            // priorité à « nuit d'essai » (c'est un fait ponctuel sur CE
+            // soir), sinon la durée idéale si le modèle en a une.
+            if reco.trial == true {
+                Text("Nuit d'essai")
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseSleep)
+            } else if let ideal = reco.idealHours {
+                let range: String = {
+                    guard let lo = reco.idealLowHours, let hi = reco.idealHighHours, lo != hi else { return "" }
+                    return " (\(dashboardHoursHM(lo))–\(dashboardHoursHM(hi)))"
+                }()
+                Text("Ta durée idéale : \(dashboardHoursHM(ideal))\(range)")
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
         }
-    }
-
-    private var shiftLine: String {
-        let shift = reco.shiftMin ?? 0
-        let habit = reco.currentBedtime.map { " (habituellement ~\($0))" } ?? ""
-        if shift <= -5 {
-            return "Soit ~\(abs(shift)) min plus tôt que d'habitude\(habit)."
-        } else if shift >= 5 {
-            return "Tu peux même te coucher ~\(shift) min plus tard\(habit)."
-        } else {
-            return "C'est déjà à peu près ton heure habituelle — continue ainsi\(habit)."
-        }
-    }
-
-    private var shiftTint: Color {
-        (reco.shiftMin ?? 0) <= -5 ? Color.pulseTextPrimary : Color.pulseSuccess
-    }
-
-    private var rationale: String {
-        let target = reco.targetHours.map { dashboardHoursHM($0) } ?? "—"
-        let base: String
-        if reco.basis == "stress" {
-            base = "Cible calée sur la durée de sommeil qui, chez toi, précède les journées les moins stressées (\(target))."
-        } else {
-            base = "Cible calée sur l'objectif de \(target) de sommeil."
-        }
-        let wake = reco.waketime.map { "à heure de lever constante (~\($0)), " } ?? ""
-        let awake = (reco.avgAwakeMin.map { $0 > 0 } ?? false)
-            ? " et de tes \(reco.avgAwakeMin!) min d'éveil nocturne habituel"
-            : ""
-        var text = "\(base) Calculé \(wake)sur \(reco.nights) nuits\(awake)."
-        if let latency = reco.latencyMin, latency > 0 {
-            text += " Coucher = endormissement − \(latency) min."
-        }
-        if let bonus = reco.debtBonusMin, bonus > 0, let debt = reco.debtHours {
-            text += " +\(bonus) min pour rembourser ~\(String(format: "%.1f", debt)) h de dette sur 7 nuits."
-        }
-        return text
     }
 }
 
@@ -365,7 +321,7 @@ private struct DashboardSleepCompositionCard: View {
                     }
                 }
             }
-            Text("Le trait vertical marque la fourchette de référence. En part du sommeil réel, moyenné sur \(composition.nights) nuits ; l'éveil représente \(String(format: "%.0f", composition.wasoPct)) % de la fenêtre.")
+            Text("En part du sommeil réel, moyenné sur \(composition.nights) nuits ; l'éveil représente \(String(format: "%.0f", composition.wasoPct)) % de la fenêtre.")
                 .font(.footnote)
                 .foregroundStyle(Color.pulseTextSecondary)
         }
@@ -439,14 +395,6 @@ private func dashboardRegularityWord(_ score: Int) -> String {
 private func dashboardHoursHM(_ hours: Double) -> String {
     let totalMinutes = Int((hours * 60).rounded())
     return "\(totalMinutes / 60):\(String(format: "%02d", totalMinutes % 60))"
-}
-
-/// Abrév. courte du jour de semaine (Calendar weekday 1…7, dimanche en tête)
-/// — utilisé par la carte reco pour indiquer le jour du réveil réglé.
-private func dashboardWeekdayShort(_ weekday: Int) -> String {
-    let labels = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."]
-    guard (1...7).contains(weekday) else { return "" }
-    return labels[weekday - 1]
 }
 
 private struct DashboardSleepDebtCard: View {
