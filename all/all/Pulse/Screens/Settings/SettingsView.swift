@@ -2,41 +2,23 @@
 //  SettingsView.swift
 //  all (bridge-connect)
 //
-//  Écran Paramètres natif — équivalent SwiftUI (partiel) de la page Angular
-//  `/parametres` (`custom-connect/web/src/app/pages/settings/
-//  settings.component.ts`). Organisé autour du **mode de connectivité** : le
-//  sélecteur de source est la colonne vertébrale et n'affiche que les contrôles
-//  du mode retenu (bridge → adresse + « Statut du pont » ; iPhone BLE → token +
-//  « Collecteur (Montre) » ; legacy → rien). Les sections neutres encadrent ce
-//  bloc : Apparence (thème), État de la synchro (fraîcheur + inventaire, calculés
-//  côté serveur, indépendants de la source), Profil (année de naissance / sexe /
-//  taille — le poids reste en lecture seule, saisi sur la page Santé) et
-//  Application (adresse de Pulse, compte, déconnexion). Les autres feuilles
-//  Angular (Objectifs, Objectif calorique, Minutes d'intensité, Export,
-//  Réanalyser) sont hors périmètre de cet écran.
+//  Écran Paramètres natif — deux niveaux, façon Réglages iOS.
 //
-//  `Form`/`Section` de style Réglages iOS plutôt que les cartes `PulseCard`
-//  des autres écrans — un choix explicite pour cette page (le natif iOS a
-//  déjà tout le vocabulaire visuel d'un écran de réglages).
+//  Racine : uniquement des LIGNES (pastille, nom, valeur courante), en trois
+//  groupes — moi (Profil, Réveil, Programme), données (Stockage,
+//  Synchronisation, Montre), app (Apparence, Aide) — plus le compte serveur
+//  quand il y en a un. Aucun contrôle ni texte d'explication à ce niveau.
+//
+//  Second niveau : une page par réglage (`SettingsProfilePage`,
+//  `SettingsWakePage`, `SettingsStoragePage`, `SettingsSyncPage`). Programme,
+//  Montre et Aide restent des feuilles (elles ont leur propre navigation).
+//  Les explications vivent dans `HelpView`.
+//
+//  Mode Téléphone : pas de serveur, donc ni Synchronisation ni compte ;
+//  `SettingsViewModel.load()` ne charge alors que le profil.
 //
 //  Toutes les déclarations de ce fichier sont préfixées `Settings*` pour ne
-//  rien exposer qui puisse entrer en collision avec les autres écrans
-//  (`Screens/Home`, `Screens/Health`…) compilés dans la même cible.
-//
-//  Stockage (incrément L0, `docs/stockage-local.md`) : `SettingsStorageSection`
-//  est la vraie colonne vertébrale de l'écran depuis cet incrément — en mode
-//  Téléphone, tout ce qui dépend VRAIMENT d'un serveur (source de synchro
-//  Pulse, statut, compte/déconnexion) n'a plus de sens et disparaît ;
-//  Stockage, Apparence, l'accès à la Montre (diagnostic BLE local) et, depuis
-//  L6, Profil (servi par `RealLocalPulseBackend`, `GET`/`PUT api/profile`)
-//  restent joignables — cf. `SettingsWatchOnlySection`, `SettingsProfileSection`
-//  et `SettingsViewModel.load()` (court-circuite UNIQUEMENT le chargement
-//  source/statut/inventaire dans ce mode, jamais le profil, pour ne jamais
-//  coincer l'utilisateur derrière un `ErrorView`). Programme a rejoint cette
-//  liste depuis L7a (`GET api/programme` servi en lecture, cf.
-//  `RealLocalPulseBackend`) : les actions d'écriture de l'écran (activer/
-//  arrêter/cocher/envoyer) restent différées et lèvent une erreur si on les
-//  déclenche en mode Téléphone.
+//  rien exposer qui puisse entrer en collision avec les autres écrans.
 //
 
 import SwiftUI
@@ -51,6 +33,9 @@ struct SettingsView: View {
     @State private var showProgramme = false
     @State private var showHelp = false
     @State private var storageMode = StorageModeStore.shared
+    @State private var theme = ThemeStore.shared
+    @State private var wake = WakeScheduleStore.shared
+    @ObservedObject private var ble = BLEManager.shared
     /// Mode serveur (Pulse / Les deux) demandé depuis le picker de stockage
     /// alors qu'aucune session n'est active — présente `PulseModeLoginSheet`.
     /// Tenu ICI (racine stable de l'écran) et non dans `SettingsStorageSection`
@@ -65,6 +50,8 @@ struct SettingsView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { SheetCloseButton { dismiss() } }
         }
+        // Bouton retour des sous-pages à la couleur de l'app, pas au bleu système.
+        .tint(Color.pulseAccent)
         .task {
             await viewModel.reload()
         }
@@ -85,65 +72,190 @@ struct SettingsView: View {
         }
     }
 
+    // Deux niveaux. La racine ne porte que des LIGNES (icône, nom, valeur
+    // courante) ; chaque réglage vit sur sa propre page. Aucun contrôle ni texte
+    // d'explication ici : on lit l'état d'un coup d'œil, on entre pour changer.
     @ViewBuilder
     private var content: some View {
-        switch viewModel.state {
-        case .loading:
+        if case .loading = viewModel.state {
             LoadingView(message: "Chargement des paramètres…")
-        case .failed(let message):
-            ErrorView(message: message) {
-                Task { await viewModel.retry() }
-            }
-        case .loaded:
-            // Organisé en blocs nets (évite l'effet « fourre-tout ») : données
-            // (le mode Stockage, colonne vertébrale, reconfigure tout le reste),
-            // puis réglages personnels (profil / réveil / apparence), puis
-            // montre & synchronisation, puis compte. Chaque `Section` garde son
-            // propre en-tête — c'est lui qui matérialise la séparation entre
-            // groupes dans un `Form` groupé.
+        } else {
             Form {
-                // — Données —
-                SettingsStorageSection(onRequestServerLogin: { pendingServerMode = $0 })
-                // L'adresse de Pulse suit immédiatement le choix « Pulse » /
-                // « Les deux » : c'est le réglage dont ce choix dépend, pas un
-                // détail de bas de page.
-                if storageMode.mode != .phone {
-                    SettingsPulseAddressSection(viewModel: viewModel)
+                // Pulse injoignable : la racine reste utilisable (c'est d'ici
+                // qu'on corrige l'adresse ou qu'on repasse en Téléphone) — avant,
+                // tout l'écran était remplacé par une erreur sans issue.
+                if case .failed(let message) = viewModel.state {
+                    Section {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(Color.pulseDanger)
+                        Button("Réessayer") { Task { await viewModel.retry() } }
+                    }
                 }
 
-                // — Compte — (le profil y vit, sur sa propre page ; l'utilisateur
-                // et la déconnexion n'existent qu'avec un serveur)
-                SettingsAccountSection(
-                    viewModel: viewModel,
-                    username: storageMode.mode == .phone ? nil : auth.username,
-                    showsServerAccount: storageMode.mode != .phone
-                )
+                Section {
+                    NavigationLink {
+                        SettingsProfilePage(viewModel: viewModel)
+                    } label: {
+                        SettingsRow(icon: "person.fill", tint: .pulseAccent, title: "Profil")
+                    }
+                    NavigationLink {
+                        SettingsWakePage()
+                    } label: {
+                        SettingsRow(icon: "alarm.fill", tint: .pulseSleep, title: "Réveil", value: wakeSummary)
+                    }
+                    Button { showProgramme = true } label: {
+                        SettingsRow(icon: "calendar", tint: .pulseSteps, title: "Programme", opensSheet: true)
+                    }
+                }
 
-                // — Personnel —
-                SettingsWakeSection()
-                SettingsAppearanceSection()
-                SettingsHelpSection(onOpen: { showHelp = true })
+                Section {
+                    NavigationLink {
+                        SettingsStoragePage(viewModel: viewModel, onRequestServerLogin: { pendingServerMode = $0 })
+                    } label: {
+                        SettingsRow(icon: "externaldrive.fill", tint: .pulseSpo2, title: "Stockage", value: storageMode.mode.label)
+                    }
+                    if storageMode.mode != .phone {
+                        NavigationLink {
+                            SettingsSyncPage(viewModel: viewModel, onStatus: { showStatus = true })
+                        } label: {
+                            SettingsRow(
+                                icon: "arrow.triangle.2.circlepath", tint: .pulseStress,
+                                title: "Synchronisation", value: syncSummary)
+                        }
+                    }
+                    Button { showWatch = true } label: {
+                        SettingsRow(
+                            icon: "applewatch", tint: .pulseBattery, title: "Montre",
+                            value: ble.connectionState == .connected ? "Connectée" : nil, opensSheet: true)
+                    }
+                }
 
-                // — Montre & synchronisation —
-                // Programme : démasqué depuis L7a (`docs/stockage-local.md`) —
-                // `GET api/programme` est servi par `RealLocalPulseBackend`
-                // (lecture seule), donc `ProgrammeView` s'ouvre pour de vrai même
-                // en mode Téléphone ; les actions d'écriture (activer / arrêter /
-                // cocher / envoyer) restent différées et lèvent
-                // `LocalPulseUnavailableError` dans ce mode.
-                SettingsProgrammeSection(onOpen: { showProgramme = true })
-                if storageMode.mode == .phone {
-                    SettingsWatchOnlySection(onWatch: { showWatch = true })
-                } else {
-                    SettingsSyncSourceSection(
-                        viewModel: viewModel,
-                        onStatus: { showStatus = true },
-                        onWatch: { showWatch = true }
-                    )
-                    SettingsStatusSection(viewModel: viewModel)
+                Section {
+                    Picker(selection: themeBinding) {
+                        Text("Automatique").tag(ThemeStore.Theme.auto)
+                        Text("Clair").tag(ThemeStore.Theme.light)
+                        Text("Sombre").tag(ThemeStore.Theme.dark)
+                    } label: {
+                        SettingsRow(icon: "circle.lefthalf.filled", tint: .pulseSleepDeep, title: "Apparence")
+                    }
+                    Button { showHelp = true } label: {
+                        SettingsRow(icon: "questionmark", tint: .pulseTextSecondary, title: "Aide", opensSheet: true)
+                    }
+                }
+
+                if storageMode.mode != .phone {
+                    Section {
+                        LabeledContent("Utilisateur", value: auth.username ?? "—")
+                        Button("Déconnexion", role: .destructive) {
+                            Task { await AuthStore.shared.logout() }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private var themeBinding: Binding<ThemeStore.Theme> {
+        Binding(get: { theme.theme }, set: { theme.theme = $0 })
+    }
+
+    private var wakeSummary: String {
+        let days = wake.minutesByWeekday.count
+        guard days > 0 else { return "Désactivé" }
+        let times = Set(wake.minutesByWeekday.values)
+        if times.count == 1, let minutes = times.first {
+            return days == 7 ? WakeScheduleStore.hhmm(minutes) : "\(WakeScheduleStore.hhmm(minutes)) · \(days) j"
+        }
+        return "\(days) jours"
+    }
+
+    private var syncSummary: String? {
+        guard let raw = viewModel.source?.source else { return nil }
+        return SettingsSyncSourceKind(rawValue: raw)?.label
+    }
+}
+
+// MARK: - Ligne de la racine
+//
+// Pastille colorée + nom + valeur courante, comme les Réglages iOS. `opensSheet`
+// : la ligne est un `Button` qui présente une feuille (Programme, Montre, Aide),
+// il faut alors dessiner le chevron qu'un `NavigationLink` pose tout seul.
+
+private struct SettingsRow: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    var value: String?
+    var opensSheet = false
+
+    var body: some View {
+        HStack(spacing: PulseSpacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 29, height: 29)
+                .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text(title)
+                .foregroundStyle(Color.pulseTextPrimary)
+            Spacer(minLength: PulseSpacing.sm)
+            if let value {
+                Text(value)
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .lineLimit(1)
+            }
+            if opensSheet {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.pulseAbsent)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Pages de second niveau
+
+/// Stockage : le choix, et juste dessous l'adresse de Pulse quand il en dépend.
+private struct SettingsStoragePage: View {
+    @Bindable var viewModel: SettingsViewModel
+    let onRequestServerLogin: (StorageMode) -> Void
+    @State private var storageMode = StorageModeStore.shared
+
+    var body: some View {
+        Form {
+            SettingsStorageSection(onRequestServerLogin: onRequestServerLogin)
+            if storageMode.mode != .phone {
+                SettingsPulseAddressSection(viewModel: viewModel)
+            }
+        }
+        .navigationTitle("Stockage")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsWakePage: View {
+    var body: some View {
+        Form {
+            SettingsWakeSection()
+        }
+        .navigationTitle("Réveil")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Synchronisation (modes avec serveur) : qui collecte, puis l'état.
+private struct SettingsSyncPage: View {
+    var viewModel: SettingsViewModel
+    let onStatus: () -> Void
+
+    var body: some View {
+        Form {
+            SettingsSyncSourceSection(viewModel: viewModel, onStatus: onStatus)
+            SettingsStatusSection(viewModel: viewModel)
+        }
+        .navigationTitle("Synchronisation")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -173,10 +285,6 @@ private struct SettingsStorageSection: View {
                 }
             }
             .pickerStyle(.segmented)
-        } header: {
-            Text("Stockage")
-        } footer: {
-            Text(Self.footnote(for: store.mode))
         }
     }
 
@@ -198,17 +306,6 @@ private struct SettingsStorageSection: View {
                 }
             }
         )
-    }
-
-    private static func footnote(for mode: StorageMode) -> String {
-        switch mode {
-        case .pulse:
-            return "Pulse : chaque synchro est envoyée au serveur — comportement historique."
-        case .phone:
-            return "Téléphone : rien n'est envoyé à Pulse, tout reste sur l'iPhone. La montre est archivée dès l'enregistrement local (pas d'attente d'un accusé serveur)."
-        case .both:
-            return "Les deux : envoyé à Pulse ET gardé sur l'iPhone. L'app lit Pulse et se replie automatiquement sur le téléphone si Pulse est injoignable."
-        }
     }
 }
 
@@ -287,61 +384,6 @@ private struct PulseModeLoginSheet: View {
                 errorMessage = PulseLoginErrorMapper.message(for: error)
             }
         }
-    }
-}
-
-// MARK: - Montre (accès direct en mode Téléphone)
-//
-// En mode Téléphone, `SettingsSyncSourceSection` (bloc « Mode de connectivité »,
-// entièrement server-only : source de synchro, statut, token) n'a plus de
-// sens — mais l'accès à « Collecteur (Montre) » (diagnostic BLE, temps réel),
-// lui, ne dépend d'aucun serveur : on le garde seul, sans tout le reste du bloc.
-
-private struct SettingsWatchOnlySection: View {
-    let onWatch: () -> Void
-
-    var body: some View {
-        Section {
-            Button(action: onWatch) {
-                SettingsNavRow(
-                    icon: "antenna.radiowaves.left.and.right",
-                    title: "Collecteur (Montre)",
-                    subtitle: "Diagnostic BLE, temps réel"
-                )
-            }
-        } header: {
-            Text("Montre")
-        }
-    }
-}
-
-// MARK: - Apparence (thème)
-//
-// Miroir de la feuille « Thème » Angular (`settings.component.ts`,
-// `ThemeService` `auto|light|dark`). Le réglage est partagé avec le bouton
-// cycle de l'en-tête Accueil via `ThemeStore.shared` (persisté `pulse-theme`,
-// appliqué au root par `.preferredColorScheme`).
-
-private struct SettingsAppearanceSection: View {
-    @State private var theme = ThemeStore.shared
-
-    var body: some View {
-        Section {
-            Picker("Thème", selection: themeBinding) {
-                Text("Automatique").tag(ThemeStore.Theme.auto)
-                Text("Clair").tag(ThemeStore.Theme.light)
-                Text("Sombre").tag(ThemeStore.Theme.dark)
-            }
-            .pickerStyle(.segmented)
-        } header: {
-            Text("Apparence")
-        } footer: {
-            Text("« Automatique » suit le réglage clair/sombre de l'iPhone.")
-        }
-    }
-
-    private var themeBinding: Binding<ThemeStore.Theme> {
-        Binding(get: { theme.theme }, set: { theme.theme = $0 })
     }
 }
 
@@ -457,10 +499,6 @@ private struct SettingsWakeSection: View {
             } else {
                 WatchAlarmUploadRow.disconnectedPlaceholder
             }
-        } header: {
-            Text("Réveil")
-        } footer: {
-            Text("Rappel téléphone (son à l'heure réglée) — pas l'alarme Horloge iOS : sans les alertes critiques, il ne sonne ni en silencieux ni en boucle. L'heure de coucher conseillée de l'écran Sommeil s'adapte à l'heure de lever réglée ici pour le prochain lever. « Envoyer à la montre » règle en plus une alarme native sur la Venu 2, à partir du même planning.")
         }
     }
 
@@ -595,56 +633,6 @@ private struct WatchAlarmUploadRow: View {
     }
 }
 
-// MARK: - Programme
-//
-// Programme (entraînement / alimentation / sommeil) était un onglet primaire ;
-// c'est une fonction de configuration (choix et suivi de plans), déplacée ici
-// pour laisser sa place dans la barre à l'onglet Sommeil. Ouvre `ProgrammeView`
-// en feuille, comme « Statut du pont » et « Collecteur (Montre) ».
-
-private struct SettingsProgrammeSection: View {
-    let onOpen: () -> Void
-
-    var body: some View {
-        Section {
-            Button(action: onOpen) {
-                SettingsNavRow(
-                    icon: "calendar",
-                    title: "Programme",
-                    subtitle: "Plans entraînement, alimentation, sommeil"
-                )
-            }
-        } header: {
-            Text("Programme")
-        }
-    }
-}
-
-// MARK: - Aide
-//
-// Sous-page de lecture (`HelpView`) : les explications d'utilisation qui
-// alourdissaient les écrans de contenu (comment c'est calculé, comment lire un
-// repère) sont regroupées là, pour garder les écrans épurés. Présentée dans
-// tous les modes de stockage (ne dépend d'aucun serveur).
-
-private struct SettingsHelpSection: View {
-    let onOpen: () -> Void
-
-    var body: some View {
-        Section {
-            Button(action: onOpen) {
-                SettingsNavRow(
-                    icon: "questionmark.circle",
-                    title: "Aide",
-                    subtitle: "Comment lire et utiliser les écrans"
-                )
-            }
-        } header: {
-            Text("Aide")
-        }
-    }
-}
-
 // MARK: - Mode de connectivité (source + contrôles propres au mode)
 //
 // Colonne vertébrale de l'écran : le sélecteur de source choisit *qui* collecte,
@@ -661,7 +649,6 @@ private struct SettingsHelpSection: View {
 private struct SettingsSyncSourceSection: View {
     var viewModel: SettingsViewModel
     let onStatus: () -> Void
-    let onWatch: () -> Void
 
     var body: some View {
         Section {
@@ -674,10 +661,6 @@ private struct SettingsSyncSourceSection: View {
             .disabled(viewModel.isChangingSource)
 
             if let source = viewModel.source {
-                Text(Self.subLabel(for: source))
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseTextSecondary)
-
                 if source.source == "bridge" {
                     LabeledContent("Adresse", value: source.url)
                     HStack(spacing: PulseSpacing.xs) {
@@ -693,23 +676,19 @@ private struct SettingsSyncSourceSection: View {
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
                     Button(action: onStatus) {
-                        SettingsNavRow(
-                            icon: "dot.radiowaves.up.forward",
-                            title: "Statut du pont",
-                            subtitle: "Lien BLE bridge↔montre, synchro automatique"
-                        )
+                        HStack {
+                            Text("Statut du pont").foregroundStyle(Color.pulseTextPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.pulseAbsent)
+                        }
+                        .contentShape(Rectangle())
                     }
                 }
 
                 if source.source == "phone" {
                     SettingsIngestTokenRow(viewModel: viewModel, token: source.ingestToken)
-                    Button(action: onWatch) {
-                        SettingsNavRow(
-                            icon: "antenna.radiowaves.left.and.right",
-                            title: "Collecteur (Montre)",
-                            subtitle: "Diagnostic BLE, temps réel"
-                        )
-                    }
                 }
 
                 if source.overridden {
@@ -734,9 +713,7 @@ private struct SettingsSyncSourceSection: View {
                     .foregroundStyle(Color.pulseDanger)
             }
         } header: {
-            Text("Mode de connectivité")
-        } footer: {
-            Text("« garmin-bridge » parle en Bluetooth depuis le serveur. « iPhone (BLE) » : cette app pousse les .fit en HTTP. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons.")
+            Text("Source")
         }
     }
 
@@ -748,14 +725,6 @@ private struct SettingsSyncSourceSection: View {
             get: { viewModel.source?.source ?? SettingsSyncSourceKind.legacy.rawValue },
             set: { next in Task { await viewModel.setSource(next) } }
         )
-    }
-
-    private static func subLabel(for source: SettingsSyncSource) -> String {
-        switch source.source {
-        case "phone": return "l'iPhone pousse les .fit en HTTP (bridge-connect)"
-        case "bridge": return "bluetooth depuis le serveur, sans téléphone"
-        default: return "adb depuis l'hôte, dépôt dans data/inbox"
-        }
     }
 }
 
@@ -800,9 +769,6 @@ private struct SettingsIngestTokenRow: View {
                         .foregroundStyle(Color.pulseSuccess)
                 }
             }
-            Text("Colle ce token dans l'app iPhone : réglages > Synchronisation. Régénérer invalide l'ancien.")
-                .font(.caption2)
-                .foregroundStyle(Color.pulseTextSecondary)
         }
         .padding(.vertical, PulseSpacing.xs)
     }
@@ -945,77 +911,6 @@ private struct SettingsProfileSection: View {
                 Text(profileError)
                     .font(.footnote)
                     .foregroundStyle(Color.pulseDanger)
-            }
-        }
-    }
-}
-
-// MARK: - Ligne de navigation (secondaire propre à un mode)
-//
-// Utilisée dans le bloc « Mode de connectivité » pour ouvrir le secondaire
-// d'un mode donné : « Statut du pont » (bridge) et « Collecteur (Montre) »
-// (iPhone BLE). Le secondaire n'est plus regroupé dans une section « Système »
-// commune — chaque entrée vit sous le mode auquel elle appartient.
-
-private struct SettingsNavRow: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    /// Faux dans un `NavigationLink`, qui dessine déjà son chevron.
-    var showsChevron = true
-
-    var body: some View {
-        HStack(spacing: PulseSpacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 17))
-                .foregroundStyle(Color.pulseAccent)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .foregroundStyle(Color.pulseTextPrimary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(Color.pulseTextSecondary)
-            }
-            Spacer()
-            if showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.pulseTextSecondary)
-            }
-        }
-        .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Compte
-
-private struct SettingsAccountSection: View {
-    @Bindable var viewModel: SettingsViewModel
-    let username: String?
-    /// Faux en mode Téléphone : pas de compte serveur, donc ni utilisateur ni
-    /// déconnexion — il ne reste que le profil.
-    let showsServerAccount: Bool
-
-    var body: some View {
-        Section("Compte") {
-            if showsServerAccount {
-                LabeledContent("Utilisateur", value: username ?? "—")
-            }
-            NavigationLink {
-                SettingsProfilePage(viewModel: viewModel)
-            } label: {
-                SettingsNavRow(
-                    icon: "person.crop.circle",
-                    title: "Profil",
-                    subtitle: "Année de naissance, taille, sexe",
-                    showsChevron: false
-                )
-            }
-            if showsServerAccount {
-                Button("Déconnexion", role: .destructive) {
-                    Task { await AuthStore.shared.logout() }
-                }
             }
         }
     }

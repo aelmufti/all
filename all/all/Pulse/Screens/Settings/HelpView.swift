@@ -161,6 +161,12 @@ private enum HelpContent {
                 title: "Où vivent les données",
                 body: "Téléphone : tout reste sur l'iPhone, rien n'est envoyé à Pulse. Pulse : chaque synchro part vers le serveur. Les deux : gardé sur l'iPhone ET envoyé à Pulse, avec repli automatique sur le téléphone si Pulse est injoignable."),
             HelpTopic(
+                title: "Source de collecte",
+                body: "« garmin-bridge » : le serveur parle à la montre en Bluetooth, sans téléphone. « iPhone (BLE) » : cette app récupère les fichiers et les envoie à Pulse. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons."),
+            HelpTopic(
+                title: "Token d'ingestion",
+                body: "Il autorise l'app à envoyer des fichiers à Pulse quand la source est l'iPhone. Régénérer invalide l'ancien."),
+            HelpTopic(
                 title: "Valeurs au tiret",
                 body: "Un tiret « — » signale une absence de donnée sur la période : les valeurs ne descendent pas à zéro pour autant. Élargis la période ou synchronise la montre."),
         ]),
