@@ -553,7 +553,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     /// d'index dédié en L3.
     private func findSpoolFileURL(hash: String) -> URL? {
         guard let spool else { return nil }
-        for entry in spool.entries.values {
+        // Entrée purgée = `.fit` supprimé (jamais une activité en pratique, cf.
+        // `SpoolPurger`) : inutile de tenter de le hacher.
+        for entry in spool.entries.values where entry.purgedAt == nil {
             let url = spool.fileURL(for: entry)
             guard let entryHash = try? PulseUploader.sha256Hex(ofFileAt: url) else { continue }
             if entryHash == hash { return url }

@@ -654,3 +654,218 @@ struct GarminSessionArchiveAckTests {
         #expect(archivedIndexes(fake) == [21])
     }
 }
+
+// MARK: - 5) Verrou d'archivage : pas de SET_FILE_FLAG sans preuve d'ingestion locale
+
+/// Compteurs des coutures d'ingestion injectées (jamais de vraie passe : le spool
+/// de l'app n'est jamais ouvert depuis un test).
+private final class IngestHooks {
+    var ingestRequests = 0
+    var verifierCalls: [Int] = [] // index des entrées vérifiées, dans l'ordre
+}
+
+struct GarminSessionIngestLockTests {
+    private func makeLockedSession(
+        requires: Bool = true, hooks: IngestHooks, verifier: ((SpoolEntry) -> Bool)? = nil
+    ) throws -> (session: GarminSession, fake: FakeGfdiCommunicator, store: SpoolStore, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-connect-ingest-lock-\(UUID().uuidString)", isDirectory: true)
+        let store = try SpoolStore(root: root)
+        let fake = FakeGfdiCommunicator()
+        let session = GarminSession(
+            communicator: fake, spoolStore: store, uploader: nil,
+            requiresLocalIngest: { requires },
+            ingestProofVerifier: verifier,
+            requestLocalIngest: { hooks.ingestRequests += 1 })
+        return (session, fake, store, root)
+    }
+
+    @discardableResult
+    private func holdDelivered(_ entry: GarminDirectoryEntry, in store: SpoolStore) throws -> WatchFileID {
+        let (id, path) = SpoolStore.identity(for: entry)
+        try store.recordAcquired(id, relativePath: path, data: Data("livré".utf8), listedSize: entry.sizeBytes)
+        store.markDelivered(id)
+        return id
+    }
+
+    private func prove(_ id: WatchFileID, _ status: SpoolIngestStatus = .ingested, in store: SpoolStore) {
+        store.markIngest(id, outcome: SpoolIngestOutcome(status: status, hash: "h", at: Date()))
+    }
+
+    @Test func noArchiveWhileProofIsMissingThenItLeavesOnceProvenAndPumped() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(file, in: store)
+
+        deliverManifest(session, fake, [file])
+        #expect(archivedIndexes(fake).isEmpty, "aucune SET_FILE_FLAG sans preuve")
+        #expect(store.entries[id]?.state == .delivered)
+
+        session.archivePendingDeliveries()
+        #expect(archivedIndexes(fake).isEmpty, "toujours verrouillé")
+
+        prove(id, in: store)
+        session.archivePendingDeliveries()
+        #expect(archivedIndexes(fake) == [21])
+
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[id]?.state == .archived)
+    }
+
+    /// En production la preuve est posée par l'instance de `SpoolStore` de la
+    /// passe d'ingestion, pas par celle de la session : la session doit relire
+    /// le journal, sinon son cache ne voit jamais la preuve.
+    @Test func proofWrittenByAnotherSpoolStoreInstanceUnlocksArchiving() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(file, in: store)
+        deliverManifest(session, fake, [file])
+        #expect(archivedIndexes(fake).isEmpty)
+
+        let ingestorStore = try SpoolStore(root: root)
+        prove(id, in: ingestorStore)
+        session.archivePendingDeliveries()
+        #expect(archivedIndexes(fake) == [21])
+    }
+
+    /// `failed` et `skipped` débloquent aussi : on tient la copie, et ne pas
+    /// archiver saturerait l'index de la montre.
+    @Test(arguments: [SpoolIngestStatus.failed, .skipped, .ingested])
+    func everyKindOfProofUnlocksArchiving(status: SpoolIngestStatus) throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(file, in: store)
+        prove(id, status, in: store)
+
+        deliverManifest(session, fake, [file])
+        #expect(archivedIndexes(fake) == [21])
+    }
+
+    @Test func withoutTheRequirementNothingChanges() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(requires: false, hooks: hooks, verifier: { _ in false })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        try holdDelivered(file, in: store)
+
+        deliverManifest(session, fake, [file])
+        #expect(archivedIndexes(fake) == [21], "mode Pulse : pas de verrou, pas de vérification")
+        #expect(hooks.ingestRequests <= 1, "au plus la demande de fin de traversée, aucune relance de vérification")
+    }
+
+    /// Vérificateur négatif : pas d'archivage, preuve effacée, ré-ingestion
+    /// demandée, rien ne reste « en vol » ni « tenté » pour elle — les autres
+    /// entrées partent, et elle part plus tard sur le MÊME lien.
+    @Test func aRejectedProofClearsItRequestsReingestionAndStillLeavesLaterOnTheSameLink() throws {
+        let hooks = IngestHooks()
+        var healthy = false // devient vrai quand la base « retrouve » l'entrée 21
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks, verifier: { entry in
+            hooks.verifierCalls.append(entry.id.index)
+            return entry.id.index != 21 || healthy
+        })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = fileEntry(fileIndex: 21), b = fileEntry(fileIndex: 22)
+        let idA = try holdDelivered(a, in: store)
+        let idB = try holdDelivered(b, in: store)
+        prove(idA, in: store)
+        prove(idB, in: store)
+
+        deliverManifest(session, fake, [a, b])
+
+        #expect(archivedIndexes(fake) == [22], "21 refusée par la vérification, 22 part : aucune demande bloquée en vol")
+        #expect(store.entries[idA]?.ingest == nil, "preuve de 21 effacée")
+        #expect(store.entries[idA]?.state == .delivered)
+        #expect(hooks.ingestRequests >= 1, "ré-ingestion demandée")
+
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[idB]?.state == .archived)
+        #expect(archivedIndexes(fake) == [22], "21 est de nouveau sans preuve : verrouillée")
+
+        // La passe d'ingestion repose la preuve, la base la confirme : 21 part, sur le même lien.
+        healthy = true
+        prove(idA, in: store)
+        session.archivePendingDeliveries()
+        #expect(archivedIndexes(fake) == [22, 21])
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[idA]?.state == .archived)
+    }
+
+    /// Un vérificateur qui répond toujours faux ne fait pas boucler
+    /// effacement → ingestion → rejet : un seul cycle par acquisition et par lien.
+    @Test func aProofRejectedTwiceOnTheSameLinkIsNotClearedAgain() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks, verifier: { _ in false })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(file, in: store)
+        prove(id, in: store)
+
+        deliverManifest(session, fake, [file])
+        let afterFirst = hooks.ingestRequests
+        #expect(store.entries[id]?.ingest == nil)
+
+        prove(id, in: store)
+        session.archivePendingDeliveries()
+        #expect(archivedIndexes(fake).isEmpty)
+        #expect(store.entries[id]?.ingest != nil, "deuxième rejet : la preuve n'est pas ré-effacée")
+        #expect(hooks.ingestRequests == afterFirst, "et aucune nouvelle passe n'est demandée")
+    }
+
+    /// Une requête de vérification par archivage, pas une par entrée éligible.
+    @Test func theVerifierIsConsultedOnlyForTheEntryThatLeaves() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks, verifier: { entry in
+            hooks.verifierCalls.append(entry.id.index)
+            return true
+        })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = [fileEntry(fileIndex: 21), fileEntry(fileIndex: 22), fileEntry(fileIndex: 23)]
+        for file in files { prove(try holdDelivered(file, in: store), in: store) }
+
+        deliverManifest(session, fake, files)
+
+        #expect(archivedIndexes(fake).count == 1)
+        #expect(hooks.verifierCalls.count == 1)
+    }
+
+    @Test func skippedAndFailedProofsAreNotCheckedAgainstTheDatabase() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks, verifier: { entry in
+            hooks.verifierCalls.append(entry.id.index)
+            return false
+        })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = fileEntry(fileIndex: 21), b = fileEntry(fileIndex: 22)
+        prove(try holdDelivered(a, in: store), .skipped, in: store)
+        prove(try holdDelivered(b, in: store), .failed, in: store)
+
+        deliverManifest(session, fake, [a, b])
+
+        #expect(archivedIndexes(fake).count == 1, "rien à confirmer en base pour skipped/failed")
+        #expect(hooks.verifierCalls.isEmpty)
+    }
+
+    /// Une passe d'ingestion est demandée dès qu'un fichier est acquis (puis à la
+    /// fin de la traversée), sans attendre la fin de la traversée.
+    @Test func acquiringAFileRequestsALocalIngestion() throws {
+        let hooks = IngestHooks()
+        let (session, fake, store, root) = try makeLockedSession(hooks: hooks)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 30, sizeBytes: 16)
+
+        deliverManifest(session, fake, [file])
+        let beforeDownload = hooks.ingestRequests
+        fake.deliver(messageType: Wire.response, payload: downloadRequestStatusPayload(maxFileSize: 16))
+        let content = syntheticContent(16)
+        fake.deliver(messageType: Wire.fileTransferData, payload: fileTransferDataPayload(dataOffset: 0, crc: Crc16.compute(content), chunk: content))
+
+        #expect(store.entries.count == 1)
+        #expect(hooks.ingestRequests == beforeDownload + 2, "une demande à l'acquisition, une à la fin de la traversée")
+    }
+}

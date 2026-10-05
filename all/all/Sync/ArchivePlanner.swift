@@ -9,8 +9,9 @@
 //  Trois pièces :
 //  - `ArchivePlanner.plan` : parmi les entrées `delivered`, lesquelles peuvent
 //    être archivées MAINTENANT (identité complète présente au manifeste
-//    courant, taille listée inchangée depuis l'acquisition) et lesquelles
-//    doivent attendre (absentes, ou à relire d'abord) ;
+//    courant, taille listée inchangée depuis l'acquisition, et — modes
+//    Téléphone/Les deux — preuve d'ingestion locale) et lesquelles doivent
+//    attendre (absentes, à relire d'abord, ou en attente d'ingestion) ;
 //  - `SetFileFlagStatus` : décodage du statut renvoyé par la montre ;
 //  - `ArchiveRequestTracker` : demandes d'archivage envoyées UNE PAR UNE, la
 //    réponse est appariée à la demande en vol (la réponse ne permet pas un
@@ -42,13 +43,23 @@ enum ArchivePlanner {
         /// du spool est périmé, `SyncPlanner.filesDue` les relira ; archiver
         /// d'abord masquerait la suite de leurs données.
         var resizedSinceAcquisition: [(entry: SpoolEntry, recordedSize: Int, listedSize: Int)] = []
+        /// Archivables côté montre MAIS sans preuve d'ingestion locale
+        /// (`SpoolEntry.ingest == nil`) alors que le mode Stockage l'exige
+        /// (`requiresIngest`) : archiver maintenant détruirait le seul exemplaire
+        /// non traité. Débloquées par `LocalIngestor` (qui notifie
+        /// `.spoolIngestDidAdvance`). Toute preuve — `failed` et `skipped`
+        /// compris — suffit : on tient la copie, et ne pas archiver saturerait
+        /// l'index de la montre.
+        var awaitingIngest: [SpoolEntry] = []
     }
 
     /// `delivered` : entrées à trier (les autres états sont ignorés). `listing` :
     /// manifeste directory courant (`GarminSession.files`). La correspondance
     /// utilise l'identité COMPLÈTE `SpoolStore.identity(for:)` (type + index +
-    /// nom, donc date) — jamais l'index seul.
-    static func plan(delivered: [SpoolEntry], listing: [GarminDirectoryEntry]) -> Plan {
+    /// nom, donc date) — jamais l'index seul. `requiresIngest` (modes Téléphone/Les
+    /// deux) range dans `awaitingIngest` toute entrée sans preuve d'ingestion ;
+    /// `false` (mode Pulse, défaut) ne change rien.
+    static func plan(delivered: [SpoolEntry], listing: [GarminDirectoryEntry], requiresIngest: Bool = false) -> Plan {
         var listedByID: [WatchFileID: GarminDirectoryEntry] = [:]
         for entry in listing where !entry.isDirectory {
             listedByID[SpoolStore.identity(for: entry).id] = entry
@@ -67,6 +78,10 @@ enum ArchivePlanner {
             }
             if let recorded = entry.listedSize, recorded != listed.sizeBytes {
                 plan.resizedSinceAcquisition.append((entry, recorded, listed.sizeBytes))
+                continue
+            }
+            if requiresIngest && entry.ingest == nil {
+                plan.awaitingIngest.append(entry)
                 continue
             }
             plan.eligible.append(entry)
@@ -168,6 +183,17 @@ struct ArchiveRequestTracker {
         guard let request = inFlight else { return nil }
         inFlight = nil
         return applied ? .applied(request) : .refused(request)
+    }
+
+    /// Retire une demande que `next` vient de rendre mais que l'appelant a
+    /// finalement décidé de NE PAS émettre (dernière vérification d'archivage
+    /// négative) : elle n'est ni en vol ni comptée comme tentée sur ce lien, donc
+    /// elle pourra partir plus tard (par exemple une fois ré-ingérée). Sans effet
+    /// si `request` n'est pas la demande en vol.
+    mutating func withdraw(_ request: InFlight) {
+        guard inFlight == request else { return }
+        inFlight = nil
+        attempted.remove(Attempt(id: request.id, acquiredAt: request.acquiredAt))
     }
 
     /// Pas de réponse à temps : libère la demande (l'entrée reste `delivered`,

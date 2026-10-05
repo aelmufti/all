@@ -195,6 +195,15 @@ final class SpoolStore {
         entries.values.filter { $0.state == .delivered }
     }
 
+    /// Nombre d'entrées dont l'ingestion locale a échoué (`ingest.status ==
+    /// .failed`) — la seule chose que l'écran montre du dispositif de preuve.
+    /// Relit d'abord le journal sur disque : la preuve est posée par une AUTRE
+    /// instance (la passe d'ingestion), le cache de celle-ci serait périmé.
+    func failedIngestCount() -> Int {
+        refreshFromDisk()
+        return entries.values.filter { $0.ingest?.status == .failed }.count
+    }
+
     // MARK: - Nommage canonique (porte `GarminUtils.buildExportPath` côté pont,
     // AGPL-3.0 — service/devices/garmin/GarminUtils.java)
 
@@ -400,6 +409,93 @@ final class SpoolStore {
             }
             return (applyPushed(entry, in: &journal, expectedAcquiredAt: expectedAcquiredAt), ())
         }
+    }
+
+    /// Pose la preuve de traitement local (`SpoolEntry.ingest`) — appelée par la
+    /// passe d'ingestion (`LocalIngestor`) avec le jeton d'acquisition capturé
+    /// AVANT de hacher/décoder : si le fichier a été relu entre-temps, la preuve
+    /// concernerait l'ancien contenu et est ignorée (l'entrée repart sans preuve).
+    /// Écrase une preuve existante (ré-ingestion après `clearIngest`). Ignorée
+    /// pour une entrée inconnue ou déjà purgée.
+    func markIngest(_ id: WatchFileID, outcome: SpoolIngestOutcome, expectedAcquiredAt: Date? = nil) {
+        mutateJournal { journal in
+            guard var entry = journal[id] else {
+                log.warning("markIngest ignoré : entrée inconnue (\(id.name, privacy: .public))")
+                return (false, ())
+            }
+            guard matchesAcquisition(entry, expectedAcquiredAt, caller: "markIngest") else { return (false, ()) }
+            guard entry.purgedAt == nil else { return (false, ()) }
+            entry.ingest = outcome
+            journal[id] = entry
+            log.info("Fichier traité localement (\(outcome.status.rawValue, privacy: .public)) : \(entry.relativePath, privacy: .public)")
+            return (true, ())
+        }
+    }
+
+    /// Efface la preuve de traitement : l'entrée sera ré-ingérée au prochain
+    /// passage et ne peut plus être archivée sur la montre d'ici là. Appelée quand
+    /// une vérification de dernière minute (archivage, purge) ne retrouve pas en
+    /// base ce que la preuve affirmait. Ne fait rien sans preuve.
+    func clearIngest(_ id: WatchFileID, expectedAcquiredAt: Date? = nil) {
+        mutateJournal { journal in
+            guard var entry = journal[id] else { return (false, ()) }
+            guard matchesAcquisition(entry, expectedAcquiredAt, caller: "clearIngest") else { return (false, ()) }
+            guard entry.ingest != nil else { return (false, ()) }
+            entry.ingest = nil
+            journal[id] = entry
+            log.warning("Preuve de traitement effacée, ré-ingestion due : \(entry.relativePath, privacy: .public)")
+            return (true, ())
+        }
+    }
+
+    /// Le `.fit` a été supprimé du disque (`SpoolPurger`). L'entrée est CONSERVÉE
+    /// (elle empêche un re-téléchargement) ; seul `purgedAt` change. Idempotente.
+    func markPurged(_ id: WatchFileID, expectedAcquiredAt: Date? = nil) {
+        mutateJournal { journal in
+            guard var entry = journal[id] else { return (false, ()) }
+            guard matchesAcquisition(entry, expectedAcquiredAt, caller: "markPurged") else { return (false, ()) }
+            guard entry.purgedAt == nil else { return (false, ()) }
+            entry.purgedAt = Date()
+            journal[id] = entry
+            log.info("Fichier purgé du spool (entrée conservée) : \(entry.relativePath, privacy: .public)")
+            return (true, ())
+        }
+    }
+
+    /// Supprime le `.fit` d'une entrée ET pose `purgedAt`, d'un seul geste sous le
+    /// verrou du journal. Le jeton d'acquisition est exigé : `recordAcquired`
+    /// remplace le fichier sous ce même verrou en changeant `acquiredAt`, donc un
+    /// jeton qui correspond garantit que les octets supprimés sont ceux que
+    /// l'appelant vient de vérifier (hash) — jamais un contenu relu entre la
+    /// vérification et la suppression. Rend vrai si le fichier est parti (ou
+    /// était déjà absent) et que l'entrée est marquée purgée.
+    @discardableResult
+    func purgeFile(_ id: WatchFileID, expectedAcquiredAt: Date) -> Bool {
+        mutateJournal { journal -> (changed: Bool, result: Bool) in
+            guard var entry = journal[id], entry.purgedAt == nil,
+                  matchesAcquisition(entry, expectedAcquiredAt, caller: "purgeFile") else { return (false, false) }
+            let url = fileURL(for: entry)
+            do {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
+                }
+            } catch {
+                log.error("purge: suppression impossible (\(entry.relativePath, privacy: .public)) : \(error.localizedDescription, privacy: .public)")
+                return (false, false)
+            }
+            entry.purgedAt = Date()
+            journal[id] = entry
+            log.info("Fichier purgé du spool (entrée conservée) : \(entry.relativePath, privacy: .public)")
+            return (true, true)
+        }
+    }
+
+    /// Relit le journal sur disque dans le cache de CETTE instance (aucune
+    /// écriture). Pour une instance de longue durée dont le cache a pu prendre du
+    /// retard sur les transitions d'une autre (la passe d'ingestion, qui ne traite
+    /// que les entrées sans preuve, veut l'état frais du journal).
+    func refreshFromDisk() {
+        mutateJournal { _ in (false, ()) }
     }
 
     /// Corps commun des deux `markPushedToPulse`, sur l'entrée du journal frais.

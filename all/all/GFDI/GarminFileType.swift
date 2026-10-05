@@ -22,6 +22,10 @@ import Foundation
 struct GarminFileTypeKey: Hashable {
     let dataType: UInt8
     let subType: UInt8
+
+    /// Forme portée par `WatchFileID.fileType` : `(dataType << 8) | subType`
+    /// (cf. `SpoolStore.identity(for:)`).
+    var watchFileType: Int { (Int(dataType) << 8) | Int(subType) }
 }
 
 enum GarminFileType {
@@ -150,6 +154,12 @@ enum GarminFileType {
         }
         return result
     }()
+
+    /// Types dont le contenu est traité localement ou purgeable (cf.
+    /// `LocalIngestor`, `SpoolPurger`) — les mêmes couples que la table ci-dessus.
+    static let activity = GarminFileTypeKey(dataType: 128, subType: 4)
+    static let monitor = GarminFileTypeKey(dataType: 128, subType: 32)
+    static let sleep = GarminFileTypeKey(dataType: 128, subType: 49)
 
     /// Nom lisible pour un couple (type, sous-type) reçu dans une entrée de
     /// manifeste directory. `nil` = type inconnu de cette table (affiché comme

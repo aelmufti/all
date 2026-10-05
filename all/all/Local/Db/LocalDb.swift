@@ -232,6 +232,15 @@ final class LocalDb {
         return found
     }
 
+    /// Vrai si la base porte ce fichier : hash dans `imported_files`
+    /// (wellness/sommeil, inséré dans la MÊME transaction que les données) ou dans
+    /// `activities.file_hash`. C'est la preuve qu'un fichier journalisé
+    /// `ingested` (`SpoolEntry.ingest`) est réellement en base avant d'archiver
+    /// sur la montre (`GarminSession`) ou de supprimer le `.fit` (`SpoolPurger`).
+    func holdsIngestedFile(hash: String) throws -> Bool {
+        try isImported(hash: hash) || isActivityImported(hash: hash)
+    }
+
     struct ImportedFileRow { let hash: String; let fileName: String }
 
     /// Fichiers déjà importés d'un `kind` donné (`wellness`/`sleep`) — miroir
@@ -365,19 +374,31 @@ final class LocalDb {
     }
 
     /// Miroir de la branche `activity` d'`IngestService.ingestBuffer` — même
-    /// colonnes, même ordre. Renvoie l'id auto-incrémenté inséré.
+    /// colonnes, même ordre. Renvoie l'id auto-incrémenté inséré (ou celui de
+    /// la ligne déjà portée par ce hash). Test d'existence ET insertion dans une
+    /// même transaction `IMMEDIATE` : deux écritures concurrentes du même
+    /// fichier (autre connexion/processus) ne peuvent plus ni doubler la ligne ni
+    /// échouer sur la contrainte UNIQUE.
     @discardableResult
     func storeActivity(_ summary: FitActivityExtractor.Summary, hash: String, fileName: String) throws -> Int {
-        try db.run(
-            """
-            INSERT INTO activities (file_hash, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [.text(hash), .text(fileName), sqliteOptionalText(summary.sport), sqliteOptionalText(summary.subSport),
-             sqliteOptionalText(summary.startTime), sqliteOptional(summary.durationS), sqliteOptional(summary.distanceM),
-             sqliteOptional(summary.calories), sqliteOptional(summary.avgHr), sqliteOptional(summary.maxHr)])
         var id = 0
-        try db.run("SELECT last_insert_rowid()") { r in id = Int(r.double(0) ?? 0) }
+        try db.transaction {
+            var existing: Int?
+            try db.run("SELECT id FROM activities WHERE file_hash = ?", [.text(hash)]) { r in existing = Int(r.double(0) ?? 0) }
+            if let existing {
+                id = existing
+                return
+            }
+            try db.run(
+                """
+                INSERT INTO activities (file_hash, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [.text(hash), .text(fileName), sqliteOptionalText(summary.sport), sqliteOptionalText(summary.subSport),
+                 sqliteOptionalText(summary.startTime), sqliteOptional(summary.durationS), sqliteOptional(summary.distanceM),
+                 sqliteOptional(summary.calories), sqliteOptional(summary.avgHr), sqliteOptional(summary.maxHr)])
+            try db.run("SELECT last_insert_rowid()") { r in id = Int(r.double(0) ?? 0) }
+        }
         return id
     }
 

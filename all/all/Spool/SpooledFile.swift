@@ -35,6 +35,29 @@ enum SpoolState: String, Codable {
     case archived
 }
 
+/// Issue du traitement local d'un `.fit` (ingestion en base, mode Téléphone/Les
+/// deux). `failed` = le fichier lui-même est inexploitable (illisible, FIT
+/// indécodable) : réessayer ne changerait rien ; ce n'est PAS une panne de base
+/// (celle-ci ne laisse aucune trace, l'entrée est simplement retentée).
+enum SpoolIngestStatus: String, Codable {
+    /// Données en base (nouvellement insérées ou déjà connues par leur hash).
+    case ingested
+    /// Type de fichier sans donnée à retenir (ou sommeil sans nuit exploitable).
+    case skipped
+    case failed
+}
+
+/// Preuve, dans le journal, qu'un `.fit` a été traité localement — c'est elle,
+/// et non le seul état `delivered`, qui autorise l'archivage montre et la purge
+/// du `.fit` en mode Téléphone/Les deux.
+struct SpoolIngestOutcome: Codable, Equatable {
+    var status: SpoolIngestStatus
+    /// SHA-256 hex du fichier au moment du traitement : la purge ne supprime que
+    /// des octets identiques à ceux qui ont été ingérés.
+    var hash: String
+    var at: Date
+}
+
 /// Une entrée du journal de spool.
 struct SpoolEntry: Codable {
     let id: WatchFileID
@@ -63,12 +86,20 @@ struct SpoolEntry: Codable {
     /// `nil` = entrée écrite avant ce champ : traitée comme « tenue, taille
     /// inconnue » (jamais de re-téléchargement massif à la mise à jour).
     var listedSize: Int?
+    /// Preuve de traitement local (cf. `SpoolIngestOutcome`). `nil` = pas encore
+    /// traité. Repart à `nil` quand le fichier est relu (`recordAcquired` crée
+    /// une entrée neuve : son contenu est nouveau).
+    var ingest: SpoolIngestOutcome?
+    /// Le `.fit` a été supprimé du spool (`SpoolPurger`). L'ENTRÉE reste pour
+    /// toujours : c'est elle qui empêche `pendingAcquisition` de redemander à la
+    /// montre un fichier qu'on a déjà eu.
+    var purgedAt: Date?
 
     init(
         id: WatchFileID, state: SpoolState, acquiredAt: Date,
         deliveredAt: Date? = nil, archivedAt: Date? = nil,
         relativePath: String, pushedToPulse: Bool = false,
-        listedSize: Int? = nil
+        listedSize: Int? = nil, ingest: SpoolIngestOutcome? = nil, purgedAt: Date? = nil
     ) {
         self.id = id
         self.state = state
@@ -78,12 +109,13 @@ struct SpoolEntry: Codable {
         self.relativePath = relativePath
         self.pushedToPulse = pushedToPulse
         self.listedSize = listedSize
+        self.ingest = ingest
+        self.purgedAt = purgedAt
     }
 
-    /// Décodage manuel pour la seule rétrocompatibilité de `pushedToPulse` et
-    /// `listedSize` : un journal écrit avant ces champs (tout journal mode
-    /// Téléphone antérieur à cet incrément, ou antérieur à `listedSize`) n'a
-    /// pas ces clés — `decodeIfPresent` les défaute à `false`/`nil` plutôt que de faire échouer tout le décodage du
+    /// Décodage manuel pour la seule rétrocompatibilité de `pushedToPulse`,
+    /// `listedSize`, `ingest` et `purgedAt` : un journal écrit avant ces champs
+    /// n'a pas ces clés — `decodeIfPresent` les défaute à `false`/`nil` plutôt que de faire échouer tout le décodage du
     /// journal (`JSONDecoder().decode([SpoolEntry].self, ...)` dans
     /// `SpoolStore.loadJournal`, qui perdrait alors le journal ENTIER, pas
     /// seulement ce champ). `encode(to:)` reste synthétisé par le compilateur
@@ -98,5 +130,7 @@ struct SpoolEntry: Codable {
         relativePath = try container.decode(String.self, forKey: .relativePath)
         pushedToPulse = try container.decodeIfPresent(Bool.self, forKey: .pushedToPulse) ?? false
         listedSize = try container.decodeIfPresent(Int.self, forKey: .listedSize)
+        ingest = try container.decodeIfPresent(SpoolIngestOutcome.self, forKey: .ingest)
+        purgedAt = try container.decodeIfPresent(Date.self, forKey: .purgedAt)
     }
 }

@@ -22,6 +22,12 @@ import os
 /// pour se rafraîchir sans attendre un redémarrage de l'app.
 extension Notification.Name {
     static let allLocalDataDidChange = Notification.Name("allLocalDataDidChange")
+    /// Notifié sur le main actor quand une passe d'ingestion a posé au moins une
+    /// preuve de traitement dans le journal du spool (`SpoolEntry.ingest`) — que
+    /// des données aient été insérées ou non (un fichier `skipped` débloque lui
+    /// aussi l'archivage). `BLEManager` s'y abonne pour relancer l'archivage
+    /// montre, verrouillé tant que la preuve manque (`GarminSession`).
+    static let spoolIngestDidAdvance = Notification.Name("spoolIngestDidAdvance")
 }
 
 enum LocalIngestKind: Equatable {
@@ -36,7 +42,13 @@ enum LocalIngestKind: Equatable {
     /// Type de fichier FIT reconnu mais pas wellness/sleep/activité, ou
     /// sommeil sans nuit exploitable (`extractSleep` renvoie `nil`).
     case skipped
+    /// Le FICHIER est en cause : illisible, ou FIT indécodable. Réessayer ne
+    /// changerait rien → journalisé `failed`.
     case error(String)
+    /// Ce n'est PAS le fichier : base SQLite indisponible/en échec, ou lecture
+    /// refusée par la protection des données (appareil verrouillé). Aucun résultat
+    /// à journaliser — l'entrée est retentée à la prochaine passe.
+    case storageError(String)
 }
 
 struct LocalIngestResult {
@@ -47,51 +59,79 @@ struct LocalIngestResult {
 enum LocalIngestor {
     private static let log = Logger(subsystem: "CleanYourRoom.all", category: "local-ingest")
 
-    /// Ingère un `.fit` déjà sur disque. Ne lève jamais : un fichier
-    /// illisible/corrompu remonte en `.error`, pour que l'appelant (ex.
-    /// `ingestAll`) continue avec les fichiers suivants plutôt que d'arrêter
-    /// tout le rejeu du spool.
+    /// Ingère un `.fit` déjà sur disque. Ne lève jamais. Deux familles d'échec,
+    /// à ne pas confondre (la première est un verdict sur le fichier, la seconde
+    /// non) : `.error` = fichier illisible ou FIT indécodable ; `.storageError` =
+    /// base SQLite en échec (ouverture, `isImported`, `store*`) ou lecture
+    /// refusée par la protection des données. L'appelant (`ingestPending`)
+    /// continue avec les fichiers suivants dans les deux cas.
     static func ingest(fileURL: URL, hash: String, fileName: String, into db: LocalDb) -> LocalIngestResult {
-        do {
-            // Dédup wellness/sommeil : `imported_files`. Les activités ont
-            // leur propre dédup (`activities.file_hash`, testée plus bas
-            // juste avant `storeActivity`) — elles n'écrivent JAMAIS dans
-            // `imported_files`, comme côté serveur (cf. commentaire de
-            // `LocalDb.isActivityImported`).
-            if try db.isImported(hash: hash) {
-                return LocalIngestResult(fileName: fileName, kind: .duplicate)
-            }
-            let data = try Data(contentsOf: fileURL)
-            let file = try FitDecoder.decode(data)
-            guard let fileType = fileTypeValue(file) else {
-                return LocalIngestResult(fileName: fileName, kind: .skipped)
-            }
+        func result(_ kind: LocalIngestKind) -> LocalIngestResult { LocalIngestResult(fileName: fileName, kind: kind) }
+        func storageFailure(_ error: Error) -> LocalIngestResult {
+            log.error("Ingestion locale: base en échec pour \(fileName, privacy: .public) : \(error.localizedDescription, privacy: .public)")
+            return result(.storageError(error.localizedDescription))
+        }
 
+        // Dédup wellness/sommeil : `imported_files`. Les activités ont
+        // leur propre dédup (`activities.file_hash`, testée plus bas
+        // juste avant `storeActivity`) — elles n'écrivent JAMAIS dans
+        // `imported_files`, comme côté serveur (cf. commentaire de
+        // `LocalDb.isActivityImported`).
+        do {
+            if try db.isImported(hash: hash) { return result(.duplicate) }
+        } catch { return storageFailure(error) }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            if isProtectedDataError(error) {
+                log.warning("Ingestion locale: lecture refusée (données protégées) pour \(fileName, privacy: .public) — retentée")
+                return result(.storageError(error.localizedDescription))
+            }
+            log.error("Ingestion locale: fichier illisible \(fileName, privacy: .public) : \(error.localizedDescription, privacy: .public)")
+            return result(.error(error.localizedDescription))
+        }
+        let file: FitFile
+        do {
+            file = try FitDecoder.decode(data)
+        } catch {
+            log.error("Ingestion locale: FIT indécodable \(fileName, privacy: .public) : \(error.localizedDescription, privacy: .public)")
+            return result(.error(error.localizedDescription))
+        }
+        guard let fileType = fileTypeValue(file) else { return result(.skipped) }
+
+        do {
             if fileType == FitProfile.fileTypeMonitoringB {
                 let wellness = FitWellnessExtractor.extractWellness(messages: file.messages)
                 try db.storeWellness(wellness, hash: hash, fileName: fileName)
-                return LocalIngestResult(fileName: fileName, kind: .wellness)
+                return result(.wellness)
             }
             if fileType == FitProfile.fileTypeSleep {
                 guard let sleep = FitWellnessExtractor.extractSleep(messages: file.messages) else {
-                    return LocalIngestResult(fileName: fileName, kind: .skipped)
+                    return result(.skipped)
                 }
                 try db.storeSleep(sleep, hash: hash, fileName: fileName)
-                return LocalIngestResult(fileName: fileName, kind: .sleep)
+                return result(.sleep)
             }
             if fileType == FitProfile.fileTypeActivity {
-                if try db.isActivityImported(hash: hash) {
-                    return LocalIngestResult(fileName: fileName, kind: .duplicate)
-                }
+                if try db.isActivityImported(hash: hash) { return result(.duplicate) }
                 let summary = FitActivityExtractor.extractSummary(messages: file.messages)
                 try db.storeActivity(summary, hash: hash, fileName: fileName)
-                return LocalIngestResult(fileName: fileName, kind: .activity)
+                return result(.activity)
             }
-            return LocalIngestResult(fileName: fileName, kind: .skipped)
+            return result(.skipped)
         } catch {
-            log.error("Ingestion locale échouée pour \(fileName, privacy: .public) : \(error.localizedDescription, privacy: .public)")
-            return LocalIngestResult(fileName: fileName, kind: .error(error.localizedDescription))
+            return storageFailure(error)
         }
+    }
+
+    /// Lecture refusée parce que l'appareil est verrouillé (protection
+    /// `completeUnlessOpen` du spool) : `NSFileReadNoPermissionError`. Transitoire
+    /// — le fichier n'est pas en cause, il sera relu appareil déverrouillé.
+    private static func isProtectedDataError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError
     }
 
     private static func fileTypeValue(_ file: FitFile) -> Double? {
@@ -110,18 +150,17 @@ enum LocalIngestor {
             switch result.kind {
             case .wellness, .sleep, .activity:
                 return true
-            case .duplicate, .skipped, .error:
+            case .duplicate, .skipped, .error, .storageError:
                 return false
             }
         }
     }
 
-    /// Rejoue TOUT le spool existant dans les tables locales (§4 de la tâche
-    /// d'incrément : « spool → tables »). Ne touche JAMAIS au journal du
-    /// spool (`SpoolStore` reste seul maître de `acquired`/`delivered`/
-    /// `archived`, cf. `Spool/SpoolStore.swift`) — l'idempotence vient
-    /// entièrement de `imported_files` (hash), comme côté Pulse : rejouer
-    /// deux fois ne duplique rien.
+    /// Rejoue TOUT le spool existant dans les tables locales, sans rien journaliser.
+    /// N'est plus utilisée par l'app (elle re-hachait tout le spool à chaque
+    /// passage) : remplacée par `ingestPending`, incrémentale. Conservée comme
+    /// outil de rejeu complet (idempotent grâce à `imported_files`, comme côté
+    /// Pulse) pour les tests de bout en bout.
     static func ingestAll(from spool: SpoolStore, into db: LocalDb) -> [LocalIngestResult] {
         spool.entries.values.map { entry in
             let url = spool.fileURL(for: entry)
@@ -133,54 +172,152 @@ enum LocalIngestor {
         }
     }
 
+    // MARK: - Passe incrémentale (preuve d'ingestion dans le journal)
+
+    /// Issue journalisable d'un résultat d'ingestion, ou `nil` s'il n'y a rien à
+    /// journaliser (`.storageError` : la base n'a pas tranché, l'entrée sera
+    /// retentée). Fonction PURE.
+    ///
+    /// `fileType` (type montre de l'entrée) nuance `.error` : seuls les types
+    /// qu'on ingère vraiment (activité, MONITOR, SLEEP) peuvent être `failed`. Un
+    /// type que l'app n'exploite pas (rapports d'erreur, fichiers de réglages…)
+    /// peut ne pas être du FIT : « indécodable » y est sans conséquence, c'est un
+    /// `skipped` — sinon le compteur d'échecs affiché à l'écran ne redescendrait
+    /// jamais.
+    static func ingestStatus(for kind: LocalIngestKind, fileType: Int) -> SpoolIngestStatus? {
+        switch kind {
+        case .wellness, .sleep, .activity, .duplicate:
+            return .ingested
+        case .skipped:
+            return .skipped
+        case .error:
+            return ingestedFileTypes.contains(fileType) ? .failed : .skipped
+        case .storageError:
+            return nil
+        }
+    }
+
+    private static let ingestedFileTypes: Set<Int> = [
+        GarminFileType.activity.watchFileType,
+        GarminFileType.monitor.watchFileType,
+        GarminFileType.sleep.watchFileType,
+    ]
+
+    struct PassReport {
+        var results: [LocalIngestResult] = []
+        /// Entrées dont la preuve a été posée dans le journal.
+        var marked = 0
+    }
+
+    /// Une passe : ne traite QUE les entrées sans preuve (`ingest == nil`) et non
+    /// purgées, lues dans le journal frais. Une entrée déjà traitée n'est ni
+    /// hachée ni décodée. Pour chaque entrée : jeton d'acquisition capturé AVANT,
+    /// hash, ingestion, puis `markIngest` avec ce jeton — un fichier relu pendant
+    /// la passe reste sans preuve (son nouveau contenu sera traité à la suivante).
+    /// Une panne de base ou de lecture protégée ne marque rien.
+    static func ingestPending(from spool: SpoolStore, into db: LocalDb, now: @autoclosure () -> Date = Date()) -> PassReport {
+        spool.refreshFromDisk()
+        let pending = spool.entries.values
+            .filter { $0.ingest == nil && $0.purgedAt == nil }
+            .sorted { ($0.acquiredAt, $0.id.index) < ($1.acquiredAt, $1.id.index) }
+        var report = PassReport()
+        for entry in pending {
+            let token = entry.acquiredAt
+            let url = spool.fileURL(for: entry)
+            let fileName = (entry.relativePath as NSString).lastPathComponent
+
+            func record(_ kind: LocalIngestKind, hash: String) {
+                report.results.append(LocalIngestResult(fileName: fileName, kind: kind))
+                guard let status = ingestStatus(for: kind, fileType: entry.id.fileType) else { return }
+                spool.markIngest(entry.id, outcome: SpoolIngestOutcome(status: status, hash: hash, at: now()), expectedAcquiredAt: token)
+                report.marked += 1
+            }
+
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                // Ni purgé ni sur le disque : rien à ingérer, jamais. `failed` plutôt
+                // que de retenter à l'infini (et de verrouiller l'archivage).
+                record(.error("fichier absent"), hash: "")
+                continue
+            }
+            let hash: String
+            do {
+                hash = try PulseUploader.sha256Hex(ofFileAt: url)
+            } catch {
+                if isProtectedDataError(error) {
+                    report.results.append(LocalIngestResult(fileName: fileName, kind: .storageError(error.localizedDescription)))
+                } else {
+                    record(.error(error.localizedDescription), hash: "")
+                }
+                continue
+            }
+            let result = ingest(fileURL: url, hash: hash, fileName: fileName, into: db)
+            record(result.kind, hash: hash)
+        }
+        return report
+    }
+
     // MARK: - Câblage (incrément L2, `docs/stockage-local.md`)
     //
-    // `ingestAll` existait déjà (L1) mais n'était appelée nulle part — la
-    // base locale restait vide même en mode Téléphone/Les deux tant que
-    // personne ne rejouait le spool. Deux points d'appel (cf. rapport
-    // d'incrément) : lancement (`ContentView.task`) et fin de traversée BLE
-    // (`GarminSession.advanceDownloadQueue`, transition vers `.done`).
+    // Points d'appel de `ingestIfNeeded` : lancement (`ContentView.task`),
+    // changement de mode, fin de traversée BLE (`GarminSession.advanceDownloadQueue`)
+    // et chaque fichier acquis (`GarminSession.finishDownload`) — la preuve
+    // d'ingestion débloque l'archivage montre, autant ne pas l'attendre.
     //
-    // Ouvre sa PROPRE `SpoolStore`/`LocalDb` à chaque appel plutôt que de
+    // Ouvre sa PROPRE `SpoolStore`/`LocalDb` à chaque passe plutôt que de
     // recevoir celles de l'appelant : on travaille hors main actor et on ne
     // veut pas posséder/garder vivante une instance partagée. C'est sûr : le
     // cache `SpoolStore.entries` est lu sous le verrou commun à toutes les
     // instances, et le journal est relu/fusionné sur disque à chaque
-    // transition (cf. `Spool/SpoolStore.swift`) — cette tâche ne le modifie de
-    // toute façon qu'au plus par le rétro-remplissage de `listedSize` à
-    // l'ouverture, lui aussi fusionné (jamais d'écrasement d'un état plus
-    // récent). Ouvrir une deuxième connexion SQLite vers le même fichier
-    // `LocalDb` est sûr (`PRAGMA journal_mode = WAL`, cf. `SQLiteDatabase.init`).
+    // transition (cf. `Spool/SpoolStore.swift`). Ouvrir une deuxième connexion
+    // SQLite vers le même fichier `LocalDb` est sûr (`PRAGMA journal_mode = WAL`,
+    // cf. `SQLiteDatabase.init`).
     //
-    // Toujours hors main actor (IO fichier + hachage SHA-256 + SQLite) via
-    // `Task.detached` — jamais attendue par l'appelant (fire-and-forget,
-    // comme un rafraîchissement en arrière-plan ; les écrans relisent la
-    // base au prochain `load()`, pas besoin de signal de fin ici).
+    // Jamais deux passes en parallèle (`SerialPassGate`) : un appel pendant une
+    // passe en demande UNE de plus juste après. Toujours hors main actor (IO
+    // fichier + hachage SHA-256 + SQLite), fire-and-forget pour l'appelant.
+
+    private static let gate = SerialPassGate()
+
     static func ingestIfNeeded() {
         guard StorageModeStore.current != .pulse else { return }
-        Task.detached(priority: .utility) {
-            guard let spool = try? SpoolStore(), let db = try? LocalDb() else {
-                log.error("ingestIfNeeded: SpoolStore/LocalDb indisponible, ingestion sautée")
-                return
-            }
-            let results = ingestAll(from: spool, into: db)
-            let errors = results.filter { if case .error = $0.kind { return true }; return false }
-            if errors.isEmpty {
-                log.info("ingestIfNeeded: \(results.count, privacy: .public) entrée(s) du spool rejouée(s), 0 erreur")
-            } else {
-                log.error("ingestIfNeeded: \(errors.count, privacy: .public)/\(results.count, privacy: .public) entrée(s) en erreur")
-            }
-            let bbBackfilled = backfillBodyBatteryIfNeeded(spool: spool, db: db)
-            // N'avertir les écrans QUE si quelque chose a réellement changé —
-            // éviter un rechargement pour rien à chaque rejeu (idempotent la
-            // plupart du temps, tout le spool étant déjà dans `imported_files`).
-            guard hasNewInsertion(results) || bbBackfilled else { return }
-            // Passe par le MÊME coalesceur que la livraison Pulse
-            // (`DataRefreshNotifier`) : en mode « Les deux », ingestion locale
-            // ET livraison Pulse arrivent quasi en même temps — sans coalescer,
-            // ça faisait DEUX rechargements d'écran au lieu d'un.
-            await MainActor.run {
+        gate.request { runPass() }
+    }
+
+    /// Corps d'une passe : ingestion incrémentale, rétro-remplissage Body Battery,
+    /// purge si due, puis notifications. Synchrone, exécuté par `gate`.
+    private static func runPass() {
+        // Le mode a pu repasser à Pulse entre la demande et l'exécution.
+        guard StorageModeStore.current != .pulse else { return }
+        guard let spool = try? SpoolStore(), let db = try? LocalDb() else {
+            log.error("ingestIfNeeded: SpoolStore/LocalDb indisponible, ingestion sautée")
+            return
+        }
+        let report = ingestPending(from: spool, into: db)
+        let failures = report.results.filter { if case .error = $0.kind { return true }; return false }.count
+        let storageErrors = report.results.filter { if case .storageError = $0.kind { return true }; return false }.count
+        if !report.results.isEmpty {
+            log.info("ingestIfNeeded: \(report.results.count, privacy: .public) entrée(s) traitée(s), \(report.marked, privacy: .public) journalisée(s), \(failures, privacy: .public) fichier(s) en échec, \(storageErrors, privacy: .public) à retenter")
+        }
+        let bbBackfilled = backfillBodyBatteryIfNeeded(spool: spool, db: db)
+        // Fin de passe, donc jamais en parallèle d'une ingestion (même `gate`).
+        SpoolPurger.runIfDue(spool: spool, db: db, pulseConfigured: PulseConfig.baseURL != nil)
+
+        // N'avertir les écrans QUE si quelque chose a réellement changé —
+        // éviter un rechargement pour rien (la plupart des passes n'ont rien à
+        // traiter).
+        let dataChanged = hasNewInsertion(report.results) || bbBackfilled
+        let advanced = report.marked > 0
+        guard dataChanged || advanced else { return }
+        DispatchQueue.main.async {
+            if dataChanged {
+                // Passe par le MÊME coalesceur que la livraison Pulse
+                // (`DataRefreshNotifier`) : en mode « Les deux », ingestion locale
+                // ET livraison Pulse arrivent quasi en même temps — sans coalescer,
+                // ça faisait DEUX rechargements d'écran au lieu d'un.
                 DataRefreshNotifier.postDataDidChangeDebounced()
+            }
+            if advanced {
+                NotificationCenter.default.post(name: .spoolIngestDidAdvance, object: nil)
             }
         }
     }
@@ -210,7 +347,9 @@ enum LocalIngestor {
         let wellnessHashes = Set((try? db.importedFiles(kind: "wellness"))?.map(\.hash) ?? [])
         var insertedAny = false
         if !wellnessHashes.isEmpty {
-            for entry in spool.entries.values {
+            // Un fichier purgé est ignoré d'office (déjà absent du disque) ; un fichier
+            // absent pour une autre raison est de toute façon toléré par le `try?`.
+            for entry in spool.entries.values where entry.purgedAt == nil {
                 let url = spool.fileURL(for: entry)
                 guard let hash = try? PulseUploader.sha256Hex(ofFileAt: url), wellnessHashes.contains(hash),
                       let data = try? Data(contentsOf: url), let file = try? FitDecoder.decode(data)

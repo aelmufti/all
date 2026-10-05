@@ -176,6 +176,30 @@ final class GarminSession: ObservableObject {
     /// qui ne connaissent pas encore l'upload — `BLEManager` passe une vraie
     /// instance (`PulseSpoolUploader`) à la construction. Cf. `uploadSpoolEntry`.
     private let uploader: SpoolUploading?
+    /// Dit si l'ingestion locale est requise avant d'archiver sur la montre (prod :
+    /// mode Stockage ≠ Pulse, relu à CHAQUE appel — l'utilisateur peut changer de
+    /// mode en cours de session). Défaut `false` : pas de verrou (tests existants,
+    /// mode Pulse). Cf. `ArchivePlanner.plan(requiresIngest:)`.
+    private let requiresLocalIngest: () -> Bool
+    /// Dernière vérification avant `SET_FILE_FLAG` : confirme qu'une entrée dont la
+    /// preuve dit `ingested` est réellement en base. `nil` = pas de vérification.
+    /// Appelé pour la SEULE entrée qui va partir (une requête par archivage, pas
+    /// une par entrée éligible à chaque pompage).
+    private let ingestProofVerifier: ((SpoolEntry) -> Bool)?
+    /// Demande une passe d'ingestion locale (prod : `LocalIngestor.ingestIfNeeded`,
+    /// qui se garde elle-même du mode). Injectable pour ne pas lancer de vraie
+    /// passe sur le spool de l'app depuis un test.
+    private let requestLocalIngest: () -> Void
+    /// Acquisitions dont la preuve a déjà été rejetée par le vérificateur sur ce
+    /// lien : un second rejet ne réefface ni ne relance rien (sinon une base
+    /// illisible côté vérificateur mais lisible côté ingestion ferait boucler
+    /// effacement → ingestion → rejet).
+    private var rejectedProofs: Set<ArchiveProofKey> = []
+
+    private struct ArchiveProofKey: Hashable {
+        let id: WatchFileID
+        let acquiredAt: Date
+    }
 
     @Published private(set) var state: GarminHandshakeState = .idle
     @Published private(set) var files: [GarminDirectoryEntry] = []
@@ -310,11 +334,20 @@ final class GarminSession: ObservableObject {
     /// la requête calendrier de la montre reçoit alors la réponse vide historique.
     private let calendarSource: CalendarEventSource?
 
-    init(communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil, calendarSource: CalendarEventSource? = nil, archiveTimeout: TimeInterval = 20) {
+    init(
+        communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil,
+        calendarSource: CalendarEventSource? = nil, archiveTimeout: TimeInterval = 20,
+        requiresLocalIngest: @escaping () -> Bool = { false },
+        ingestProofVerifier: ((SpoolEntry) -> Bool)? = nil,
+        requestLocalIngest: @escaping () -> Void = { LocalIngestor.ingestIfNeeded() }
+    ) {
         self.communicator = communicator
         self.archiveTimeout = archiveTimeout
         self.spoolStore = spoolStore
         self.uploader = uploader
+        self.requiresLocalIngest = requiresLocalIngest
+        self.ingestProofVerifier = ingestProofVerifier
+        self.requestLocalIngest = requestLocalIngest
         self.calendarSource = calendarSource
         communicator.onGfdiFrame = { [weak self] frame in self?.handle(frame) }
         communicator.onGfdiChannelReady = { [weak self] in self?.onGfdiChannelReady() }
@@ -739,7 +772,7 @@ final class GarminSession: ObservableObject {
             // fusionné sur disque, deux instances ne s'écrasent pas). Seam retenu faute d'un point de fin de
             // traversée plus canonique ; à revalider si un futur incrément en
             // introduit un (cf. rapport d'incrément L2).
-            LocalIngestor.ingestIfNeeded()
+            requestLocalIngest()
             // Fin de traversée : si tous les uploads Pulse ont déjà abouti
             // (réseau plus rapide que le BLE), `handleUploadOutcome` ne sera
             // plus rappelé — c'est donc ICI qu'on poste le rafraîchissement
@@ -834,7 +867,12 @@ final class GarminSession: ObservableObject {
     /// rapport est émis (un par manifeste), `pumpArchiveQueue` restant muet.
     private func retryPendingArchives() {
         guard let spoolStore else { return }
-        let plan = ArchivePlanner.plan(delivered: spoolStore.pendingArchive(), listing: files)
+        let requiresIngest = requiresLocalIngest()
+        if requiresIngest { spoolStore.refreshFromDisk() }
+        let plan = ArchivePlanner.plan(delivered: spoolStore.pendingArchive(), listing: files, requiresIngest: requiresIngest)
+        if !plan.awaitingIngest.isEmpty {
+            log.info("\(plan.awaitingIngest.count, privacy: .public) entrée(s) `delivered` en attente d'ingestion locale — pas d'archivage avant la preuve")
+        }
         if !plan.absentFromManifest.isEmpty {
             log.info("\(plan.absentFromManifest.count, privacy: .public) entrée(s) `delivered` absente(s) du manifeste courant — laissée(s) `delivered`, pas d'archivage à l'aveugle par index")
             for entry in plan.absentFromManifest {
@@ -850,18 +888,61 @@ final class GarminSession: ObservableObject {
         pumpArchiveQueue()
     }
 
+    /// Fichiers du spool dont l'ingestion locale a échoué — pour l'écran montre.
+    func failedIngestCount() -> Int {
+        spoolStore?.failedIngestCount() ?? 0
+    }
+
     /// Émet, s'il n'y en a pas déjà une en vol, la prochaine demande d'archivage
     /// éligible, et arme le minuteur d'absence de réponse.
+    ///
+    /// Modes Téléphone/Les deux : une entrée sans preuve d'ingestion n'est pas
+    /// éligible (`ArchivePlanner.awaitingIngest`), et celle qui va partir est
+    /// revérifiée une dernière fois (`confirmIngestProof`) — une demande refusée
+    /// par cette vérification est RETIRÉE du suivi (`withdraw`) : ni en vol, ni
+    /// comptée comme tentée, elle pourra partir une fois ré-ingérée.
     private func pumpArchiveQueue() {
         guard let spoolStore else { return }
-        let plan = ArchivePlanner.plan(delivered: spoolStore.pendingArchive(), listing: files)
-        guard let request = archiveTracker.next(from: plan.eligible) else { return }
-        archiveFileOnWatch(fileIndex: request.fileIndex)
-        let sequence = request.sequence
-        DispatchQueue.main.asyncAfter(deadline: .now() + archiveTimeout) { [weak self] in
-            guard let self, self.archiveTracker.inFlight?.sequence == sequence else { return }
-            self.expireInFlightArchive()
+        let requiresIngest = requiresLocalIngest()
+        // La preuve d'ingestion est posée par une AUTRE instance de `SpoolStore`
+        // (la passe de `LocalIngestor`) : sans relire le journal, le cache de
+        // celle-ci ne la verrait pas et l'entrée resterait « en attente ».
+        if requiresIngest { spoolStore.refreshFromDisk() }
+        let plan = ArchivePlanner.plan(delivered: spoolStore.pendingArchive(), listing: files, requiresIngest: requiresIngest)
+        var candidates = plan.eligible
+        while let request = archiveTracker.next(from: candidates) {
+            func isRequested(_ entry: SpoolEntry) -> Bool { entry.id == request.id && entry.acquiredAt == request.acquiredAt }
+            if requiresIngest, let entry = candidates.first(where: isRequested), !confirmIngestProof(of: entry) {
+                archiveTracker.withdraw(request)
+                candidates.removeAll(where: isRequested)
+                continue
+            }
+            archiveFileOnWatch(fileIndex: request.fileIndex)
+            let sequence = request.sequence
+            DispatchQueue.main.asyncAfter(deadline: .now() + archiveTimeout) { [weak self] in
+                guard let self, self.archiveTracker.inFlight?.sequence == sequence else { return }
+                self.expireInFlightArchive()
+            }
+            return
         }
+    }
+
+    /// Dernier contrôle avant `SET_FILE_FLAG` : une preuve `ingested` doit être
+    /// confirmée par la base (`ingestProofVerifier`). Sinon la preuve est effacée
+    /// (l'entrée sera ré-ingérée) et l'archivage de CETTE entrée est reporté. Les
+    /// preuves `skipped`/`failed` n'ont rien en base à confirmer.
+    private func confirmIngestProof(of entry: SpoolEntry) -> Bool {
+        guard entry.ingest?.status == .ingested, let verifier = ingestProofVerifier else { return true }
+        if verifier(entry) { return true }
+        let key = ArchiveProofKey(id: entry.id, acquiredAt: entry.acquiredAt)
+        if rejectedProofs.insert(key).inserted {
+            log.warning("Archivage reporté : la base ne confirme pas l'ingestion de index=\(entry.id.index, privacy: .public) — preuve effacée, ré-ingestion demandée")
+            spoolStore?.clearIngest(entry.id, expectedAcquiredAt: entry.acquiredAt)
+            requestLocalIngest()
+        } else {
+            log.warning("Archivage reporté : ingestion de index=\(entry.id.index, privacy: .public) toujours non confirmée sur ce lien")
+        }
+        return false
     }
 
     /// La montre n'a pas répondu à temps : l'entrée reste `delivered` (retentée à
@@ -1135,6 +1216,10 @@ final class GarminSession: ObservableObject {
                 acquiredFileIndexes.insert(entry.fileIndex)
                 log.info("Fichier acquis dans le spool : \(relativePath, privacy: .public)")
                 uploadSpoolEntry(saved)
+                // Ingestion locale dès l'acquisition : c'est la preuve qui débloque
+                // l'archivage montre en mode Téléphone/Les deux, inutile d'attendre
+                // la fin de la traversée. Passes fusionnées (`SerialPassGate`).
+                requestLocalIngest()
             } catch {
                 log.error("Échec d'écriture dans le spool (\(relativePath, privacy: .public)) : \(error.localizedDescription, privacy: .public)")
             }

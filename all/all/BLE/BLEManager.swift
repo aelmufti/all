@@ -277,8 +277,37 @@ final class BLEManager: NSObject, ObservableObject {
     /// Métrique 5 — dernière notification GATT reçue, pour le delta à la chute.
     private var lastNotificationAt: Date?
 
+    /// Base locale retenue pour le vérificateur d'archivage (cf.
+    /// `ingestProofVerifier`) — ouverte au premier besoin, rouverte si l'ouverture
+    /// a échoué. Jamais touchée hors main (le vérificateur est appelé par
+    /// `GarminSession`, sur le main). Le fichier est en WAL : cette connexion
+    /// coexiste avec celles de l'ingestion (`LocalIngestor`).
+    private var verificationDb: LocalDb?
+
+    /// Observateur de `.spoolIngestDidAdvance` (jamais retiré : singleton).
+    private var spoolIngestObserver: NSObjectProtocol?
+
+    /// Vrai si la base locale détient bien le fichier de cette entrée (hash dans
+    /// `imported_files` ou `activities`). Base indisponible ou en échec → `false` :
+    /// on n'archive pas ce qu'on ne peut pas vérifier.
+    private func localDbHoldsIngestedFile(of entry: SpoolEntry) -> Bool {
+        guard let hash = entry.ingest?.hash, !hash.isEmpty else { return false }
+        if verificationDb == nil { verificationDb = try? LocalDb() }
+        guard let db = verificationDb else {
+            log.error("Vérification d'ingestion: LocalDb indisponible — archivage reporté")
+            return false
+        }
+        return (try? db.holdsIngestedFile(hash: hash)) ?? false
+    }
+
     private override init() {
         super.init()
+        // L'archivage montre est verrouillé tant qu'une entrée n'a pas de preuve
+        // d'ingestion locale (modes Téléphone/Les deux, cf. `GarminSession`) : dès
+        // qu'une passe d'ingestion a posé des preuves, on relance l'archivage.
+        spoolIngestObserver = NotificationCenter.default.addObserver(forName: .spoolIngestDidAdvance, object: nil, queue: .main) { [weak self] _ in
+            self?.garminSession?.archivePendingDeliveries()
+        }
         let options: [String: Any] = [
             CBCentralManagerOptionRestoreIdentifierKey: Self.restoreIdentifier,
             CBCentralManagerOptionShowPowerAlertKey: true,
@@ -811,7 +840,10 @@ extension BLEManager: CBPeripheralDelegate {
             if spoolStore == nil {
                 log.error("SpoolStore indisponible — le téléchargement de fichiers ne pourra pas écrire sur disque")
             }
-            let session = GarminSession(communicator: communicator, spoolStore: spoolStore, uploader: pulseUploader, calendarSource: EventKitCalendarSource.shared)
+            let session = GarminSession(
+                communicator: communicator, spoolStore: spoolStore, uploader: pulseUploader, calendarSource: EventKitCalendarSource.shared,
+                requiresLocalIngest: { StorageModeStore.current != .pulse },
+                ingestProofVerifier: { [weak self] entry in self?.localDbHoldsIngestedFile(of: entry) ?? false })
             // Live-2 : même `communicator` (conforme aux deux protocoles),
             // aucun service REALTIME_* enregistré ici — juste prête à recevoir
             // des toggles utilisateur (cf. commentaire de la propriété).

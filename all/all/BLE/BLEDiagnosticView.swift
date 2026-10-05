@@ -227,11 +227,20 @@ func shouldShowForgetDeviceButton(peripheralName: String?, connectionState: BLEC
 /// d'état) — il faut observer l'objet lui-même pour ça.
 private struct GarminDirectorySection: View {
     @ObservedObject var session: GarminSession
+    /// Fichiers dont l'ingestion locale a échoué (journal du spool). Rafraîchi à
+    /// l'apparition et à chaque avancée de l'ingestion : la session ne publie pas
+    /// ce compteur.
+    @State private var failedIngests = 0
 
     var body: some View {
         Section("Synchronisation") {
             LabeledContent("Sync", value: syncStateLabel)
             LabeledContent("Fichiers", value: "\(session.acquiredFileIndexes.count) acquis · \(session.deliveredFileIndexes.count) livrés")
+            if failedIngests > 0 {
+                Text("\(failedIngests) fichier(s) non ingéré(s)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             // Filet de sécurité : la traversée se lance déjà toute seule à la
             // connexion (cf. `GarminSession.finishDownload()`, branche
             // `.directory`) — ce bouton sert pour un rattrapage manuel (ex.
@@ -240,6 +249,10 @@ private struct GarminDirectorySection: View {
                 session.syncNewFiles()
             }
             .disabled(session.downloadingFileIndex != nil || isDownloading)
+        }
+        .onAppear { failedIngests = session.failedIngestCount() }
+        .onReceive(NotificationCenter.default.publisher(for: .spoolIngestDidAdvance)) { _ in
+            failedIngests = session.failedIngestCount()
         }
         Section("GFDI (montre V2)") {
             LabeledContent("État", value: session.state.label)
