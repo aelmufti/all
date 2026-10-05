@@ -145,8 +145,14 @@ final class WakeScheduleStore {
             }
             // Adopte la map serveur, même vide quand le cache l'était déjà
             // (vide → vide n'est jamais un effacement délibéré observable).
-            minutesByWeekday = serverMap
-            persist()
+            // Inchangé (cas courant : relu à chaque démarrage/changement de mode/
+            // connexion) : ne pas réaffecter la valeur observable, sinon tous les
+            // écrans qui lisent `minutesByWeekday` se réévaluent pour rien. Les
+            // rappels, eux, sont toujours reprogrammés (comportement historique).
+            if serverMap != minutesByWeekday {
+                minutesByWeekday = serverMap
+                persist()
+            }
             WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
         } catch {
             // Hors-ligne / `.notConfigured` / `.unauthorized` : no-op, on

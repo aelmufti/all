@@ -55,8 +55,11 @@ final class StatusViewModel {
 
     // MARK: - Chargement
 
+    /// Garde les cartes affichées pendant le rechargement (pull-to-refresh : le
+    /// repasser en `.loading` détruisait la `ScrollView` en plein geste) ; un
+    /// échec ne les vide pas.
     func load() async {
-        state = .loading
+        if case .loaded = state {} else { state = .loading }
         do {
             async let linkTask: StatusLinkState = client.get("api/sync/link")
             async let detailTask: StatusHealthDetail = client.get("api/health/detail")
@@ -67,7 +70,7 @@ final class StatusViewModel {
             self.syncStatus = status
             state = .loaded
         } catch {
-            state = .failed(Self.message(for: error))
+            if case .loaded = state {} else { state = .failed(Self.message(for: error)) }
         }
     }
 

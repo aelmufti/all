@@ -123,7 +123,8 @@ private struct NutritionAddMenu: View {
                                                 .foregroundStyle(Color.pulseTextSecondary)
                                         }
                                     }
-                                    .padding(.vertical, PulseSpacing.sm)
+                                    .frame(minHeight: 44)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -144,7 +145,8 @@ private struct NutritionAddMenu: View {
                                     .font(.caption)
                             }
                             .foregroundStyle(Color.pulseAccent)
-                            .padding(.vertical, PulseSpacing.sm)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -164,7 +166,8 @@ private struct NutritionAddMenu: View {
                                 .font(.caption)
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
-                        .padding(.vertical, PulseSpacing.xs)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -183,7 +186,8 @@ private struct NutritionAddMenu: View {
                                 .font(.system(size: 12, design: .rounded))
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
-                        .padding(.vertical, PulseSpacing.xs)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -202,7 +206,8 @@ private struct NutritionAddMenu: View {
                                 .font(.caption)
                                 .foregroundStyle(Color.pulseTextSecondary)
                         }
-                        .padding(.vertical, PulseSpacing.xs)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -227,6 +232,8 @@ private struct NutritionAddMenu: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(Color.pulseTextSecondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -268,7 +275,8 @@ private struct NutritionAddFrequentList: View {
                                             .foregroundStyle(Color.pulseTextSecondary)
                                             .lineLimit(1)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
 
@@ -278,7 +286,7 @@ private struct NutritionAddFrequentList: View {
                                     Image(systemName: "plus")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Color.pulseSurface)
-                                        .frame(width: 42, height: 42)
+                                        .frame(width: 44, height: 44)
                                         .background(Color.pulseTextPrimary)
                                         .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
                                 }
@@ -357,7 +365,7 @@ private struct NutritionAddManualForm: View {
                                     Text(viewModel.amountUnitText())
                                         .font(.system(size: 13, design: .rounded))
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(PulseButtonStyle(kind: .secondary, fullWidth: false))
                                 .disabled(viewModel.pUnitGrams == nil)
                             }
                         }
@@ -403,7 +411,7 @@ private struct NutritionAddManualForm: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.pulsePrimary)
                 .tint(Color.pulseAccent)
                 .disabled(isAddDisabled)
 
@@ -413,7 +421,7 @@ private struct NutritionAddManualForm: View {
                     Text("Annuler")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.pulseSecondary)
             }
             .padding(PulseSpacing.lg)
             .background(

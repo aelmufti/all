@@ -9,17 +9,13 @@
 //  directement) et les composants `DesignSystem.swift`.
 //
 //  Trois états stricts (cf. contrat de l'agent) : chargement (`LoadingView`),
-//  erreur (`ErrorView(message:retry:)`), données. Le poids (fenêtre 90 jours,
-//  indépendante de la date affichée) échoue silencieusement côté vue-modèle
-//  plutôt que de bloquer tout l'écran — un exercice pratique de la même règle
-//  que `IntensityDayCardComponent` côté Angular (au mieux, jamais bloquant).
+//  erreur (`ErrorView(message:retry:)`), données — les deux premiers seulement
+//  tant qu'il n'y a encore rien à afficher : ensuite un rechargement garde le
+//  contenu (bandeau d'erreur discret en cas d'échec) et un changement de date
+//  montre des emplacements réservés.
 //
-//  Poids servi en mode Téléphone depuis l'incrément L5 (`docs/stockage-local.md`) :
-//  `RealLocalPulseBackend` sert `api/weight` depuis `weight_log` (SQLite
-//  locale), la carte n'est donc plus masquée. `push` (statut de transmission
-//  vers la montre) reste toujours neutre côté backend local — l'écriture vers
-//  la montre passe par `BLEManager.requestWatchWeightWrite`, indépendante du
-//  mode de stockage (cf. `HealthViewModel.saveWeight`).
+//  Le poids (saisie, courbe, historique) vit dans l'écran Nutrition — cf.
+//  `Screens/Nutrition/NutritionWeightCard.swift`.
 //
 
 import SwiftUI
@@ -30,8 +26,8 @@ struct HealthView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let day = viewModel.day {
-                    loaded(day: day)
+                if viewModel.hasContent {
+                    loaded
                 } else if let message = viewModel.errorMessage {
                     ErrorView(message: message) {
                         Task { await viewModel.retry() }
@@ -47,7 +43,7 @@ struct HealthView: View {
             .background(Color.pulseBackground)
         }
         .task {
-            await viewModel.load()
+            await viewModel.reload()
         }
         // Bascule de jour : à minuit local et au retour premier plan, avance au
         // nouveau jour si l'utilisateur est sur le dernier jour connu.
@@ -55,19 +51,31 @@ struct HealthView: View {
         // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
         // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
-        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
-        .reloadsOnStorageModeChange { await viewModel.load() }
+        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay(trailing: true) }
+        .reloadsOnStorageModeChange { await viewModel.reload(trailing: true) }
     }
 
-    private func loaded(day: WellnessDayDetail) -> some View {
+    private var loaded: some View {
         ScrollView {
             VStack(spacing: PulseSpacing.lg) {
                 HealthDayNavigator(viewModel: viewModel)
-                SleepCard(viewModel: viewModel, sleep: day.sleep)
-                MetricTabPicker(viewModel: viewModel)
-                HealthMetricChartCard(viewModel: viewModel, day: day)
-                IntensityCard(intensity: viewModel.intensity, failed: viewModel.intensityFailed)
-                WeightCard(viewModel: viewModel)
+                if let message = viewModel.errorMessage {
+                    DashboardInlineError(message: message) { Task { await viewModel.retry() } }
+                }
+                if let day = viewModel.day {
+                    SleepCard(viewModel: viewModel, sleep: day.sleep)
+                    MetricTabPicker(viewModel: viewModel)
+                    HealthMetricChartCard(viewModel: viewModel, day: day)
+                } else if viewModel.isDayLoading {
+                    // Autre date en cours de chargement : mêmes emplacements que
+                    // les cartes du jour, jamais les données de l'ancienne date.
+                    PulseSkeletonCard(height: 250)
+                    MetricTabPicker(viewModel: viewModel)
+                    PulseSkeletonCard(height: 230)
+                }
+                if viewModel.day != nil || viewModel.isDayLoading {
+                    IntensityCard(intensity: viewModel.intensity, failed: viewModel.intensityFailed)
+                }
             }
             .padding(PulseSpacing.lg)
         }

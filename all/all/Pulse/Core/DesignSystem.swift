@@ -162,6 +162,22 @@ struct PulseCard<Content: View>: View {
     }
 }
 
+/// Emplacement réservé d'une carte pas encore chargée (changement de date) :
+/// même enveloppe que `PulseCard`, bloc neutre de hauteur donnée. Garde la
+/// structure de la page au lieu de faire disparaître puis réapparaître la carte.
+struct PulseSkeletonCard: View {
+    var height: CGFloat
+
+    var body: some View {
+        PulseCard {
+            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                .fill(Color.pulseSurfaceAlt)
+                .frame(height: height)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 /// Badge circulaire teinté (fond `pulseAccent` à faible opacité) autour d'un
 /// SF Symbol — repère visuel d'en-tête, partagé entre l'onboarding
 /// (`OnboardingIconBadge` en dérive) et la porte de login (`LoginView`). Un seul
@@ -258,6 +274,50 @@ struct SectionHeader<Trailing: View>: View {
     }
 }
 
+/// Style unique des boutons d'action de l'app — remplace les styles système
+/// `.bordered`/`.borderedProminent`, trop bas pour être confortables au
+/// doigt. Hauteur minimale 48 pt, pleine largeur par défaut ; `fullWidth:
+/// false` pour un bouton posé en bout de ligne.
+struct PulseButtonStyle: ButtonStyle {
+    enum Kind { case primary, secondary }
+
+    let kind: Kind
+    var fullWidth = true
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let foreground = foreground(for: configuration.role)
+        configuration.label
+            .font(.system(.body, design: .rounded, weight: .semibold))
+            .foregroundStyle(foreground)
+            .tint(foreground)
+            .lineLimit(1)
+            .padding(.horizontal, PulseSpacing.lg)
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 48)
+            .background(kind == .primary ? Color.pulseAccent : Color.pulseSurfaceAlt)
+            .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+            .overlay {
+                if kind == .secondary {
+                    RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                        .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                }
+            }
+            .contentShape(Rectangle())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.4)
+    }
+
+    private func foreground(for role: ButtonRole?) -> Color {
+        if kind == .primary { return .pulseOnAccent }
+        return role == .destructive ? .pulseDanger : .pulseTextPrimary
+    }
+}
+
+extension ButtonStyle where Self == PulseButtonStyle {
+    static var pulsePrimary: PulseButtonStyle { PulseButtonStyle(kind: .primary) }
+    static var pulseSecondary: PulseButtonStyle { PulseButtonStyle(kind: .secondary) }
+}
+
 /// Bouton « Terminé » standard pour un écran présenté en feuille (`.sheet`)
 /// depuis le menu système (roue crantée). Garantit une sortie explicite —
 /// aucun écran présenté modalement ne doit pouvoir piéger l'utilisateur.
@@ -305,7 +365,7 @@ struct ErrorView: View {
                 .foregroundStyle(Color.pulseTextPrimary)
                 .multilineTextAlignment(.center)
             Button("Réessayer", action: retry)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.pulsePrimary)
                 .tint(Color.pulseAccent)
         }
         .padding(PulseSpacing.xl)

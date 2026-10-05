@@ -22,13 +22,27 @@ final class ActivitiesViewModel {
 
     private(set) var state: State = .loading
     private let client: PulseAPIClient
+    /// Fusionne les rechargements (synchro, changement de source, pull-to-refresh)
+    /// — cf. `ReloadGate`.
+    private let gate = ReloadGate()
 
     init(client: PulseAPIClient = .shared) {
         self.client = client
     }
 
+    /// Rechargement fusionné : un déclencheur pendant un rechargement en cours
+    /// le rejoint au lieu de relancer la requête. `trailing` : la donnée vient
+    /// de changer (synchro, changement de source) — un seul rechargement est
+    /// rejoué après le courant.
+    func reload(trailing: Bool = false) async {
+        await gate.run(trailing: trailing) { [self] in await self.load() }
+    }
+
+    /// Garde la liste affichée pendant le rechargement (plein écran de
+    /// chargement seulement tant qu'il n'y a rien) ; un échec ne la vide pas
+    /// (pas de bandeau d'erreur sur cet écran : on garde simplement la liste).
     func load() async {
-        state = .loading
+        if case .loaded = state {} else { state = .loading }
         do {
             let response: ActivityListResponse = try await client.get(
                 "api/activities",
@@ -36,7 +50,7 @@ final class ActivitiesViewModel {
             )
             state = .loaded(response.items)
         } catch {
-            state = .failed(error.localizedDescription)
+            if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
     }
 }

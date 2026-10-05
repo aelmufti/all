@@ -38,7 +38,7 @@ struct ProgrammeView: View {
                 .toolbar { SheetCloseButton { dismiss() } }
         }
         .task {
-            await viewModel.load()
+            await viewModel.reload()
         }
         .sheet(isPresented: Binding(
             get: { viewModel.libraryKind != nil },
@@ -72,7 +72,7 @@ struct ProgrammeView: View {
             LoadingView(message: "Chargement du programme…")
         case .failed(let message):
             ErrorView(message: message) {
-                Task { await viewModel.load() }
+                Task { await viewModel.reload() }
             }
         case .loaded:
             loadedContent
@@ -83,6 +83,10 @@ struct ProgrammeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: PulseSpacing.lg) {
                 header
+
+                if let message = viewModel.actionError {
+                    DashboardInlineError(message: message) { Task { await viewModel.reload() } }
+                }
 
                 ForEach(viewModel.domains) { domain in
                     ProgrammeDomainSection(domain: domain, viewModel: viewModel)

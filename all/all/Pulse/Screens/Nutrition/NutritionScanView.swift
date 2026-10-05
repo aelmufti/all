@@ -12,8 +12,8 @@
 //
 //  Autorisation caméra gérée explicitement (string `NSCameraUsageDescription`
 //  dans `all/Info.plist`) : on demande l'accès au premier affichage, et on
-//  offre un repli « saisir à la main » si l'appareil ne sait pas scanner ou
-//  si l'accès est refusé — la feuille ne doit jamais piéger l'utilisateur.
+//  offre toujours la saisie manuelle du code-barres (champ + « Chercher »),
+//  seul recours si l'appareil ne sait pas scanner ou si l'accès est refusé.
 //
 
 import SwiftUI
@@ -35,6 +35,8 @@ struct NutritionScanView: View {
     @Bindable var viewModel: NutritionViewModel
     /// `nil` = autorisation en cours d'évaluation, `true`/`false` ensuite.
     @State private var cameraAuthorized: Bool?
+    @State private var typedCode = ""
+    @FocusState private var codeFocused: Bool
 
     var body: some View {
         content
@@ -62,7 +64,7 @@ struct NutritionScanView: View {
             .ignoresSafeArea(edges: .bottom)
 
             VStack(spacing: PulseSpacing.md) {
-                Text(viewModel.lookupMsg ?? "Vise le code-barres de l'emballage")
+                Text(viewModel.lookupMsg ?? "Vise le code-barres ou tape ses chiffres")
                     .font(.footnote)
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
@@ -70,16 +72,9 @@ struct NutritionScanView: View {
                     .padding(.vertical, PulseSpacing.sm)
                     .background(.black.opacity(0.6), in: Capsule())
 
-                Button {
-                    viewModel.openManual()
-                } label: {
-                    Text("Saisir à la main")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.pulseAccent)
-                .padding(.horizontal, PulseSpacing.lg)
+                barcodeEntry
             }
+            .padding(.horizontal, PulseSpacing.lg)
             .padding(.bottom, PulseSpacing.xl)
         }
     }
@@ -89,25 +84,46 @@ struct NutritionScanView: View {
             Image(systemName: "camera.fill")
                 .font(.largeTitle)
                 .foregroundStyle(Color.pulseTextSecondary)
-            Text(unavailableMessage)
+            Text(viewModel.lookupMsg ?? unavailableMessage)
                 .font(PulseFont.body)
                 .foregroundStyle(Color.pulseTextPrimary)
                 .multilineTextAlignment(.center)
-            Button("Saisir à la main") {
-                viewModel.openManual()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Color.pulseAccent)
+            barcodeEntry
             if cameraDenied {
                 Button("Ouvrir les Réglages") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(url)
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.pulseSecondary)
             }
         }
         .padding(PulseSpacing.xl)
+    }
+
+    /// Saisie manuelle du code-barres (chiffres sous les barres) — même
+    /// résolution que la lecture caméra (`lookupBarcode`).
+    private var barcodeEntry: some View {
+        HStack(spacing: PulseSpacing.sm) {
+            TextField("Code-barres", text: $typedCode)
+                .keyboardType(.numberPad)
+                .focused($codeFocused)
+                .onChange(of: typedCode) { _, new in
+                    let digits = String(new.filter(\.isNumber).prefix(14))
+                    if digits != new { typedCode = digits }
+                }
+                .padding(.horizontal, PulseSpacing.md)
+                .frame(height: 48)
+                .background(Color.pulseSurface)
+                .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+
+            Button("Chercher") {
+                codeFocused = false
+                Task { await viewModel.lookupBarcode(typedCode) }
+            }
+            .buttonStyle(PulseButtonStyle(kind: .primary, fullWidth: false))
+            .disabled(typedCode.count < 6 || viewModel.isLookingUp)
+        }
     }
 
     private var cameraDenied: Bool {
@@ -116,9 +132,9 @@ struct NutritionScanView: View {
 
     private var unavailableMessage: String {
         if !DataScannerViewController.isSupported {
-            return "Cet appareil ne peut pas scanner de code-barres. Saisis l'aliment à la main."
+            return "Cet appareil ne peut pas scanner de code-barres. Tape ses chiffres ci-dessous."
         }
-        return "L'accès à la caméra est refusé. Autorise-le dans les Réglages pour scanner un code-barres."
+        return "L'accès à la caméra est refusé. Autorise-le dans les Réglages, ou tape les chiffres du code-barres."
     }
 
     private func resolveAuthorization() {

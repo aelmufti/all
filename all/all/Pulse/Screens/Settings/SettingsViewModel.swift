@@ -31,7 +31,13 @@ final class SettingsViewModel {
 
     private let client: PulseAPIClient
 
+    /// Plein écran de chargement/erreur seulement tant qu'il n'y a rien à
+    /// afficher : ensuite un rechargement (changement de source de stockage…)
+    /// garde le formulaire — sinon le sélecteur que l'on vient de toucher
+    /// disparaissait derrière un écran de chargement.
     private(set) var state: ScreenState = .loading
+    /// Fusionne les rechargements — cf. `ReloadGate`.
+    private let gate = ReloadGate()
 
     private(set) var source: SettingsSyncSource?
     private(set) var status: SettingsSyncStatus?
@@ -68,8 +74,14 @@ final class SettingsViewModel {
 
     // MARK: - Chargement
 
+    /// Rechargement fusionné : un déclencheur pendant un rechargement en cours
+    /// le rejoint au lieu de relancer les requêtes.
+    func reload() async {
+        await gate.run(trailing: true) { [self] in await self.load() }
+    }
+
     func load() async {
-        state = .loading
+        if case .loaded = state {} else { state = .loading }
         // Mode Téléphone (incréments L0+L6, `docs/stockage-local.md`) :
         // source de synchro / statut / inventaire n'ont pas de sens sans
         // serveur — ils passeraient par le backend local stub et
@@ -88,7 +100,7 @@ final class SettingsViewModel {
                 applyProfile(profile)
                 state = .loaded
             } catch {
-                state = .failed(Self.message(for: error))
+                if case .loaded = state {} else { state = .failed(Self.message(for: error)) }
             }
             return
         }
@@ -103,12 +115,13 @@ final class SettingsViewModel {
             state = .loaded
             await loadInventory()
         } catch {
-            state = .failed(Self.message(for: error))
+            // Déjà chargé : on garde le formulaire (aucun bandeau d'erreur ici).
+            if case .loaded = state {} else { state = .failed(Self.message(for: error)) }
         }
     }
 
     func retry() async {
-        await load()
+        await reload()
     }
 
     private func loadInventory() async {

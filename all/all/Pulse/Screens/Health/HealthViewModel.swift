@@ -5,8 +5,8 @@
 //  État + logique réseau de l'écran Santé. Miroir de `HealthComponent`
 //  (Angular) mais adapté au style vue-modèle iOS : un seul point d'entrée
 //  `load()` (chargement initial), navigation de jour (`shiftDay`/`selectDate`)
-//  qui recharge le détail du jour + l'intensité, poids séparé (fenêtre 90 j,
-//  indépendante de la date affichée — comme côté Angular).
+//  qui recharge le détail du jour + l'intensité. Le poids vit dans l'écran
+//  Nutrition (`NutritionWeightCard.swift`).
 //
 
 import Foundation
@@ -39,6 +39,15 @@ final class HealthViewModel {
 
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    /// Vrai dès que le premier chargement a abouti : le contenu reste alors
+    /// TOUJOURS visible (un rechargement le remplace à l'arrivée de la réponse,
+    /// un échec ne le vide pas — bandeau d'erreur discret). Avant : plein écran
+    /// de chargement/erreur.
+    private(set) var hasContent = false
+    /// Vrai pendant que le détail d'une AUTRE date charge : `day` est alors
+    /// `nil` (jamais les données de l'ancienne date), la vue garde la structure
+    /// de la page avec des emplacements réservés.
+    private(set) var isDayLoading = false
 
     private(set) var date: String = HealthViewModel.todayKey()
     private(set) var maxDate: String = HealthViewModel.todayKey()
@@ -49,15 +58,15 @@ final class HealthViewModel {
     /// (miroir de `failed`/`detail` dans `IntensityDayCardComponent`) — les
     /// deux cas laissent `intensity` à `nil`.
     private(set) var intensityFailed = false
-    private(set) var weight: WeightData?
 
     var selectedTab: MetricTab = .cardio
 
-    var weightInputText: String = ""
-    private(set) var weightMessage: String?
-    private(set) var isSavingWeight = false
-
     private let client: PulseAPIClient
+    /// Fusionne les rechargements complets (retour au premier plan, synchro,
+    /// changement de source) — cf. `ReloadGate`.
+    private let gate = ReloadGate()
+    /// Invalide la réponse « jour » d'une date quittée entre-temps.
+    private var dayGeneration = 0
 
     init(client: PulseAPIClient = .shared) {
         self.client = client
@@ -65,9 +74,17 @@ final class HealthViewModel {
 
     // MARK: - Chargement initial
 
+    /// Rechargement complet fusionné : un déclencheur pendant un rechargement
+    /// en cours le rejoint au lieu de relancer toutes les requêtes. `trailing` :
+    /// la donnée vient de changer (synchro, changement de source) — un seul
+    /// rechargement est rejoué après le courant.
+    func reload(trailing: Bool = false) async {
+        await gate.run(trailing: trailing) { [self] in await self.load() }
+    }
+
+    /// Garde tout ce qui est affiché jusqu'à l'arrivée de la réponse.
     func load() async {
         isLoading = true
-        errorMessage = nil
         defer { isLoading = false }
         do {
             let days: [WellnessDayRow] = try await client.get(
@@ -77,19 +94,27 @@ final class HealthViewModel {
             days30 = days
             // Toujours le jour du calendrier, même vide : après minuit le
             // nouveau jour n'existe côté Pulse qu'à l'ingestion du premier
-            // `.fit` qui le couvre — l'écran se remplit alors.
+            // `.fit` qui le couvre — l'écran se remplit alors. Un jour passé
+            // consulté est conservé (un rechargement ne ramène pas à aujourd'hui).
             let today = Self.todayKey()
-            date = today
+            let followsToday = !hasContent || isLastDay
             maxDate = today
+            if followsToday && date != today {
+                date = today
+                day = nil
+                intensity = nil
+                intensityFailed = false
+                isDayLoading = true
+            }
             await loadDayDetails()
-            await loadWeight()
+            hasContent = true
         } catch {
             errorMessage = Self.message(for: error)
         }
     }
 
     func retry() async {
-        await load()
+        await reload()
     }
 
     // MARK: - Navigation de jour
@@ -107,110 +132,43 @@ final class HealthViewModel {
     func selectDate(_ newDate: String) async {
         guard newDate != date else { return }
         date = newDate
-        weightMessage = nil
-        weightInputText = Self.formatKg(shownWeight)
-        await loadDayDetails()
-    }
-
-    private func loadDayDetails() async {
+        // Seul cas où l'on ne montre pas les données d'avant : une AUTRE date.
         day = nil
         intensity = nil
         intensityFailed = false
-        errorMessage = nil
+        isDayLoading = true
+        await loadDayDetails()
+    }
+
+    /// Détail + intensité de la date courante. Garde `day`/`intensity` tant que
+    /// la réponse n'est pas arrivée (rechargement de la même date) ; une réponse
+    /// d'une date quittée entre-temps est ignorée.
+    private func loadDayDetails() async {
+        dayGeneration += 1
+        let generation = dayGeneration
+        let requested = date
+        defer { if generation == dayGeneration { isDayLoading = false } }
         do {
-            let detail: WellnessDayDetail = try await client.get("api/wellness/day/\(date)")
+            let detail: WellnessDayDetail = try await client.get("api/wellness/day/\(requested)")
+            guard generation == dayGeneration else { return }
             day = detail
+            errorMessage = nil
         } catch {
+            guard generation == dayGeneration else { return }
             errorMessage = Self.message(for: error)
             return
         }
         // Intensité : au mieux, comme `IntensityDayCardComponent` côté Angular
         // (attrape ses propres erreurs sans affecter le reste de l'écran).
         do {
-            intensity = try await client.get("api/wellness/intensity/day/\(date)")
+            let loaded: IntensityDayDetail = try await client.get("api/wellness/intensity/day/\(requested)")
+            guard generation == dayGeneration else { return }
+            intensity = loaded
+            intensityFailed = false
         } catch {
-            intensityFailed = true
-        }
-    }
-
-    // MARK: - Poids
-
-    private func loadWeight() async {
-        do {
-            // Fenêtre max serveur : la série/l'historique/la courbe démarrent à
-            // la toute première pesée saisie (et non 90 jours en arrière avec du
-            // vide avant la 1ʳᵉ saisie).
-            let data: WeightData = try await client.get("api/weight", query: ["days": "3660"])
-            weight = data
-            weightInputText = Self.formatKg(shownWeight)
-        } catch {
-            // Le poids est secondaire à l'écran Santé — une panne ici ne doit
-            // pas empêcher d'afficher le reste (FC, sommeil, etc.), donc pas
-            // de propagation vers `errorMessage`.
-        }
-    }
-
-    /// Poids du jour affiché s'il existe, sinon le dernier connu — miroir de
-    /// `dayWeight`/`shownWeight` (Angular).
-    var dayWeight: Double? {
-        weight?.series.first { $0.date == date }?.kg
-    }
-
-    var shownWeight: Double? {
-        dayWeight ?? weight?.current
-    }
-
-    var weightDelta: Double? { weight?.deltaKg }
-
-    var weighLabel: String {
-        guard let weight, weight.entries > 0 else { return "aucune pesée" }
-        if dayWeight != nil { return "pesée du jour" }
-        guard let currentDate = weight.currentDate else { return "aucune pesée" }
-        return "dernière : \(Self.shortDateLabel(currentDate))"
-    }
-
-    var watchNote: String? {
-        guard let push = weight?.push, push.status != "idle" else { return nil }
-        guard let pushKg = push.kg, let current = weight?.current else { return nil }
-        guard abs(pushKg - current) < 0.05 else { return nil }
-        switch push.status {
-        case "sent": return "poids transmis à la montre"
-        case "pending": return "poids en attente de la montre"
-        default: return "poids non transmis à la montre"
-        }
-    }
-
-    func saveWeight() async {
-        guard let kg = Double(weightInputText.replacingOccurrences(of: ",", with: ".")) else { return }
-        isSavingWeight = true
-        weightMessage = nil
-        defer { isSavingWeight = false }
-        do {
-            let _: WeightSaveResult = try await client.post(
-                "api/weight",
-                body: WeightSaveRequest(date: date, kg: kg)
-            )
-            await loadWeight()
-            // Écriture auto vers la montre : le téléphone pousse le poids dans le
-            // profil de la montre (le seul réglage qu'il pousse). Part tout de
-            // suite si la montre est liée, sinon au prochain lien BLE (cf.
-            // `BLEManager.requestWatchWeightWrite`). La pesée reste par ailleurs
-            // stockée côté Pulse quoi qu'il arrive.
-            BLEManager.shared.requestWatchWeightWrite(kg: kg)
-            weightMessage = "Pesée enregistrée pour le \(Self.shortDateLabel(date))."
-        } catch {
-            weightMessage = "Poids refusé : vérifie la valeur (entre 25 et 300 kg)."
-        }
-    }
-
-    func removeWeight() async {
-        weightMessage = nil
-        do {
-            try await client.delete("api/weight/\(date)")
-            await loadWeight()
-            weightMessage = "Pesée effacée."
-        } catch {
-            weightMessage = "Suppression impossible."
+            guard generation == dayGeneration else { return }
+            // Un échec de rechargement garde l'intensité déjà affichée.
+            if intensity == nil { intensityFailed = true }
         }
     }
 
@@ -416,8 +374,8 @@ final class HealthViewModel {
     /// Déclenché au changement de jour local (`refreshesAtDayChange`) : si
     /// l'utilisateur est sur le dernier jour, recharge — `load()` re-cale la
     /// date sur aujourd'hui (même encore vide).
-    func reloadForNewDay() async {
-        if isLastDay { await load() }
+    func reloadForNewDay(trailing: Bool = false) async {
+        if isLastDay { await reload(trailing: trailing) }
     }
 
     private static var utcCalendar: Calendar = {
@@ -480,11 +438,6 @@ final class HealthViewModel {
 
     private static func formatInt(_ value: Double) -> String {
         String(Int(value.rounded()))
-    }
-
-    private static func formatKg(_ value: Double?) -> String {
-        guard let value else { return "" }
-        return String(format: "%.1f", value)
     }
 
     private static func message(for error: Error) -> String {

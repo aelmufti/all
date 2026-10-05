@@ -147,6 +147,13 @@ final class HomeViewModel {
     private(set) var intakeTarget: HomeNutritionAmount?
 
     private let client: PulseAPIClient
+    /// Fusionne les rechargements (retour au premier plan, synchro, minuit,
+    /// changement de source) — cf. `ReloadGate`.
+    private let gate = ReloadGate()
+    /// Source de données du dernier chargement : si elle change, les données
+    /// secondaires d'avant ne doivent pas survivre à un échec (elles viennent
+    /// d'un autre backend).
+    private var loadedMode: StorageMode?
 
     /// Abonnement à `BLEManager.$liveHeartRate` (mode Téléphone) — cf.
     /// `subscribeToPhoneLiveHeartRate`. Annulé automatiquement à la
@@ -161,8 +168,21 @@ final class HomeViewModel {
 
     // MARK: - Chargement
 
+    /// Rechargement fusionné : un déclencheur pendant un rechargement en cours
+    /// le rejoint au lieu de relancer toutes les requêtes. `trailing` : la
+    /// donnée vient de changer (synchro, changement de source) — un seul
+    /// rechargement est rejoué après le courant.
+    func reload(trailing: Bool = false) async {
+        await gate.run(trailing: trailing) { [self] in await self.load() }
+    }
+
+    /// Garde l'écran déjà rempli visible pendant le rechargement (plein écran
+    /// de chargement seulement tant qu'il n'y a rien) ; un échec ne le vide pas.
     func load() async {
-        state = .loading
+        if case .loaded = state {} else { state = .loading }
+        let mode = StorageModeStore.current
+        let sourceChanged = loadedMode != nil && loadedMode != mode
+        loadedMode = mode
         do {
             let today = Self.todayKey()
             async let dayTask: HomeDayDetail = client.get("api/wellness/day/\(today)")
@@ -185,48 +205,53 @@ final class HomeViewModel {
 
             // Best-effort : ne bloquent pas l'affichage principal (le live est
             // déjà rapatrié ci-dessus).
-            async let programmeTask = loadProgramme(date: today)
-            async let intensityTask = loadIntensity()
-            async let sleepDebtTask = loadSleepDebt()
-            async let nutritionTask = loadNutrition(date: today)
+            async let programmeTask = loadProgramme(date: today, sourceChanged: sourceChanged)
+            async let intensityTask = loadIntensity(sourceChanged: sourceChanged)
+            async let sleepDebtTask = loadSleepDebt(sourceChanged: sourceChanged)
+            async let nutritionTask = loadNutrition(date: today, sourceChanged: sourceChanged)
             _ = await (programmeTask, intensityTask, sleepDebtTask, nutritionTask)
         } catch {
-            state = .failed(error.localizedDescription)
+            // Déjà rempli : on garde le contenu (aucun bandeau d'erreur sur cet
+            // écran) ; sinon plein écran d'erreur.
+            if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
     }
 
-    private func loadProgramme(date: String) async {
+    // Les chargements secondaires gardent la valeur affichée en cas d'échec
+    // (sauf si la SOURCE de données a changé : on ne garde pas l'autre backend).
+
+    private func loadProgramme(date: String, sourceChanged: Bool) async {
         do {
             let response: HomeProgrammeResponse = try await client.get(
                 "api/programme", query: ["date": date])
             programme = response.domains
         } catch {
-            programme = []
+            if sourceChanged { programme = [] }
         }
     }
 
-    private func loadIntensity() async {
+    private func loadIntensity(sourceChanged: Bool) async {
         do {
             intensity = try await client.get("api/wellness/intensity")
         } catch {
-            intensity = nil
+            if sourceChanged { intensity = nil }
         }
     }
 
     /// `GET api/stats/sleep-debt` — alimente `nightDelta` (écart de la nuit
     /// affichée vs l'habitude récente), `sleepDebt()` côté Angular.
-    private func loadSleepDebt() async {
+    private func loadSleepDebt(sourceChanged: Bool) async {
         do {
             sleepDebt = try await client.get("api/stats/sleep-debt")
         } catch {
-            sleepDebt = nil
+            if sourceChanged { sleepDebt = nil }
         }
     }
 
     /// `GET api/nutrition/day/:date` + `GET api/nutrition/targets` —
     /// alimente la jauge « Cal. mangées » de « Depuis le réveil »,
     /// `loadSideData()` côté Angular.
-    private func loadNutrition(date: String) async {
+    private func loadNutrition(date: String, sourceChanged: Bool) async {
         do {
             async let dayTask: HomeNutritionDayResponse = client.get("api/nutrition/day/\(date)")
             async let targetsTask: HomeNutritionTargetsResponse = client.get(
@@ -238,9 +263,11 @@ final class HomeViewModel {
             intakeTarget = day.targets
             dayTarget = targets.auto
         } catch {
-            intake = nil
-            intakeTarget = nil
-            dayTarget = nil
+            if sourceChanged {
+                intake = nil
+                intakeTarget = nil
+                dayTarget = nil
+            }
         }
     }
 

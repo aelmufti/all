@@ -7,7 +7,12 @@
 //  analyse poussée de la nuit sélectionnée (hypnogramme, phases, efficacité,
 //  fragmentation, stress nocturne, composition vs référence, écart à la
 //  moyenne) + heure de coucher conseillée (`sleep-recommendation`) : carte fixe
-//  « Ce soir » (nuit à venir, indépendante de la date) et carte par nuit.
+//  « Ce soir » (nuit à venir, indépendante de la date) et simple ligne
+//  « Coucher conseillé » en bas de la carte NUIT de la date affichée.
+//
+//  Rechargements : le contenu affiché reste en place (plein écran de chargement
+//  seulement tant qu'il n'y a rien), un échec ne le vide pas ; au changement de
+//  DATE, les cartes de la nuit deviennent des emplacements réservés.
 //
 
 import SwiftUI
@@ -18,7 +23,7 @@ struct SommeilView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.day != nil || !viewModel.days30.isEmpty {
+                if viewModel.hasContent {
                     content
                 } else if let message = viewModel.errorMessage {
                     ErrorView(message: message) { Task { await viewModel.retry() } }
@@ -29,13 +34,13 @@ struct SommeilView: View {
             .background(Color.pulseBackground)
             .toolbar(.hidden, for: .navigationBar)
         }
-        .task { await viewModel.load() }
+        .task { await viewModel.reload() }
         .refreshesAtDayChange { await viewModel.reloadForNewDay() }
         // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
         // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
-        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
-        .reloadsOnStorageModeChange { await viewModel.load() }
+        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay(trailing: true) }
+        .reloadsOnStorageModeChange { await viewModel.reload(trailing: true) }
         // La nuit à venir change au passage de l'heure de réveil prévu (pas
         // seulement à minuit) : réévaluation à la minute, sans requête tant que
         // la nuit visée est la même.
@@ -58,18 +63,22 @@ struct SommeilView: View {
             VStack(spacing: PulseSpacing.lg) {
                 SommeilDayNavigator(viewModel: viewModel)
 
-                SommeilTonightCard(card: viewModel.tonightCard)
+                SommeilTonightCard(card: viewModel.bedtimeCard)
 
                 if let message = viewModel.errorMessage {
                     DashboardInlineError(message: message) { Task { await viewModel.retry() } }
                 }
 
-                SommeilNightBedtimeCard(card: viewModel.nightCard)
-
                 if let main = viewModel.day?.sleep.main {
                     SommeilNightCard(viewModel: viewModel, main: main)
                     SommeilAnalysisCard(viewModel: viewModel)
                     SommeilCompositionCard(rows: viewModel.compositionRows)
+                } else if viewModel.isDayLoading {
+                    // Autre date en cours de chargement : mêmes emplacements que
+                    // les cartes de la nuit, jamais « pas de nuit » ni l'ancienne.
+                    PulseSkeletonCard(height: 330)
+                    PulseSkeletonCard(height: 190)
+                    PulseSkeletonCard(height: 150)
                 } else {
                     SommeilNoNightCard()
                 }
@@ -78,7 +87,7 @@ struct SommeilView: View {
         }
         .pulseTabBarClearance()
         .background(Color.pulseBackground)
-        .refreshable { await viewModel.load() }
+        .refreshable { await viewModel.reload() }
     }
 }
 
@@ -280,6 +289,21 @@ private struct SommeilNightCard: View {
                 stageBar
                 hypnogramAxis
                 stageLegend
+            }
+
+            // Reco de coucher de CETTE nuit : en bas de carte, sous l'hypnogramme,
+            // pour que son arrivée tardive ne décale rien de ce qui est au-dessus.
+            if let plan = viewModel.nightBedtime {
+                Divider()
+                HStack {
+                    Text("Coucher conseillé")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                    Spacer()
+                    Text(plan.bedtime)
+                        .font(PulseFont.metricUnit)
+                        .foregroundStyle(Color.pulseSleep)
+                }
             }
 
             if let spo2 = viewModel.nightSpo2 {

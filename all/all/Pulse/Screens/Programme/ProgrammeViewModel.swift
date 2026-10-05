@@ -36,7 +36,13 @@ final class ProgrammeViewModel {
 
     private let client: PulseAPIClient
 
+    /// Plein écran de chargement/erreur seulement tant qu'il n'y a rien à
+    /// afficher : ensuite un rechargement garde le contenu.
     private(set) var state: ScreenState = .loading
+    /// Échec d'un rechargement ou d'une action alors que l'écran est rempli :
+    /// bandeau discret, le contenu reste (avant : tout l'écran remplacé par
+    /// l'`ErrorView`).
+    private(set) var actionError: String?
     var current: ProgrammeCurrent?
 
     /// Semaine affichée dans la carte entraînement — équivalent `shownWeek`.
@@ -57,6 +63,8 @@ final class ProgrammeViewModel {
     /// tant qu'aucun envoi n'a eu lieu depuis l'ouverture de l'écran).
     private(set) var pushFilesSent: Int?
     private var pushPollTask: Task<Void, Never>?
+    /// Fusionne les rechargements — cf. `ReloadGate`.
+    private let gate = ReloadGate()
 
     init(client: PulseAPIClient = .shared) {
         self.client = client
@@ -73,14 +81,25 @@ final class ProgrammeViewModel {
 
     // MARK: - Chargement
 
+    func reload() async {
+        await gate.run { [self] in await self.load() }
+    }
+
+    /// Garde le contenu affiché pendant le rechargement ; un échec ne le vide
+    /// pas (bandeau discret `actionError`).
     func load() async {
-        state = .loading
+        if case .loaded = state {} else { state = .loading }
         do {
             let result: ProgrammeCurrent = try await client.get("api/programme")
             apply(result)
             state = .loaded
+            actionError = nil
         } catch {
-            state = .failed(Self.message(for: error))
+            if case .loaded = state {
+                actionError = Self.message(for: error)
+            } else {
+                state = .failed(Self.message(for: error))
+            }
         }
         await refreshPushStatus()
     }
@@ -145,12 +164,13 @@ final class ProgrammeViewModel {
     private func mutate(_ operation: () async throws -> ProgrammeCurrent) async {
         guard !isBusy else { return }
         isBusy = true
+        actionError = nil
         defer { isBusy = false }
         do {
             let result = try await operation()
             apply(result)
         } catch {
-            state = .failed(Self.message(for: error))
+            actionError = Self.message(for: error)
         }
     }
 
@@ -171,6 +191,7 @@ final class ProgrammeViewModel {
     func sendToWatch() async {
         guard !isBusy else { return }
         isBusy = true
+        actionError = nil
         defer { isBusy = false }
         do {
             let response: ProgrammePushResponse = try await client.post("api/programme/push")
@@ -178,7 +199,7 @@ final class ProgrammeViewModel {
             await refreshPushStatus()
             pollPush()
         } catch {
-            state = .failed(Self.message(for: error))
+            actionError = Self.message(for: error)
         }
     }
 

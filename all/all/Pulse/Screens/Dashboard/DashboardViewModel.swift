@@ -39,6 +39,15 @@ final class DashboardViewModel {
 
     private let client: PulseAPIClient
     private var hasStartedLoad = false
+    /// Fusionne les rechargements (synchro, changement de source, pull-to-refresh,
+    /// réessai) — cf. `ReloadGate`. Le changement de période, lui, ne passe pas
+    /// par la garde : il doit remplacer le chargement en cours.
+    private let gate = ReloadGate()
+    /// Numéro du dernier `load()` lancé : la réponse d'un chargement dépassé (autre
+    /// période demandée entre-temps) ne remplace pas une plus récente.
+    private var loadGeneration = 0
+    /// Source de données du dernier chargement (cf. `reco` non bloquante).
+    private var loadedMode: StorageMode?
 
     init(client: PulseAPIClient = .shared) {
         self.client = client
@@ -58,11 +67,19 @@ final class DashboardViewModel {
     func loadIfNeeded() async {
         guard !hasStartedLoad else { return }
         hasStartedLoad = true
-        await load()
+        await reload()
+    }
+
+    /// Rechargement fusionné : un déclencheur pendant un rechargement en cours
+    /// le rejoint au lieu de relancer les 8 requêtes. `trailing` : la donnée
+    /// vient de changer (synchro, changement de source) — un seul rechargement
+    /// est rejoué après le courant.
+    func reload(trailing: Bool = false) async {
+        await gate.run(trailing: trailing) { [self] in await self.load() }
     }
 
     func retry() {
-        Task { await load() }
+        Task { await reload() }
     }
 
     func selectPeriod(_ period: DashboardPeriod) {
@@ -88,6 +105,11 @@ final class DashboardViewModel {
     }
 
     func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let mode = StorageModeStore.current
+        let sourceChanged = loadedMode != nil && loadedMode != mode
+        loadedMode = mode
         state = .loading
         let days = String(period.days)
         let daysQuery = ["days": days]
@@ -112,16 +134,23 @@ final class DashboardViewModel {
                 trainingResult, healthResult, nutritionResult,
                 sleepDebtResult, sleepInsightsResult, sleepRegularityResult, wellnessDaysResult
             )
+            let reco = await sleepRecommendationResult
+            // Chargement dépassé (autre période demandée entre-temps) : le plus
+            // récent a la main sur l'état et les données.
+            guard generation == loadGeneration else { return }
             training = t
             health = h
             nutrition = n
             sleepDebt = sd
             sleepInsights = si
             sleepRegularity = sr
-            sleepRecommendation = await sleepRecommendationResult
+            // Reco non bloquante : un échec ponctuel garde celle déjà affichée
+            // (sauf changement de source, où elle viendrait de l'autre backend).
+            if reco != nil || sourceChanged { sleepRecommendation = reco }
             wellnessDays = wd
             state = .loaded
         } catch {
+            guard generation == loadGeneration else { return }
             state = .failed(error.localizedDescription)
         }
     }

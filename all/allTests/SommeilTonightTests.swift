@@ -2,12 +2,14 @@
 //  SommeilTonightTests.swift
 //  allTests
 //
-//  Carte « Ce soir » + carte par nuit de l'écran Sommeil : choix de la nuit à
-//  venir (`SleepTonight`, pur), état du view-model (`SommeilViewModel`) avec un
-//  backend local FACTICE (aucun réseau, aucune donnée réelle) : pas de doublon
-//  quand la date affichée est la nuit à venir, pas de valeur périmée au
-//  changement de date, repli sur l'idéal global après un échec. Données
-//  SYNTHÉTIQUES uniquement.
+//  Carte « Ce soir » + ligne « Coucher conseillé » de la carte NUIT de l'écran
+//  Sommeil : choix de la nuit à venir (`SleepTonight`, pur), état du view-model
+//  (`SommeilViewModel`) avec un backend local FACTICE (aucun réseau, aucune
+//  donnée réelle) : pas de ligne quand la date affichée est la nuit à venir,
+//  pas de valeur périmée au changement de date, repli sur l'idéal global après
+//  un échec ; et rechargements (contenu gardé, échec sans effet sur l'écran,
+//  fusion des déclencheurs, réponse périmée ignorée). Données SYNTHÉTIQUES
+//  uniquement.
 //
 
 import Testing
@@ -119,43 +121,81 @@ struct SleepTonightChoiceTests {
 // MARK: - Backend factice
 
 /// Backend local factice : répond à `sleep-recommendation` (reco synthétique par
-/// date), enregistre les dates demandées, peut RETENIR une réponse (`hold`) puis
-/// la libérer, ou échouer (`fail`). Toute autre route échoue.
+/// date) ET aux routes de l'écran Sommeil (`wellness/days|dates|day/<date>`,
+/// nuits synthétiques), enregistre les requêtes, peut RETENIR une réponse
+/// (`hold`) puis la libérer, ou échouer (`fail`). Clés : la date pour la reco,
+/// `day:<date>` pour une nuit, `days` pour la liste des jours. Le reste échoue.
 private final class FakeRecoBackend: LocalPulseBackend, @unchecked Sendable {
     private let lock = NSLock()
     private var requestedDates: [String] = []
+    private var requestedDayDates: [String] = []
+    private var daysRequests = 0
     private var held: Set<String> = []
     private var failing: Set<String> = []
     private var waiting: [String: [CheckedContinuation<Void, Never>]] = [:]
+    /// Dernière ligne de `wellness/days` (nuits du 2026-10-01 à cette date).
+    var lastRowDate = "2026-10-05"
+    /// Dates dont la nuit n'a pas de sommeil mesuré (`sleep.main == null`).
+    var unmeasuredDates: Set<String> = []
 
     var requested: [String] { lock.withLock { requestedDates } }
-    func hold(_ date: String) { lock.withLock { _ = held.insert(date) } }
-    func fail(_ date: String) { lock.withLock { _ = failing.insert(date) } }
-    func release(_ date: String) {
+    var requestedDays: [String] { lock.withLock { requestedDayDates } }
+    var daysCalls: Int { lock.withLock { daysRequests } }
+    func hold(_ key: String) { lock.withLock { _ = held.insert(key) } }
+    func fail(_ key: String) { lock.withLock { _ = failing.insert(key) } }
+    func heal(_ key: String) { lock.withLock { _ = failing.remove(key) } }
+    func release(_ key: String) {
         let continuations: [CheckedContinuation<Void, Never>] = lock.withLock {
-            held.remove(date)
-            return waiting.removeValue(forKey: date) ?? []
+            held.remove(key)
+            return waiting.removeValue(forKey: key) ?? []
         }
         continuations.forEach { $0.resume() }
     }
 
-    func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data {
-        guard path == "api/stats/sleep-recommendation", let date = query["date"] else {
-            throw LocalPulseUnavailableError()
-        }
-        lock.withLock { requestedDates.append(date) }
+    private func gate(_ key: String) async throws {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let proceed: Bool = lock.withLock {
-                if held.contains(date) {
-                    waiting[date, default: []].append(continuation)
+                if held.contains(key) {
+                    waiting[key, default: []].append(continuation)
                     return false
                 }
                 return true
             }
             if proceed { continuation.resume() }
         }
-        if lock.withLock({ failing.contains(date) }) { throw LocalPulseUnavailableError() }
-        return Data(recoJSON(nightDate: date, nightIdeal: 7.5).utf8)
+        if lock.withLock({ failing.contains(key) }) { throw LocalPulseUnavailableError() }
+    }
+
+    private static let allDates = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06"]
+
+    func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data {
+        switch path {
+        case "api/stats/sleep-recommendation":
+            guard let date = query["date"] else { throw LocalPulseUnavailableError() }
+            lock.withLock { requestedDates.append(date) }
+            try await gate(date)
+            return Data(recoJSON(nightDate: date, nightIdeal: 7.5).utf8)
+        case "api/wellness/days":
+            lock.withLock { daysRequests += 1 }
+            try await gate("days")
+            let rows = Self.allDates.filter { $0 <= lastRowDate }.map { "{\"date\":\"\($0)\",\"sleepDurationS\":27000}" }
+            return Data("[\(rows.joined(separator: ","))]".utf8)
+        case "api/wellness/dates":
+            return Data("[\"2026-09-01\",\"\(lastRowDate)\"]".utf8)
+        case _ where path.hasPrefix("api/wellness/day/"):
+            let date = String(path.dropFirst("api/wellness/day/".count))
+            lock.withLock { requestedDayDates.append(date) }
+            try await gate("day:" + date)
+            let main = unmeasuredDates.contains(date)
+                ? "null" : "{\"from\":1790000000,\"to\":1790027000,\"durationS\":27000}"
+            return Data("""
+                {"date":"\(date)","summary":{},"hr":[],"stress":[],"spo2":[],"respiration":[],
+                 "bodyBatteryPivot":[],"activities":[],
+                 "sleep":{"segments":[],"main":\(main),"stages":[],"score":80}}
+                """.utf8)
+        default:
+            throw LocalPulseUnavailableError()
+        }
     }
 }
 
@@ -233,19 +273,6 @@ struct SommeilTonightViewModelTests {
         #expect(plan.isNightSpecific)
     }
 
-    @Test func noDuplicateWhenDisplayedDateIsTheUpcomingNight() async {
-        // 01:00 mardi : la date affichée par défaut est aujourd'hui = la nuit à venir.
-        let backend = FakeRecoBackend()
-        let vm = makeVM(backend, clock: Clock(local(2026, 10, 6, 1, cal: calendar())))
-        await vm.refreshTonight()
-        #expect(vm.date == vm.tonightDate)
-        #expect(vm.nightCard == .hidden)
-        // Une autre date affiche bien sa carte (une fois chargée).
-        await vm.selectDate("2026-10-05")
-        await waitUntil { vm.nightReco != .loading }
-        if case .plan = vm.nightCard {} else { Issue.record("carte par nuit attendue") }
-    }
-
     @Test func tonightChangesWhenTheWakeTimePasses() async {
         let backend = FakeRecoBackend()
         let clock = Clock(local(2026, 10, 5, 6, 0, cal: calendar()))
@@ -290,71 +317,166 @@ struct SommeilTonightViewModelTests {
     }
 }
 
-// MARK: - Carte par nuit (view-model)
 
 @MainActor
-struct SommeilNightCardViewModelTests {
+struct SommeilTonightRefreshTests {
     private let noon = Clock(local(2026, 10, 5, 12, cal: calendar()))
 
-    @Test func placeholderWhileTheDateLoadsNeverTheStaleValue() async {
+    @Test func refreshOfTheSameNightKeepsTheShownValue() async {
         let backend = FakeRecoBackend()
         let vm = makeVM(backend, clock: noon)
         await vm.refreshTonight()
+        guard case .plan(let before) = vm.tonightCard else { Issue.record("plan attendu"); return }
 
+        // Même nuit rechargée (réponse retenue) : jamais d'emplacement réservé.
+        backend.hold("2026-10-06")
+        let task = Task { await vm.refreshTonight() }
+        await waitUntil { backend.requested.count == 2 }
+        #expect(vm.tonightCard == .plan(before))
+        backend.release("2026-10-06")
+        await task.value
+        #expect(vm.tonightCard == .plan(before))
+    }
+
+    @Test func failedRefreshOfTheSameNightKeepsTheShownValue() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.refreshTonight()
+        guard case .plan(let before) = vm.tonightCard else { Issue.record("plan attendu"); return }
+
+        backend.fail("2026-10-06")
+        await vm.refreshTonight()
+        #expect(vm.tonightCard == .plan(before))  // et pas le repli « idéal global »
+    }
+}
+
+// MARK: - Ligne « Coucher conseillé » de la carte NUIT (view-model)
+
+@MainActor
+struct SommeilNightLineViewModelTests {
+    private let noon = Clock(local(2026, 10, 5, 12, cal: calendar()))
+
+    @Test func noLineWhenTheDisplayedDateIsTheUpcomingNight() async {
+        // Mardi 01:00 : la nuit affichée par défaut (la plus récente) est
+        // aujourd'hui = la nuit à venir, déjà portée par « Ce soir ».
+        let backend = FakeRecoBackend()
+        backend.lastRowDate = "2026-10-06"
+        let vm = makeVM(backend, clock: Clock(local(2026, 10, 6, 1, cal: calendar())))
+        await vm.load()
+        #expect(vm.date == "2026-10-06")
+        #expect(vm.date == vm.tonightDate)
+        #expect(vm.nightBedtime == nil)
+        #expect(vm.bedtimeCard.title == "Ce soir")
+        // Une autre date : la carte du haut porte la reco de CETTE date (plus
+        // « Ce soir »), et la ligne de la carte NUIT ne la répète pas.
+        await vm.selectDate("2026-10-05")
+        await waitUntil { vm.nightReco != .loading }
+        #expect(vm.bedtimeCard.title != "Ce soir")
+        #expect(!vm.bedtimeCard.showsWake)
+        #expect(cardPlan(vm) != nil)
+        #expect(vm.nightBedtime == nil)
+    }
+
+    /// Plan porté par la carte du haut, s'il y en a un.
+    private func cardPlan(_ vm: SommeilViewModel) -> SleepBedtimePlan.Result? {
+        if case .plan(let plan) = vm.bedtimeCard.state { return plan }
+        return nil
+    }
+
+    @Test func noLineWhileTheUpcomingNightIsStillProvisional() async {
+        // Sans alarme, la nuit à venir est d'abord « demain » (10-07) puis
+        // corrigée en « aujourd'hui » (10-06) quand la reco arrive : tant que ce
+        // n'est pas tranché, on n'affiche pas la ligne de 10-06 (elle disparaîtrait).
+        let backend = FakeRecoBackend()
+        backend.lastRowDate = "2026-10-06"
+        backend.hold("2026-10-07")
+        let vm = makeVM(backend, clock: Clock(local(2026, 10, 6, 1, cal: calendar())))
+        let task = Task { await vm.load() }
+        await waitUntil { vm.hasContent && vm.nightReco != .loading }
+        #expect(vm.tonightDate == "2026-10-07")
+        #expect(vm.nightBedtime == nil)
+        backend.release("2026-10-07")
+        await task.value
+        #expect(vm.tonightDate == "2026-10-06")
+        #expect(vm.nightBedtime == nil)
+    }
+
+    @Test func lineAppearsForAPastNightAndMatchesItsOwnDate() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        #expect(vm.date == "2026-10-05")
+        // Lundi 10-05 (réveil prévu 07:00, durée idéale de CETTE nuit 7,5 h) → 23:30.
+        #expect(vm.nightBedtime?.bedtime == "23:30")
+        #expect(vm.nightBedtime?.isNightSpecific == true)
+    }
+
+    @Test func noLineWithoutMeasuredSleep() async {
+        let backend = FakeRecoBackend()
+        backend.unmeasuredDates = ["2026-10-03"]
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
         await vm.selectDate("2026-10-03")
         await waitUntil { vm.nightReco != .loading }
-        guard case .plan(let first) = vm.nightCard else { Issue.record("plan attendu"); return }
-        #expect(first.isNightSpecific)
+        #expect(vm.day?.sleep.main == nil)
+        #expect(vm.nightBedtime == nil)
+    }
 
-        // Date suivante retenue : la carte ne montre PAS l'heure de 10-03.
+    @Test func noLineWhileTheRecoOfTheNewDateLoadsNeverTheStaleValue() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        await vm.selectDate("2026-10-03")
+        await waitUntil { vm.nightReco != .loading }
+        #expect(cardPlan(vm) != nil)
+
         backend.hold("2026-10-02")
-        await vm.selectDate("2026-10-02")
+        await vm.selectDate("2026-10-02")  // la nuit charge, la reco est retenue
         await waitUntil { backend.requested.contains("2026-10-02") }
-        #expect(vm.nightCard == .placeholder)
+        #expect(vm.bedtimeCard.state == .placeholder)
 
         backend.release("2026-10-02")
         await waitUntil { vm.nightReco != .loading }
-        guard case .plan(let second) = vm.nightCard else { Issue.record("plan attendu"); return }
-        #expect(second.isNightSpecific)
-        #expect(second.bedtime == "23:30")
+        #expect(cardPlan(vm)?.bedtime == "23:30")
     }
 
     @Test func failureFallsBackToGlobalIdealOnceKnown() async {
         let backend = FakeRecoBackend()
         let vm = makeVM(backend, clock: noon)
-        await vm.refreshTonight()  // reco de repli (idéal global 8 h)
+        await vm.load()  // reco de repli (idéal global 8 h) connue
 
         // Jeudi 2026-10-01 (semaine, lever 07:00).
         backend.hold("2026-10-01")
         backend.fail("2026-10-01")
         await vm.selectDate("2026-10-01")
         await waitUntil { backend.requested.contains("2026-10-01") }
-        #expect(vm.nightCard == .placeholder)  // échec pas encore connu
+        #expect(vm.bedtimeCard.state == .placeholder)  // échec pas encore connu
 
         backend.release("2026-10-01")
         await waitUntil { vm.nightReco != .loading }
         #expect(vm.nightReco == .failed)
-        guard case .plan(let plan) = vm.nightCard else { Issue.record("repli attendu"); return }
+        guard let plan = cardPlan(vm) else { Issue.record("repli attendu"); return }
         #expect(!plan.isNightSpecific)
         #expect(plan.idealHours == 8.0)
         #expect(plan.bedtime == "23:00")  // 07:00 − 8 h
     }
 
-    @Test func failureWithoutAnyFallbackHidesTheCard() async {
+    @Test func failureWithoutAnyFallbackHidesTheLine() async {
         let backend = FakeRecoBackend()
         backend.fail("2026-10-06")
+        backend.fail("2026-10-05")
         backend.fail("2026-10-01")
         let vm = makeVM(backend, clock: noon)
-        await vm.refreshTonight()
+        await vm.load()
         await vm.selectDate("2026-10-01")
         await waitUntil { vm.nightReco != .loading }
-        #expect(vm.nightCard == .hidden)
+        #expect(vm.nightBedtime == nil)
     }
 
-    @Test func lateResponseOfAPreviousDateIsIgnored() async {
+    @Test func lateRecoResponseOfAPreviousDateIsIgnored() async {
         let backend = FakeRecoBackend()
         let vm = makeVM(backend, clock: noon)
-        await vm.refreshTonight()
+        await vm.load()
 
         backend.hold("2026-10-02")
         await vm.selectDate("2026-10-02")
@@ -367,5 +489,195 @@ struct SommeilNightCardViewModelTests {
         try? await Task.sleep(for: .milliseconds(100))
         guard case .ready(let reco) = vm.nightReco else { Issue.record("reco attendue"); return }
         #expect(reco.nightDate == "2026-10-03")
+    }
+
+    @Test func recoOfTheSameDateIsKeptWhileAndAfterAFailedReload() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        let before = vm.nightBedtime
+        #expect(before != nil)
+
+        // Rechargement de la MÊME date, reco retenue : la ligne reste.
+        backend.hold("2026-10-05")
+        let task = Task { await vm.reload() }
+        await waitUntil { backend.requested.filter { $0 == "2026-10-05" }.count == 2 }
+        #expect(vm.nightBedtime == before)
+        backend.release("2026-10-05")
+        await task.value
+
+        // Puis un rechargement dont la reco échoue : la ligne reste aussi.
+        backend.fail("2026-10-05")
+        await vm.reload()
+        #expect(vm.nightBedtime == before)
+    }
+}
+
+// MARK: - Rechargements de l'écran Sommeil
+
+@MainActor
+struct SommeilReloadTests {
+    private let noon = Clock(local(2026, 10, 5, 12, cal: calendar()))
+
+    @Test func reloadKeepsTheDisplayedNightUntilTheResponseArrives() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        #expect(vm.hasContent)
+
+        backend.hold("day:2026-10-05")
+        let task = Task { await vm.reload() }
+        await waitUntil { backend.requestedDays.count == 2 }
+        #expect(vm.hasContent)
+        #expect(vm.day?.date == "2026-10-05")
+        #expect(!vm.isDayLoading)
+        #expect(!vm.days30.isEmpty)
+        backend.release("day:2026-10-05")
+        await task.value
+        #expect(vm.day?.date == "2026-10-05")
+    }
+
+    @Test func failedReloadOfTheDaysDoesNotEmptyTheScreen() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+
+        backend.fail("days")
+        await vm.reload()
+        #expect(vm.hasContent)
+        #expect(vm.day != nil)
+        #expect(!vm.days30.isEmpty)
+        #expect(vm.errorMessage != nil)  // signalé discrètement (bandeau)
+    }
+
+    @Test func failedReloadOfTheNightKeepsTheShownNight() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+
+        backend.fail("day:2026-10-05")
+        await vm.reload()
+        #expect(vm.day?.date == "2026-10-05")
+        #expect(vm.errorMessage != nil)
+
+        // Le prochain rechargement réussi efface l'erreur.
+        backend.heal("day:2026-10-05")
+        await vm.reload()
+        #expect(vm.errorMessage == nil)
+    }
+
+    @Test func firstLoadFailureShowsNoContent() async {
+        let backend = FakeRecoBackend()
+        backend.fail("days")
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        #expect(!vm.hasContent)
+        #expect(vm.errorMessage != nil)
+    }
+
+    @Test func closeTriggersAreMergedIntoOneReload() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        #expect(backend.daysCalls == 1)
+
+        backend.hold("days")
+        let first = Task { await vm.reload() }
+        await waitUntil { backend.daysCalls == 2 }
+        // Foreground + minuit + pull-to-refresh pendant le rechargement : on le rejoint.
+        let second = Task { await vm.reload() }
+        let third = Task { await vm.reloadForNewDay() }
+        try? await Task.sleep(for: .milliseconds(50))
+        backend.release("days")
+        await first.value
+        await second.value
+        await third.value
+        #expect(backend.daysCalls == 2)
+    }
+
+    @Test func aDataChangeDuringAReloadReplaysOneReloadAfterIt() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+
+        backend.hold("days")
+        let first = Task { await vm.reload() }
+        await waitUntil { backend.daysCalls == 2 }
+        // Synchro terminée pendant le rechargement : deux notifications → UN rejeu.
+        let second = Task { await vm.reloadForNewDay(trailing: true) }
+        let third = Task { await vm.reload(trailing: true) }
+        try? await Task.sleep(for: .milliseconds(50))
+        backend.release("days")
+        await first.value
+        await second.value
+        await third.value
+        #expect(backend.daysCalls == 3)
+    }
+
+    @Test func changingDateNeverShowsTheOldDateNight() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        #expect(vm.day?.date == "2026-10-05")
+
+        backend.hold("day:2026-10-03")
+        let task = Task { await vm.selectDate("2026-10-03") }
+        await waitUntil { backend.requestedDays.contains("2026-10-03") }
+        #expect(vm.day == nil)
+        #expect(vm.isDayLoading)
+        #expect(vm.hasContent)  // la page garde sa structure (emplacements réservés)
+        #expect(vm.stageBreakdown == nil)
+        backend.release("day:2026-10-03")
+        await task.value
+        #expect(vm.day?.date == "2026-10-03")
+        #expect(!vm.isDayLoading)
+    }
+
+    @Test func lateNightResponseOfAPreviousDateIsIgnored() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+
+        backend.hold("day:2026-10-02")
+        let slow = Task { await vm.selectDate("2026-10-02") }
+        await waitUntil { backend.requestedDays.contains("2026-10-02") }
+        await vm.selectDate("2026-10-03")
+        #expect(vm.day?.date == "2026-10-03")
+
+        backend.release("day:2026-10-02")
+        await slow.value
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(vm.day?.date == "2026-10-03")
+        #expect(vm.date == "2026-10-03")
+        #expect(!vm.isDayLoading)
+    }
+
+    @Test func reloadKeepsAPastNightPickedByTheUser() async {
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: noon)
+        await vm.load()
+        await vm.selectDate("2026-10-03")
+        #expect(vm.date == "2026-10-03")
+
+        await vm.reload()
+        #expect(vm.date == "2026-10-03")
+        #expect(vm.day?.date == "2026-10-03")
+        // Une synchro (ou le retour au premier plan) ne l'arrache pas non plus.
+        await vm.reloadForNewDay(trailing: true)
+        #expect(vm.date == "2026-10-03")
+    }
+
+    @Test func aSyncFollowsTheLatestNightWhenNothingWasPicked() async {
+        // Nuit d'hier affichée (aujourd'hui pas encore mesuré) ; la synchro apporte
+        // la nuit d'aujourd'hui : l'écran la suit sans intervention.
+        let backend = FakeRecoBackend()
+        let vm = makeVM(backend, clock: Clock(local(2026, 10, 6, 9, cal: calendar())))
+        backend.lastRowDate = "2026-10-05"
+        await vm.load()
+        #expect(vm.date == "2026-10-05")
+        backend.lastRowDate = "2026-10-06"
+        await vm.reloadForNewDay(trailing: true)
+        #expect(vm.date == "2026-10-06")
+        #expect(vm.day?.date == "2026-10-06")
     }
 }

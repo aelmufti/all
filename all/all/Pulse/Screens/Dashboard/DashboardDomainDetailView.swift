@@ -52,7 +52,7 @@ struct DashboardDomainDetailView: View {
         }
         .background(Color.pulseBackground)
         .pulseTabBarClearance()
-        .refreshable { await viewModel.load() }
+        .refreshable { await viewModel.reload() }
         .navigationTitle(tab.label)
         .navigationBarTitleDisplayMode(.inline)
         // Fixe le domaine actif (et réinitialise `subView` à la 1re sous-vue

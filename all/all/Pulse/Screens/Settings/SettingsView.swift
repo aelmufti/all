@@ -66,13 +66,13 @@ struct SettingsView: View {
                 .toolbar { SheetCloseButton { dismiss() } }
         }
         .task {
-            await viewModel.load()
+            await viewModel.reload()
         }
         // Basculer le mode de stockage change radicalement ce que cet écran a
         // de sens à charger (cf. `SettingsViewModel.load()`) — recharge à
         // chaque changement, pas seulement à l'ouverture de la feuille.
         .onChange(of: storageMode.mode) { _, _ in
-            Task { await viewModel.load() }
+            Task { await viewModel.reload() }
         }
         .sheet(isPresented: $showStatus) { StatusView() }
         .sheet(isPresented: $showWatch) { WatchSectionView() }

@@ -16,6 +16,13 @@
 //  dernier jour (voir `reloadForNewDay`/`load` des vue-modèles), pour ne pas
 //  arracher l'utilisateur qui consulte un jour passé.
 //
+//  Retour au premier plan : les onglets restent tous vivants, donc CHAQUE écran
+//  visité recharge à chaque `.active`. Un aller-retour de quelques secondes
+//  (notification, autre app) déclenchait ainsi toute la série de requêtes de
+//  tous les écrans pour rien : le retour au premier plan ne recharge que si le
+//  dernier déclenchement date de plus de `foregroundMinInterval` ou si le jour
+//  a changé entre-temps. Le minuteur de minuit, lui, déclenche toujours.
+//
 
 import SwiftUI
 
@@ -25,14 +32,29 @@ extension View {
     }
 }
 
+/// Délai minimal entre deux rechargements dus au retour au premier plan.
+let foregroundMinInterval: TimeInterval = 30
+
+/// Retour au premier plan : recharger si jamais déclenché, si le jour local a
+/// changé depuis, ou si le dernier déclenchement est assez ancien.
+func foregroundReloadDecision(lastFired: Date?, now: Date, calendar: Calendar = .current) -> Bool {
+    guard let lastFired else { return true }
+    if !calendar.isDate(lastFired, inSameDayAs: now) { return true }
+    return now.timeIntervalSince(lastFired) >= foregroundMinInterval
+}
+
 private struct DayRolloverModifier: ViewModifier {
     let onDayChange: () async -> Void
     @Environment(\.scenePhase) private var scenePhase
+    /// Dernier déclenchement (ou apparition de l'écran, qui charge déjà).
+    @State private var lastFired: Date?
 
     func body(content: Content) -> some View {
         content
+            .onAppear { if lastFired == nil { lastFired = Date() } }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active {
+                if phase == .active, foregroundReloadDecision(lastFired: lastFired, now: Date()) {
+                    lastFired = Date()
                     Task { await onDayChange() }
                 }
             }
@@ -42,6 +64,7 @@ private struct DayRolloverModifier: ViewModifier {
                     let delay = Self.secondsUntilNextLocalMidnight()
                     try? await Task.sleep(for: .seconds(delay))
                     if Task.isCancelled { break }
+                    lastFired = Date()
                     await onDayChange()
                 }
             }

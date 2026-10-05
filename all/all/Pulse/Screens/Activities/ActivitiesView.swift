@@ -47,7 +47,7 @@ struct ActivitiesView: View {
                 .toolbar(.hidden, for: .navigationBar)
                 .task {
                     guard !hasLoaded else { return }
-                    await vm.load()
+                    await vm.reload()
                     hasLoaded = true
                 }
                 .navigationDestination(for: Int.self) { id in
@@ -58,8 +58,8 @@ struct ActivitiesView: View {
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) : même rechargement
         // complet que le pull-to-refresh (`.refreshable`), pas de notion de
         // « jour courant » ici (liste, pas un écran par jour).
-        .reloadsOnLocalDataChange { await vm.load() }
-        .reloadsOnStorageModeChange { await vm.load() }
+        .reloadsOnLocalDataChange { await vm.reload(trailing: true) }
+        .reloadsOnStorageModeChange { await vm.reload(trailing: true) }
     }
 
     @ViewBuilder
@@ -69,7 +69,7 @@ struct ActivitiesView: View {
             LoadingView(message: "Chargement des activités…")
         case .failed(let message):
             ErrorView(message: message) {
-                Task { await vm.load() }
+                Task { await vm.reload() }
             }
         case .loaded(let activities):
             loaded(activities)
@@ -97,7 +97,7 @@ struct ActivitiesView: View {
             .padding(.bottom, PulseSpacing.lg)
         }
         .pulseTabBarClearance()
-        .refreshable { await vm.load() }
+        .refreshable { await vm.reload() }
     }
 
     private var emptyState: some View {

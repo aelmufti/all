@@ -28,13 +28,16 @@ final class ActivityDetailViewModel {
         self.client = client
     }
 
+    /// Une activité terminée ne change pas : si elle est déjà affichée (le
+    /// `.task` se relance à chaque réapparition de la vue), on la garde ; un
+    /// échec de rechargement ne la vide pas.
     func load() async {
-        state = .loading
+        if case .loaded = state {} else { state = .loading }
         do {
             let detail: ActivityDetail = try await client.get("api/activities/\(activityId)")
             state = .loaded(detail)
         } catch {
-            state = .failed(error.localizedDescription)
+            if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
     }
 }

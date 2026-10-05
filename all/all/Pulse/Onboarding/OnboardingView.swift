@@ -235,7 +235,7 @@ private struct OnboardingStepActions: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.pulsePrimary)
             .tint(Color.pulseAccent)
             .disabled(isBusy)
 
@@ -553,7 +553,7 @@ private struct OnboardingWatchStep: View {
                     pendingAdvance?.cancel()
                     onAutoAdvance()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.pulsePrimary)
                 .tint(Color.pulseAccent)
                 .frame(maxWidth: .infinity)
             } else {
@@ -575,7 +575,7 @@ private struct OnboardingWatchStep: View {
                 }
 
                 Button("Ouvrir le collecteur") { showWatch = true }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.pulsePrimary)
                     .tint(Color.pulseAccent)
                     .frame(maxWidth: .infinity)
 

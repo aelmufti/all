@@ -78,7 +78,7 @@ struct HomeView: View {
                     SettingsView()
                 }
         }
-        .task { await viewModel.load() }
+        .task { await viewModel.reload() }
         .task {
             // FC en direct : rafraîchissement périodique tant que l'écran est
             // visible — annulé automatiquement par SwiftUI à sa disparition.
@@ -90,13 +90,13 @@ struct HomeView: View {
         }
         // Bascule de jour : à minuit local et au retour premier plan, recharge
         // « aujourd'hui » (l'Accueil est toujours sur le jour courant).
-        .refreshesAtDayChange { await viewModel.load() }
+        .refreshesAtDayChange { await viewModel.reload() }
         // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) : mêmes données que
         // `.refreshesAtDayChange`, mais déclenché par l'arrivée réelle d'un
         // nouveau fichier plutôt que par le calendrier.
-        .reloadsOnLocalDataChange { await viewModel.load() }
-        .reloadsOnStorageModeChange { await viewModel.load() }
+        .reloadsOnLocalDataChange { await viewModel.reload(trailing: true) }
+        .reloadsOnStorageModeChange { await viewModel.reload(trailing: true) }
     }
 
     /// En-tête en contenu : titre « Accueil » 24pt + roue crantée (Paramètres).
@@ -127,7 +127,7 @@ struct HomeView: View {
             LoadingView(message: "Chargement de l'accueil…")
         case .failed(let message):
             ErrorView(message: message) {
-                Task { await viewModel.load() }
+                Task { await viewModel.reload() }
             }
         case .loaded:
             ScrollView {

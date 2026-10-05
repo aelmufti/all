@@ -45,8 +45,8 @@ struct DashboardView: View {
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) : pas de notion de
         // « jour courant » ici (période glissante depuis aujourd'hui), donc
         // un rechargement inconditionnel comme `retry()`/`selectPeriod`.
-        .reloadsOnLocalDataChange { await viewModel.load() }
-        .reloadsOnStorageModeChange { await viewModel.load() }
+        .reloadsOnLocalDataChange { await viewModel.reload(trailing: true) }
+        .reloadsOnStorageModeChange { await viewModel.reload(trailing: true) }
     }
 
     private var overview: some View {
@@ -89,7 +89,7 @@ struct DashboardView: View {
             .padding(PulseSpacing.lg)
         }
         .pulseTabBarClearance()
-        .refreshable { await viewModel.load() }
+        .refreshable { await viewModel.reload() }
     }
 
     private var header: some View {

@@ -167,11 +167,11 @@ private struct ProgrammeChoiceRow: View {
             Spacer()
             if isActive {
                 Button("Arrêter", role: .destructive, action: onStop)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(PulseButtonStyle(kind: .secondary, fullWidth: false))
                     .disabled(isBusy)
             } else {
                 Button("Commencer", action: onBegin)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PulseButtonStyle(kind: .primary, fullWidth: false))
                     .tint(Color.pulseAccent)
                     .disabled(isBusy)
             }

@@ -83,7 +83,7 @@ struct LoginView: View {
                         Label("Utiliser sans serveur", systemImage: "iphone")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.pulseSecondary)
                     .tint(Color.pulseAccent)
 
                     Text("Tout reste sur cet iPhone, aucun compte requis. Modifiable ensuite dans Paramètres > Stockage.")
@@ -206,7 +206,7 @@ struct PulseCredentialsForm: View {
                         .padding(.vertical, PulseSpacing.xs)
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.pulsePrimary)
             .controlSize(.large)
             .tint(Color.pulseAccent)
             .disabled(isSubmitDisabled)

@@ -5,7 +5,8 @@
 //  État de l'onglet **Sommeil** : navigation par NUIT (comme l'écran Santé,
 //  bornée à aujourd'hui) + analyse poussée de la nuit sélectionnée + reco
 //  d'heure de coucher : carte fixe « Ce soir » (nuit à venir, requête propre,
-//  indépendante de la date affichée) et carte par nuit. Charge le
+//  indépendante de la date affichée) et simple ligne « Coucher conseillé » dans
+//  la carte NUIT de la date affichée. Charge le
 //  détail par jour (`api/wellness/day/{date}`, qui porte l'hypnogramme, la SpO2
 //  et le stress de la nuit) et réutilise les helpers de formatage statiques de
 //  `HealthViewModel` (dates/heures) pour ne pas les redupliquer. Découplé de
@@ -29,6 +30,15 @@ final class SommeilViewModel {
 
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    /// Vrai dès que l'écran a de quoi s'afficher (jours + nuit de la date
+    /// courante reçus). Avant : plein écran de chargement/erreur ; après : le
+    /// contenu reste TOUJOURS visible, un rechargement le remplace à l'arrivée
+    /// de la réponse et un échec ne le vide pas (bandeau d'erreur discret).
+    private(set) var hasContent = false
+    /// Vrai pendant que la nuit d'une AUTRE date charge : `day` est alors `nil`
+    /// (jamais les données de l'ancienne date) et la vue montre des
+    /// emplacements réservés plutôt que « pas de nuit mesurée ».
+    private(set) var isDayLoading = false
 
     private(set) var date: String
     private(set) var days30: [WellnessDayRow] = []
@@ -37,25 +47,16 @@ final class SommeilViewModel {
     /// sélecteur de date.
     private(set) var firstDate: String?
 
-    /// État de la reco de la date AFFICHÉE (carte par nuit). Jamais de valeur
-    /// d'une autre date : pendant le chargement la carte montre un emplacement
-    /// réservé, pas l'heure de la date précédente.
+    /// État de la reco de la date AFFICHÉE (ligne « Coucher conseillé » de la
+    /// carte NUIT). Jamais de valeur d'une autre date : au changement de date
+    /// l'état repasse à `.loading` (pas de ligne) ; un simple rechargement de
+    /// la MÊME date garde la valeur affichée jusqu'à la réponse.
     enum RecoState: Equatable {
         case loading
         case ready(DashboardSleepRecommendation)
         case failed
     }
     private(set) var nightReco: RecoState = .loading
-
-    /// Carte par nuit : ce que la vue doit montrer.
-    enum NightCard: Equatable {
-        /// Rien : date = nuit à venir (doublon avec « Ce soir »), ou aucune
-        /// donnée exploitable.
-        case hidden
-        /// Reco de cette date en cours de chargement (emplacement réservé).
-        case placeholder
-        case plan(SleepBedtimePlan.Result)
-    }
 
     /// Carte fixe « Ce soir ».
     enum TonightCard: Equatable {
@@ -81,6 +82,16 @@ final class SommeilViewModel {
     /// Rechargement de la reco lors d'un changement de date (annulé si une
     /// nouvelle date arrive avant la réponse).
     private var recoTask: Task<Void, Never>?
+    /// Fusionne les rechargements complets (retour au premier plan, synchro,
+    /// changement de source, pull-to-refresh) — cf. `ReloadGate`.
+    private let gate = ReloadGate()
+    /// Invalide la réponse « nuit » d'une date quittée entre-temps.
+    private var dayGeneration = 0
+    /// Nuit la plus récente mesurée (dernier `load`) et choix explicite d'une
+    /// AUTRE date par l'utilisateur : tant qu'il consulte une nuit passée, un
+    /// rechargement ne le ramène pas sur la plus récente.
+    private var latestNight: String?
+    private var userPickedDate = false
     /// Invalide les réponses « Ce soir » en vol quand une requête plus récente
     /// part (date de nuit changée, rafraîchissement).
     private var tonightGeneration = 0
@@ -105,40 +116,63 @@ final class SommeilViewModel {
 
     // MARK: - Chargement
 
+    /// Rechargement complet fusionné : un déclencheur pendant un rechargement en
+    /// cours le rejoint au lieu de relancer toutes les requêtes. `trailing` :
+    /// la donnée vient de changer (synchro, changement de source) — un seul
+    /// rechargement est rejoué après le courant.
+    func reload(trailing: Bool = false) async {
+        await gate.run(trailing: trailing) { [self] in await self.load() }
+    }
+
+    /// Un rechargement garde tout ce qui est affiché jusqu'à l'arrivée de la
+    /// réponse ; un échec ne vide rien (bandeau d'erreur discret).
     func load() async {
         isLoading = true
-        errorMessage = nil
         defer { isLoading = false }
         // « Ce soir » ne dépend ni des jours ni de la date affichée : requête
         // concurrente, un échec des jours ne l'empêche pas.
         async let tonight: Void = refreshTonight()
         lastKnownToday = todayKey
         do {
+            async let datesTask: [String] = client.get("api/wellness/dates")
             let days: [WellnessDayRow] = try await client.get(
                 "api/wellness/days", query: ["limit": "30", "days": "30"]
             )
-            let dates: [String] = try await client.get("api/wellness/dates")
+            let dates = try await datesTask
             days30 = days
             firstDate = dates.min()
             // Par défaut, la nuit la plus récente RÉELLEMENT dormie (le tout
             // dernier jour peut être aujourd'hui, sans nuit encore mesurée).
             let latest = days.last(where: { $0.sleepDurationS != nil })?.date
                 ?? days.last?.date ?? dates.last
+            latestNight = latest
             let previousDate = date
-            if let latest { date = latest }
-            // Un simple rafraîchissement de la même date garde la valeur affichée.
-            if date != previousDate { nightReco = .loading }
-            await loadDay()
-            // Reco non bloquante (endpoint récent : un Pulse pas à jour renvoie 404).
+            if let latest, !userPickedDate { date = latest }
+            if date != previousDate {
+                // Autre nuit que celle affichée : jamais les données de l'ancienne.
+                day = nil
+                isDayLoading = true
+                nightReco = .loading
+            }
+            // Reco non bloquante (endpoint récent : un Pulse pas à jour renvoie
+            // 404), lancée en parallèle de la nuit.
             recoTask?.cancel()
-            await fetchRecommendation(for: date)
+            let requested = date
+            let recoRequest = Task { [weak self] in
+                guard let self else { return }
+                await self.fetchRecommendation(for: requested)
+            }
+            recoTask = recoRequest
+            await loadDay()
+            hasContent = true
+            await recoRequest.value
         } catch {
             errorMessage = Self.message(for: error)
         }
         await tonight
     }
 
-    func retry() async { await load() }
+    func retry() async { await reload() }
 
     // MARK: - Navigation de jour (miroir du sous-ensemble de HealthViewModel)
 
@@ -169,8 +203,12 @@ final class SommeilViewModel {
     func selectDate(_ newDate: String) async {
         guard newDate != date, newDate <= maxReachableDate else { return }
         date = newDate
-        // Plus de reco périmée : tant que la nouvelle date charge, la carte par
-        // nuit montre un emplacement réservé (pas l'heure de la date d'avant).
+        userPickedDate = newDate != latestNight
+        // Seul cas où l'on ne montre pas les données d'avant : une AUTRE date.
+        // Pas de nuit ni de reco périmées — la vue garde la structure de la
+        // page avec des emplacements réservés.
+        day = nil
+        isDayLoading = true
         nightReco = .loading
         // La reco de la nouvelle date se charge en parallèle du détail de la
         // nuit : elle ne retarde pas son affichage, et son échec n'en fait pas
@@ -191,6 +229,8 @@ final class SommeilViewModel {
         if let reco {
             lastGoodReco = reco
             nightReco = .ready(reco)
+        } else if case .ready = nightReco {
+            // Rechargement de la MÊME date en échec : on garde la valeur affichée.
         } else {
             nightReco = .failed
         }
@@ -228,6 +268,10 @@ final class SommeilViewModel {
             let reco = await Self.fetchReco(client: client, date: wanted)
             guard generation == tonightGeneration, !Task.isCancelled else { return }
             guard let reco else {
+                // Échec d'un simple rafraîchissement (même nuit, `.ready` déjà
+                // affiché) : on garde la valeur ; un changement de nuit, lui, a
+                // remis `.loading` plus haut.
+                if case .ready = tonightReco { return }
                 tonightReco = .failed
                 return
             }
@@ -263,37 +307,88 @@ final class SommeilViewModel {
         }
     }
 
-    var nightCard: NightCard {
-        // Date affichée = nuit à venir (cas après minuit) : doublon de « Ce soir ».
-        if date == tonightDate { return .hidden }
+    /// Carte d'heure de coucher en haut de l'écran : UNE seule, qui suit la date
+    /// affichée. Sur aujourd'hui (ou tant qu'aucune autre date n'a été choisie,
+    /// ou si la date affichée est la nuit à venir), c'est « Ce soir ». Sur toute
+    /// autre date T, c'est la reco de CETTE nuit-là — jamais celle de ce soir.
+    struct BedtimeCard: Equatable {
+        let title: String
+        /// La ligne « Pour te réveiller à … » n'a de sens que pour la nuit à venir.
+        let showsWake: Bool
+        let state: TonightCard
+    }
+
+    var showsTonight: Bool {
+        !userPickedDate || date == maxReachableDate || date == tonightDate
+    }
+
+    var bedtimeCard: BedtimeCard {
+        if showsTonight {
+            return BedtimeCard(title: "Ce soir", showsWake: true, state: tonightCard)
+        }
+        let title = "Coucher conseillé · \(HealthViewModel.shortDateLabel(date))"
+        let state: TonightCard
         switch nightReco {
         case .loading:
-            return .placeholder
+            state = .placeholder
         case .ready(let reco):
-            return plan(reco: reco, date: date).map(NightCard.plan) ?? .hidden
+            state = plan(reco: reco, date: date).map(TonightCard.plan) ?? .unavailable
+        case .failed:
+            // Échec connu : idéal GLOBAL de la dernière reco, sinon rien.
+            state = lastGoodReco.flatMap { plan(reco: $0, date: date) }.map(TonightCard.plan) ?? .unavailable
+        }
+        return BedtimeCard(title: title, showsWake: false, state: state)
+    }
+
+    /// Ligne « Coucher conseillé » de la carte NUIT de la date affichée. `nil` =
+    /// pas de ligne : pas de nuit mesurée, reco de cette date en cours de
+    /// chargement, indisponible sans repli, ou date affichée = nuit à venir
+    /// (déjà portée par « Ce soir » : jamais deux fois la même information).
+    /// Tant que la nuit à venir est provisoire (`tonightReco` en chargement : elle
+    /// peut être corrigée à l'arrivée de la reco), on n'affiche rien — sinon la
+    /// ligne apparaîtrait puis disparaîtrait.
+    var nightBedtime: SleepBedtimePlan.Result? {
+        // Sur une date choisie, la carte du haut porte déjà la reco de cette nuit.
+        guard day?.sleep.main != nil, date != tonightDate, showsTonight else { return nil }
+        if case .loading = tonightReco { return nil }
+        switch nightReco {
+        case .loading:
+            return nil
+        case .ready(let reco):
+            return plan(reco: reco, date: date)
         case .failed:
             // Échec connu : on retombe sur l'idéal GLOBAL de la dernière reco.
-            guard let lastGoodReco, let result = plan(reco: lastGoodReco, date: date) else { return .hidden }
-            return .plan(result)
+            guard let lastGoodReco else { return nil }
+            return plan(reco: lastGoodReco, date: date)
         }
     }
 
+    /// Nuit de la date courante. Garde `day` tant que la réponse n'est pas
+    /// arrivée (rechargement de la même date) ; une réponse d'une date quittée
+    /// entre-temps est ignorée.
     private func loadDay() async {
-        day = nil
-        errorMessage = nil
+        dayGeneration += 1
+        let generation = dayGeneration
+        let requested = date
+        defer { if generation == dayGeneration { isDayLoading = false } }
         do {
-            day = try await client.get("api/wellness/day/\(date)")
+            let detail: WellnessDayDetail = try await client.get("api/wellness/day/\(requested)")
+            guard generation == dayGeneration else { return }
+            day = detail
+            errorMessage = nil
         } catch {
+            guard generation == dayGeneration else { return }
             errorMessage = Self.message(for: error)
         }
     }
 
     /// Changement de jour / retour au premier plan / données locales : recharge
-    /// tout si l'utilisateur est sur aujourd'hui (ou sur « l'ancien aujourd'hui »
-    /// après minuit) ; sinon la nuit à venir seule est réévaluée.
-    func reloadForNewDay() async {
-        if isLastDay || date == lastKnownToday {
-            await load()
+    /// tout tant que l'utilisateur suit la nuit la plus récente (ou est sur
+    /// aujourd'hui) ; s'il consulte une nuit passée de son choix, seule la nuit
+    /// à venir est réévaluée (on ne l'arrache pas, et le passé ne bouge pas).
+    func reloadForNewDay(trailing: Bool = false) async {
+        if !userPickedDate || isLastDay || date == lastKnownToday {
+            await reload(trailing: trailing)
         } else {
             lastKnownToday = todayKey
             await refreshTonight(force: false)

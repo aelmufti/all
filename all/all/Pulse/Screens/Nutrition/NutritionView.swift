@@ -9,12 +9,11 @@
 //  suivie est celle du gabarit **mobile** du composant Angular (`@else` du
 //  `@if (desktop())`, largeur < 900px) : carte macros (`ng-template #macros`,
 //  PAS `#hero`), carte Timing (`#frise`), carte Journée — la carte « Objectif
-//  du jour », le widget « Ajout rapide » et « Pour finir la journée »
-//  n'existent, côté Angular, que dans le gabarit desktop (`@if (desktop())`).
-//  Ils sont malgré tout **conservés** ici (le natif les avait déjà et la
-//  consigne était de ne rien retirer sans qu'Angular ne le fasse) : ordre
-//  réaligné sur le DOM desktop réduit à une colonne (hero, ajout rapide,
-//  objectif, journal, timing, suggestions), vocabulaire visuel (mono/labels
+//  du jour » et le widget « Ajout rapide » n'existent, côté Angular, que dans
+//  le gabarit desktop (`@if (desktop())`). Ils sont malgré tout **conservés**
+//  ici (le natif les avait déjà) : ordre réaligné sur le DOM desktop réduit à
+//  une colonne (hero, ajout rapide, objectif, journal, timing) — « Pour finir
+//  la journée » (`#suggestions`) a été retiré du natif, vocabulaire visuel (mono/labels
 //  `.lab`) unifié avec le reste de l'écran. Voir le rendu de l'agent pour le
 //  détail des écarts maquette/Angular tranchés (jauge, ligne d'en-tête macros,
 //  frise, journal).
@@ -46,7 +45,7 @@ struct NutritionView: View {
                 .toolbar(.hidden, for: .navigationBar)
         }
         .task {
-            await viewModel.load()
+            await viewModel.reload()
         }
         // Bascule de jour à minuit local + retour premier plan (avance au
         // nouveau jour si l'utilisateur était sur aujourd'hui).
@@ -54,8 +53,8 @@ struct NutritionView: View {
         // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
         // ouvert (cf. `LocalIngestor.ingestIfNeeded`) — même garde-fou que
         // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
-        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
-        .reloadsOnStorageModeChange { await viewModel.load() }
+        .reloadsOnLocalDataChange { await viewModel.reloadForNewDay(trailing: true) }
+        .reloadsOnStorageModeChange { await viewModel.reload(trailing: true) }
         .onChange(of: addTrigger) { _, _ in
             viewModel.openAddSheet()
         }
@@ -74,7 +73,7 @@ struct NutritionView: View {
             LoadingView(message: "Chargement de la nutrition…")
         case .failed(let message):
             ErrorView(message: message) {
-                Task { await viewModel.load() }
+                Task { await viewModel.reload() }
             }
         case .loaded:
             loadedContent
@@ -82,15 +81,23 @@ struct NutritionView: View {
     }
 
     /// Ordre = DOM desktop d'Angular ramené à une colonne : `#hero`
-    /// (`macros` ici), `#quickAdd`, `#objective`, `#journal`, `#timing`,
-    /// `#suggestions` (lignes 736-779 de `nutrition.component.ts`).
+    /// (`macros` ici), `#quickAdd`, `#objective`, `#journal`, `#timing`
+    /// (lignes 736-779 de `nutrition.component.ts`) — sans `#suggestions`.
     private var loadedContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: PulseSpacing.md) {
                 NutritionDayHeader(viewModel: viewModel)
 
+                if let message = viewModel.actionError {
+                    DashboardInlineError(message: message) { Task { await viewModel.reload() } }
+                }
+
                 if let day = viewModel.day {
                     NutritionMacrosCard(day: day)
+                } else if viewModel.isDateLoading {
+                    // Autre date en cours de chargement : emplacements réservés,
+                    // jamais les données de l'ancienne date.
+                    PulseSkeletonCard(height: 150)
                 }
 
                 if !viewModel.frequent.isEmpty {
@@ -101,6 +108,8 @@ struct NutritionView: View {
 
                 if let target = viewModel.targetInfo {
                     NutritionObjectiveCard(target: target, weekly: viewModel.weekly)
+                } else if viewModel.isDateLoading {
+                    PulseSkeletonCard(height: 120)
                 }
 
                 if let day = viewModel.day {
@@ -110,17 +119,20 @@ struct NutritionView: View {
                         onEdit: { entry in viewModel.editEntry(entry) },
                         onDelete: { id in Task { await viewModel.deleteEntry(id) } }
                     )
+                } else if viewModel.isDateLoading {
+                    PulseSkeletonCard(height: 160)
                 }
 
                 if let day = viewModel.day {
                     NutritionTimingCard(day: day, isToday: viewModel.isToday)
                 }
 
-                if !viewModel.suggestions.isEmpty {
-                    NutritionSuggestionsCard(day: viewModel.day, items: viewModel.suggestions, isMutating: viewModel.isMutating) { item in
-                        Task { await viewModel.addSuggestion(item) }
-                    }
-                }
+                // Une pesée change l'objectif du jour : on recharge l'écran.
+                WeightCard(
+                    viewModel: viewModel.weight,
+                    onSelectDate: { viewModel.selectDate($0) },
+                    onChange: { await viewModel.reload(trailing: true) }
+                )
             }
             .padding(.horizontal, PulseSpacing.lg)
             .padding(.top, PulseSpacing.lg)
@@ -233,7 +245,7 @@ private func nutritionShortDateLabel(isToday: Bool, date: String) -> String {
 // MARK: - Libellé de section (mono UPPERCASE) — équivalent `.lab`
 //
 // Chaque en-tête de carte Angular (« Aujourd'hui », « Objectif du jour »,
-// « Journée », « Timing », « Pour finir la journée »…) partage la même
+// « Journée », « Timing »…) partage la même
 // classe `.lab` (mono 11pt, tracking .12em, `--text-dim`) — PAS le style
 // `.headline` gras que fournit le `SectionHeader` partagé de
 // `DesignSystem.swift` (utilisé par les autres écrans). On ne touche pas ce
@@ -869,57 +881,6 @@ private func nutritionFriseNote(day: NutritionDay, isToday: Bool) -> String {
     let mins = max(Int((Date().timeIntervalSince1970 - Double(last)) / 60), 0)
     let ago = mins < 60 ? "\(mins) min" : "\(mins / 60) h \(String(format: "%02d", mins % 60))"
     return "\(count) · dernier repas il y a \(ago)"
-}
-
-// MARK: - Suggestions pour finir la journée
-
-private struct NutritionSuggestionsCard: View {
-    let day: NutritionDay?
-    let items: [NutritionSuggestionItem]
-    let isMutating: Bool
-    let onAdd: (NutritionSuggestionItem) -> Void
-
-    private var top: [NutritionSuggestionItem] { Array(items.prefix(4)) }
-
-    var body: some View {
-        PulseCard {
-            NutritionSectionLabel("Pour finir la journée") {
-                Text(nutritionSuggestSummary(count: top.count, remainingProtein: day?.remaining.protein))
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(Color.pulseTextSecondary)
-            }
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: PulseSpacing.sm) {
-                ForEach(top) { item in
-                    Button {
-                        onAdd(item)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(item.name) · \(nutritionPortion(grams: item.grams, units: item.units, label: item.unitLabel))")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Color.pulseTextPrimary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            Text("\(Int(item.kcal.rounded())) kcal · \(Int(item.protein.rounded())) P")
-                                .font(.system(size: 11, design: .rounded))
-                                .foregroundStyle(Color.pulseTextSecondary)
-                        }
-                        .padding(PulseSpacing.sm)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.pulseSurfaceAlt)
-                        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isMutating)
-                }
-            }
-        }
-    }
-}
-
-private func nutritionSuggestSummary(count: Int, remainingProtein: Double?) -> String {
-    let base = count > 0 ? "\(count) idée\(count > 1 ? "s" : "")" : "aucune idée"
-    guard let remainingProtein else { return base }
-    return "\(base) · reste \(Int(remainingProtein.rounded())) g de protéines"
 }
 
 #Preview {

@@ -244,7 +244,7 @@ struct ProgrammeTrainingSection: View {
             Button("Relancer un cycle aujourd’hui") {
                 Task { await viewModel.restart(domain) }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.pulseSecondary)
             .disabled(viewModel.isBusy)
         }
     }
@@ -284,7 +284,7 @@ struct ProgrammeTrainingSection: View {
                 Text(viewModel.pushStatus?.state == "running" ? "Envoi en cours…" : "Envoyer à la montre")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.pulseSecondary)
             .disabled(viewModel.isBusy || viewModel.pushStatus?.state == "running")
             Text(programmePushHint(status: viewModel.pushStatus))
                 .font(.system(size: 11, design: .rounded))
