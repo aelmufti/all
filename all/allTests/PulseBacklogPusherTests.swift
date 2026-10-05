@@ -78,7 +78,7 @@ struct SpoolEntryPushedToPulseCodableTests {
     }
 
     /// Le journal réel est un TABLEAU (`[SpoolEntry]`, cf.
-    /// `SpoolStore.loadJournal`/`persistJournal`) — vérifie que l'absence du
+    /// `SpoolStore.loadJournal`/`persist`) — vérifie que l'absence du
     /// champ sur une entrée ne fait pas échouer le décodage du tableau
     /// ENTIER, pas seulement d'une entrée isolée décodée seule.
     @Test func aWholeJournalArrayWithoutTheFieldOnOneEntryStillDecodesEntirely() throws {

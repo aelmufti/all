@@ -20,7 +20,8 @@
 //  (`GarminSession.downloadFile`, cf. `BLEDiagnosticView`) OU via la traversée
 //  automatique `syncNewFiles()` —, l'upload vers Pulse de chaque fichier acquis,
 //  et l'archivage différé (`SET_FILE_FLAG` ARCHIVE) une fois qu'un fichier est
-//  `delivered` dans le Spool. Les octets reçus vont au Spool
+//  `delivered` dans le Spool — marqué `archived` seulement sur accusé APPLIQUÉ
+//  de la montre, une demande à la fois (`Sync/ArchivePlanner.swift`). Les octets reçus vont au Spool
 //  (`SpoolStore.recordAcquired`) sans jamais être parsés (cf. CLAUDE.md, « ne
 //  pas parser le FIT sur le collecteur »).
 //
@@ -203,6 +204,14 @@ final class GarminSession: ObservableObject {
     /// Vrai si au moins un fichier a été livré à Pulse (2xx) depuis le dernier
     /// rafraîchissement posté — évite de rafraîchir quand rien n'a changé.
     private var deliveredSinceLastRefresh = false
+    /// Demandes d'archivage (SET_FILE_FLAG) : une seule en vol, appariée à sa
+    /// réponse par l'ordre — cf. `ArchiveRequestTracker`. Un lien BLE = une
+    /// instance de session = un tracker neuf : tout archivage non accusé est
+    /// retenté à la session suivante.
+    private var archiveTracker = ArchiveRequestTracker()
+    /// Délai sans réponse de la montre à un SET_FILE_FLAG avant d'abandonner les
+    /// archivages de ce lien (`expireInFlightArchive`).
+    private let archiveTimeout: TimeInterval
     /// État de l'écriture du poids vers la montre (cf. `writeWeight`).
     @Published private(set) var weightWriteState: WatchWeightWriteState = .idle
     /// État de l'écriture du planning d'alarmes vers la montre (cf.
@@ -301,8 +310,9 @@ final class GarminSession: ObservableObject {
     /// la requête calendrier de la montre reçoit alors la réponse vide historique.
     private let calendarSource: CalendarEventSource?
 
-    init(communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil, calendarSource: CalendarEventSource? = nil) {
+    init(communicator: GfdiCommunicating, spoolStore: SpoolStore?, uploader: SpoolUploading? = nil, calendarSource: CalendarEventSource? = nil, archiveTimeout: TimeInterval = 20) {
         self.communicator = communicator
+        self.archiveTimeout = archiveTimeout
         self.spoolStore = spoolStore
         self.uploader = uploader
         self.calendarSource = calendarSource
@@ -577,30 +587,45 @@ final class GarminSession: ObservableObject {
     }
 
     /// Réponse à `SET_FILE_FLAG` — porté de `SetFileFlagsStatusMessage.parseIncoming`
-    /// (messages/status/GFDIStatusMessage.java, AGPL-3.0). Purement pour le
-    /// journal/diagnostic : aucune action supplémentaire n'en dépend, l'état du
-    /// Spool (`archived`) est déjà fixé à l'émission par
-    /// `archivePendingDeliveries` (cf. son commentaire).
+    /// (messages/status/GFDIStatusMessage.java, AGPL-3.0), décodé par
+    /// `SetFileFlagStatus`. C'est ICI, et seulement ici, qu'une entrée passe
+    /// `archived` : sur un accusé ACK + flags APPLIED, apparié à la demande EN VOL
+    /// (une seule à la fois, cf. `ArchiveRequestTracker`). Refus, statut
+    /// tronqué ou réponse sans demande en vol : l'entrée reste `delivered`
+    /// (retentée à la session suivante, jamais en boucle sur ce lien).
+    ///
+    /// L'identifiant renvoyé n'est PAS utilisé pour l'appariement : le `+1` du
+    /// pont (commentaire "TODO: check if always or only on archival" sur
+    /// `SetFileFlagsStatusMessage` upstream, jamais résolu même côté Java) est
+    /// une hypothèse non vérifiée contre le matériel. On journalise la valeur
+    /// brute, la valeur +1 et l'index demandé pour pouvoir la trancher sur une
+    /// vraie montre.
     private func handleSetFileFlagStatus(_ rest: Data) {
-        var reader = GarminByteReader(rest)
-        guard let status = reader.readUInt8() else { return }
-        guard status == 0 else { // Status.ACK
-            log.warning("SET_FILE_FLAG refusé par la montre : status=\(status, privacy: .public)")
+        let parsed = SetFileFlagStatus.parse(rest)
+        guard let outcome = archiveTracker.receive(applied: parsed?.isApplied ?? false) else {
+            log.info("SET_FILE_FLAG reçu sans demande d'archivage en vol — ignoré (réponse tardive ou non sollicitée)")
             return
         }
-        guard let flagsStatus = reader.readUInt8(),
-              let fileIdentifierRaw = reader.readUInt16LE(),
-              let flagsBitmask = reader.readUInt8()
-        else { return }
-        // HYPOTHÈSE reprise telle quelle du pont (commentaire "TODO: check if
-        // always or only on archival" sur `SetFileFlagsStatusMessage` upstream,
-        // jamais résolu même côté Java) : +1 sur l'identifiant renvoyé. Non
-        // vérifié contre le matériel — purement informatif ici.
-        let fileIdentifier = Int(fileIdentifierRaw) + 1
-        log.info("""
-            SET_FILE_FLAG accusé : flagsStatus=\(flagsStatus == 0 ? "APPLIED" : "ERROR", privacy: .public) \
-            fileIdentifier=\(fileIdentifier, privacy: .public) flags=0x\(String(flagsBitmask, radix: 16), privacy: .public)
-            """)
+        let request: ArchiveRequestTracker.InFlight
+        switch outcome {
+        case .applied(let r), .refused(let r): request = r
+        }
+        if let parsed {
+            let flagsStatus = parsed.flagsStatus.map { $0 == 0 ? "APPLIED" : "ERROR" } ?? "absent"
+            let flags = parsed.flags.map { "0x" + String($0, radix: 16) } ?? "absent"
+            let rawID = parsed.fileIdentifierRaw.map { String($0) } ?? "absent"
+            let rawIDPlusOne = parsed.fileIdentifierRaw.map { String(Int($0) + 1) } ?? "absent"
+            log.info("SET_FILE_FLAG accusé : status=\(parsed.status, privacy: .public) flagsStatus=\(flagsStatus, privacy: .public) flags=\(flags, privacy: .public) identifiant brut=\(rawID, privacy: .public) brut+1=\(rawIDPlusOne, privacy: .public) index demandé=\(request.fileIndex, privacy: .public)")
+        } else {
+            log.warning("SET_FILE_FLAG : réponse vide pour la demande index=\(request.fileIndex, privacy: .public)")
+        }
+        switch outcome {
+        case .applied:
+            spoolStore?.markArchived(request.id, expectedAcquiredAt: request.acquiredAt)
+        case .refused:
+            log.warning("Archivage refusé/non appliqué par la montre (index=\(request.fileIndex, privacy: .public)) — l'entrée reste `delivered`, retentée à la prochaine session")
+        }
+        pumpArchiveQueue()
     }
 
     // MARK: - Téléchargement (DOWNLOAD_REQUEST/FILE_TRANSFER_DATA) — manifeste ou fichier
@@ -681,8 +706,17 @@ final class GarminSession: ObservableObject {
         // calculer la nouvelle file de téléchargement, pour ne pas laisser
         // traîner du travail d'upload en attente pendant toute la traversée.
         uploadPendingAcquisitions()
-        let alreadyAcquired = Set(spoolStore.entries.keys)
-        downloadQueue = SyncPlanner.filesDue(from: files, alreadyAcquired: alreadyAcquired)
+        // Tenu = identité journalisée ET taille listée inchangée depuis l'acquisition
+        // (un fichier que la montre a continué d'écrire est relu, une fois par
+        // manifeste : la file est figée ici, jamais recalculée en cours de
+        // traversée).
+        let journal = spoolStore.entries
+        for (entry, recordedSize) in SyncPlanner.resizedSinceAcquisition(from: files, journal: journal) {
+            // PREUVE de l'hypothèse « la montre écrit encore dans un fichier déjà
+            // lu » : si cette ligne n'apparaît jamais, l'hypothèse est fausse.
+            log.info("Re-téléchargement dû (taille listée changée) : type=\(entry.typeName, privacy: .public) index=\(entry.fileIndex, privacy: .public) ancienne taille=\(recordedSize, privacy: .public) o, nouvelle taille=\(entry.sizeBytes, privacy: .public) o")
+        }
+        downloadQueue = SyncPlanner.filesDue(from: files, journal: journal)
         log.info("syncNewFiles : \(self.downloadQueue.count, privacy: .public) fichier(s) dû(s) sur \(self.files.count, privacy: .public) listé(s), récent→ancien")
         advanceDownloadQueue()
     }
@@ -701,9 +735,8 @@ final class GarminSession: ObservableObject {
             // traversée BLE (mode Téléphone/Les deux — incrément L2, cf.
             // `docs/stockage-local.md`). `ingestIfNeeded` vérifie elle-même le
             // mode Stockage et ouvre sa propre `SpoolStore`/`LocalDb` (jamais
-            // celles d'ici) : voir son commentaire d'en-tête pour pourquoi
-            // (course évitée sur `SpoolStore.entries`, mutable et manipulé sur
-            // le main actor). Seam retenu faute d'un point de fin de
+            // celles d'ici) : voir son commentaire d'en-tête (le journal est
+            // fusionné sur disque, deux instances ne s'écrasent pas). Seam retenu faute d'un point de fin de
             // traversée plus canonique ; à revalider si un futur incrément en
             // introduit un (cf. rapport d'incrément L2).
             LocalIngestor.ingestIfNeeded()
@@ -755,42 +788,89 @@ final class GarminSession: ObservableObject {
     /// `archiveOnWatch` côté pont (session/GarminSession.java, AGPL-3.0). Trame
     /// directe (pas enveloppée en RESPONSE/5000), comme
     /// `SetFileFlagsMessage.generateOutgoing` qui écrit son propre type en
-    /// sortie. Jamais appelée pour une entrée DIRECTORY : les appelants de
-    /// cette méthode (`archivePendingDeliveries`) ne connaissent que des
-    /// `WatchFileID` qui, par construction du Spool, ne sont jamais des
-    /// entrées DIRECTORY (cf. commentaire de `archivePendingDeliveries`).
+    /// sortie. Jamais appelée pour une entrée DIRECTORY : son seul appelant
+    /// (`pumpArchiveQueue`) ne connaît que des entrées filtrées par
+    /// `ArchivePlanner.plan`, qui écarte `fileType == 0`.
     private func archiveFileOnWatch(fileIndex: Int) {
         let payload = Self.setFileFlagsArchivePayload(fileIndex: fileIndex)
         send(GfdiFrame.build(messageType: MessageType.setFileFlag, payload: payload), taskName: "archive file \(fileIndex)")
         log.info("SET_FILE_FLAG(ARCHIVE) envoyé pour fileIndex=\(fileIndex, privacy: .public)")
     }
 
-    /// Archive sur la montre tout fichier `delivered`-non-`archived` du Spool —
-    /// à appeler **après** que `SpoolStore.markDelivered(_:)` a fait passer un
-    /// fichier à `delivered` (2xx de Pulse), jamais avant (contrat d'ingestion
-    /// §7 : « rien n'est archivé sur la montre ni purgé du téléphone avant le
-    /// 2xx »). Câblée depuis le pivot 2026-09-22 (autorisation réseau explicite
-    /// de l'utilisateur) : `handleUploadOutcome` ci-dessus l'appelle juste après
-    /// chaque `markDelivered` réussi.
+    /// Tente d'archiver sur la montre les fichiers `delivered`-non-`archived` du
+    /// Spool — à appeler **après** que `SpoolStore.markDelivered(_:)` a fait
+    /// passer un fichier à `delivered` (2xx de Pulse), jamais avant (contrat
+    /// d'ingestion §7 : « rien n'est archivé sur la montre ni purgé du
+    /// téléphone avant le 2xx »). Appelée à chaque livraison
+    /// (`handleUploadOutcome`), à chaque manifeste reçu (`retryPendingArchives`)
+    /// et à chaque réponse de la montre.
     ///
-    /// Marque `archived` dès l'émission plutôt qu'après un accusé de la montre
-    /// — fidèle à `archiveOnWatch` côté pont, qui ne fait pas non plus
-    /// dépendre son état d'un accusé (la réponse SET_FILE_FLAG est décodée par
-    /// `handleSetFileFlagStatus`, mais purement pour le journal/diagnostic).
+    /// N'émet qu'UNE demande à la fois (`ArchiveRequestTracker`) et ne marque
+    /// RIEN : `archived` n'est posé que par `handleSetFileFlagStatus`, sur accusé
+    /// appliqué. Le pont Linux marque à l'émission (`archiveOnWatch`) parce que
+    /// sa copie locale est définitive ; ici une commande perdue ou refusée,
+    /// notée `archived`, ne serait plus jamais retentée, les fichiers non
+    /// archivés s'accumuleraient sur la montre et son index saturerait (panne
+    /// connue, CLAUDE.md « Archiver après livraison »).
+    ///
+    /// Candidates = `ArchivePlanner.plan` sur le manifeste COURANT (`files`) :
+    /// identité complète (type + index + nom), taille listée inchangée depuis
+    /// l'acquisition. Une entrée `delivered` absente du manifeste (ou à relire
+    /// d'abord) reste `delivered` : jamais d'archivage à l'aveugle par index.
+    ///
+    /// Cohabitation avec un téléchargement : SET_FILE_FLAG est une trame directe
+    /// qui ne touche ni `downloadTarget` ni `currentDownload` (comme
+    /// `archiveOnWatch` côté pont, cf. docs/robustesse-transferts.md §3) — elle
+    /// peut donc partir pendant qu'un fichier est en vol sans toucher au slot
+    /// de transfert ; sa réponse (RESPONSE/5000 de type 5008) est routée à part
+    /// de FILE_TRANSFER_DATA.
     func archivePendingDeliveries() {
+        pumpArchiveQueue()
+    }
+
+    /// Début de session, manifeste reçu : retente les archivages restés
+    /// `delivered` (commande perdue/refusée lors d'une session précédente) et
+    /// journalise ce qui est laissé de côté — c'est le seul endroit où le
+    /// rapport est émis (un par manifeste), `pumpArchiveQueue` restant muet.
+    private func retryPendingArchives() {
         guard let spoolStore else { return }
-        for entry in spoolStore.pendingArchive() {
-            // Garde défensive, fidèle au `if DIRECTORY return` explicite
-            // d'`archiveOnWatch` côté pont : ne devrait jamais se déclencher
-            // ici, puisque seul `finishDownload().file` écrit dans le Spool
-            // (jamais le manifeste directory lui-même, dataType=subType=0).
-            guard entry.id.fileType != 0 else {
-                log.warning("archivePendingDeliveries ignore une entrée DIRECTORY inattendue : \(entry.relativePath, privacy: .public)")
-                continue
+        let plan = ArchivePlanner.plan(delivered: spoolStore.pendingArchive(), listing: files)
+        if !plan.absentFromManifest.isEmpty {
+            log.info("\(plan.absentFromManifest.count, privacy: .public) entrée(s) `delivered` absente(s) du manifeste courant — laissée(s) `delivered`, pas d'archivage à l'aveugle par index")
+            for entry in plan.absentFromManifest {
+                log.debug("  absente du manifeste : type=\(entry.id.fileType, privacy: .public) index=\(entry.id.index, privacy: .public)")
             }
-            archiveFileOnWatch(fileIndex: entry.id.index)
-            spoolStore.markArchived(entry.id)
         }
+        for (entry, recorded, listed) in plan.resizedSinceAcquisition {
+            log.info("Archivage différé (taille listée changée, relecture d'abord) : type=\(entry.id.fileType, privacy: .public) index=\(entry.id.index, privacy: .public) ancienne taille=\(recorded, privacy: .public) o, nouvelle taille=\(listed, privacy: .public) o")
+        }
+        if !plan.eligible.isEmpty {
+            log.info("\(plan.eligible.count, privacy: .public) archivage(s) à (re)tenter")
+        }
+        pumpArchiveQueue()
+    }
+
+    /// Émet, s'il n'y en a pas déjà une en vol, la prochaine demande d'archivage
+    /// éligible, et arme le minuteur d'absence de réponse.
+    private func pumpArchiveQueue() {
+        guard let spoolStore else { return }
+        let plan = ArchivePlanner.plan(delivered: spoolStore.pendingArchive(), listing: files)
+        guard let request = archiveTracker.next(from: plan.eligible) else { return }
+        archiveFileOnWatch(fileIndex: request.fileIndex)
+        let sequence = request.sequence
+        DispatchQueue.main.asyncAfter(deadline: .now() + archiveTimeout) { [weak self] in
+            guard let self, self.archiveTracker.inFlight?.sequence == sequence else { return }
+            self.expireInFlightArchive()
+        }
+    }
+
+    /// La montre n'a pas répondu à temps : l'entrée reste `delivered` (retentée à
+    /// la session suivante) et les archivages de ce lien s'arrêtent
+    /// (`ArchiveRequestTracker.timeOut`). Internal pour être piloté en test sans
+    /// attendre le minuteur.
+    func expireInFlightArchive() {
+        guard let request = archiveTracker.timeOut() else { return }
+        log.warning("SET_FILE_FLAG sans réponse (index=\(request.fileIndex, privacy: .public)) — entrée laissée `delivered`, archivages interrompus sur ce lien, retentés à la prochaine session")
     }
 
     // MARK: - Upload Pulse (après acquisition dans le Spool)
@@ -803,16 +883,24 @@ final class GarminSession: ObservableObject {
         let fileURL = spoolStore.fileURL(for: entry)
         let filename = entry.id.name
         outstandingUploads += 1
+        // Jeton d'acquisition capturé AVANT l'envoi : si le fichier est relu
+        // (taille listée changée) pendant que cet upload est en vol, son issue
+        // concerne l'ANCIEN contenu et ne doit pas faire avancer le nouveau.
+        let acquiredAt = entry.acquiredAt
         uploader.upload(fileURL: fileURL, watchFilename: filename) { [weak self] outcome in
-            DispatchQueue.main.async { self?.handleUploadOutcome(outcome, for: entry.id) }
+            DispatchQueue.main.async { self?.handleUploadOutcome(outcome, for: entry.id, acquiredAt: acquiredAt) }
         }
     }
 
-    private func handleUploadOutcome(_ outcome: PulseUploadOutcome, for id: WatchFileID) {
+    private func handleUploadOutcome(_ outcome: PulseUploadOutcome, for id: WatchFileID, acquiredAt: Date) {
         outstandingUploads = max(0, outstandingUploads - 1)
         switch outcome {
         case .delivered:
-            spoolStore?.markDelivered(id)
+            guard spoolStore?.entries[id]?.acquiredAt == acquiredAt else {
+                log.info("Upload Pulse 2xx pour un contenu depuis relu (index=\(id.index, privacy: .public)) — résultat périmé ignoré, le nouveau contenu sera envoyé")
+                break
+            }
+            spoolStore?.markDelivered(id, expectedAcquiredAt: acquiredAt)
             deliveredFileIndexes.insert(id.index)
             archivePendingDeliveries()
             deliveredSinceLastRefresh = true
@@ -1011,6 +1099,11 @@ final class GarminSession: ObservableObject {
             // (guard `currentDownload == nil, downloadTarget == nil`), donc rien
             // à ajouter ici pour éviter un chevauchement avec un `downloadFile`
             // manuel ou une traversée déjà en cours.
+            //
+            // Manifeste reçu = début de session utile : retente d'abord les
+            // archivages restés `delivered` (commande perdue/refusée avant),
+            // limités aux entrées présentes dans CE manifeste.
+            retryPendingArchives()
             syncNewFiles()
 
         case .file(let entry):
@@ -1030,8 +1123,15 @@ final class GarminSession: ObservableObject {
                 return
             }
             let (id, relativePath) = SpoolStore.identity(for: entry)
+            if buffer.count != entry.sizeBytes {
+                // Le fichier a changé entre le manifeste et le téléchargement
+                // (ou la taille du manifeste n'est pas celle du contenu) : trace
+                // utile pour l'hypothèse « la montre écrit encore ». La taille
+                // ENREGISTRÉE reste celle du manifeste (cf. `SpoolEntry.listedSize`).
+                log.info("Taille reçue ≠ taille listée : type=\(entry.typeName, privacy: .public) index=\(entry.fileIndex, privacy: .public) listée=\(entry.sizeBytes, privacy: .public) o, reçue=\(buffer.count, privacy: .public) o")
+            }
             do {
-                let saved = try spoolStore.recordAcquired(id, relativePath: relativePath, data: buffer)
+                let saved = try spoolStore.recordAcquired(id, relativePath: relativePath, data: buffer, listedSize: entry.sizeBytes)
                 acquiredFileIndexes.insert(entry.fileIndex)
                 log.info("Fichier acquis dans le spool : \(relativePath, privacy: .public)")
                 uploadSpoolEntry(saved)

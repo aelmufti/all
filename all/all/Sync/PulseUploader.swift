@@ -37,8 +37,9 @@ import os
 enum PulseUploadOutcome: Equatable {
     /// 2xx — `imported` / `wellness` / `duplicate` / `skipped` valent TOUS
     /// accusé (contrat §4, « un fichier déjà connu vaut accusé ») : l'appelant
-    /// traduit en `SpoolStore.markDelivered`, puis
-    /// `GarminSession.archivePendingDeliveries()` à la prochaine fenêtre BLE.
+    /// traduit en `SpoolStore.markDelivered`, puis demande l'archivage
+    /// (`GarminSession.archivePendingDeliveries()`) — marqué `archived` seulement
+    /// quand la montre accuse la commande (appliquée).
     case delivered
     /// 401 — token absent/invalide. Garder en spool, NE PAS réessayer
     /// automatiquement : erreur de configuration à signaler (contrat §6).
@@ -234,8 +235,8 @@ final class PulseSpoolUploader: SpoolUploading {
 ///  - `phone` : aucune requête réseau. Le fichier est déclaré `.delivered`
 ///    tout de suite — même issue qu'un 2xx de Pulse, ce qui fait exactement ce
 ///    que `GarminSession.handleUploadOutcome` ferait après un accusé serveur :
-///    `SpoolStore.markDelivered` puis `archivePendingDeliveries()` (archivage
-///    montre). C'est la décision actée dans `docs/stockage-local.md` :
+///    `SpoolStore.markDelivered` puis `archivePendingDeliveries()` (demande
+///    d'archivage montre ; `archived` seulement sur accusé de la montre). C'est la décision actée dans `docs/stockage-local.md` :
 ///    « archivage montre en mode Téléphone : dès l'écriture locale ». Le
 ///    fichier lui-même **reste** dans le Spool (rien ne le purge à ce stade —
 ///    l'ingestion locale réelle, qui le lira, arrive à l'incrément L1) : seul
@@ -273,9 +274,13 @@ final class RoutingSpoolUploader: SpoolUploading {
             // reste de la pile (GarminSession), qui continue d'ignorer
             // totalement `pushedToPulse` (son rôle reste `markDelivered` +
             // l'archivage montre, inchangés).
+            // Jeton d'acquisition capturé AVANT l'envoi : un fichier relu (taille
+            // listée changée) pendant l'upload ne doit pas être déclaré poussé
+            // sur l'accusé de son ANCIEN contenu.
+            let token = spoolStore?.acquiredAt(forFileAt: fileURL)
             pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename) { [spoolStore] outcome in
                 if outcome == .delivered {
-                    spoolStore?.markPushedToPulse(forFileAt: fileURL)
+                    spoolStore?.markPushedToPulse(forFileAt: fileURL, expectedAcquiredAt: token)
                 }
                 // Le rafraîchissement des écrans après livraison Pulse n'est PAS
                 // posté ici (ce serait un refresh par fichier) : `GarminSession`

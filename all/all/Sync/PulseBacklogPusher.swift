@@ -12,11 +12,14 @@
 //
 //  Miroir structurel de `Local/LocalIngestor.swift` (`ingestIfNeeded`) : un
 //  `static func`, garde de mode, `Task.detached` qui ouvre sa PROPRE
-//  `SpoolStore` plutôt que de réutiliser celle, vivante, de `BLEManager`
-//  (même raison : `SpoolStore.entries` est un dictionnaire mutable lu/écrit
-//  ailleurs sur le main actor — une deuxième instance relit `journal.json`,
-//  petit fichier, coût négligeable, et élimine la course plutôt que de la
-//  gérer).
+//  `SpoolStore` plutôt que de recevoir celle de `BLEManager` (hors main actor,
+//  on ne veut pas dépendre d'une instance possédée ailleurs, ni la garder
+//  vivante). Ouvrir une deuxième instance est SÛR : le journal est relu et
+//  fusionné sur disque à chaque transition, sous un verrou commun à toutes les
+//  instances (cf. `Spool/SpoolStore.swift`) — `markPushedToPulse` ne peut donc
+//  ni écraser une entrée ou un état plus récent écrit par l'instance de
+//  `BLEManager`, ni être gênée par elle ; le cache `entries` est lu sous ce même
+//  verrou. L'instantané d'ouverture sert seulement à choisir QUOI pousser.
 //
 //  N'utilise PAS `RoutingSpoolUploader` : ce type est un pousseur DIRECT vers
 //  Pulse (`PulseSpoolUploader`), déclenché seulement après que son propre
@@ -108,7 +111,10 @@ enum PulseBacklogPusher {
             uploader.upload(fileURL: fileURL, watchFilename: entry.id.name) { outcome in
                 switch outcome {
                 case .delivered:
-                    spool.markPushedToPulse(entry.id)
+                    // Jeton de l'acquisition poussée : si le fichier a été relu
+                    // (taille changée) pendant l'envoi, le nouveau contenu n'a
+                    // PAS été poussé et ne doit pas être marqué.
+                    spool.markPushedToPulse(entry.id, expectedAcquiredAt: entry.acquiredAt)
                     log.info("Rattrapage Pulse : fichier poussé (\(entry.relativePath, privacy: .public))")
                 case .keepConfigError, .keepRetryLater, .keepRetry, .quarantine:
                     // Laisse `pushedToPulse=false` : retenté au prochain

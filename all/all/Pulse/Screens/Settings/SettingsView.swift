@@ -656,7 +656,7 @@ private struct SettingsSyncSourceSection: View {
     var body: some View {
         Section {
             Picker("Source", selection: sourceBinding) {
-                ForEach(SettingsSyncSourceKind.allCases) { kind in
+                ForEach(SettingsSyncSourceKind.selectable) { kind in
                     Text(kind.label).tag(kind.rawValue)
                 }
             }
@@ -709,6 +709,15 @@ private struct SettingsSyncSourceSection: View {
                 }
             }
 
+            // Source serveur sur la chaîne historique (masquée du sélecteur) :
+            // Pulse refuse alors les envois de l'app — on le dit, sinon rien
+            // n'indique pourquoi les données n'arrivent plus.
+            if viewModel.source?.source == SettingsSyncSourceKind.legacy.rawValue {
+                Text("Pulse est réglé sur l'ancienne chaîne par câble : il refuse les envois de cette app. Choisis « iPhone (BLE) » pour reprendre.")
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseDanger)
+            }
+
             if let sourceError = viewModel.sourceError {
                 Text(sourceError)
                     .font(.footnote)
@@ -717,7 +726,7 @@ private struct SettingsSyncSourceSection: View {
         } header: {
             Text("Mode de connectivité")
         } footer: {
-            Text("« Téléphone » est la chaîne historique (adb depuis l'hôte). « garmin-bridge » parle en Bluetooth depuis le serveur. « iPhone (BLE) » : cette app pousse les .fit en HTTP. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons.")
+            Text("« garmin-bridge » parle en Bluetooth depuis le serveur. « iPhone (BLE) » : cette app pousse les .fit en HTTP. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons.")
         }
     }
 

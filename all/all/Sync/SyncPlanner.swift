@@ -3,7 +3,8 @@
 //  all (bridge-connect)
 //
 //  Traversée/diff PURS du manifeste directory : quels fichiers de contenu
-//  restent dus, dans quel ordre. Extrait de `GarminSession` en un type sans
+//  restent dus (jamais acquis, OU dont la taille listée a changé depuis
+//  l'acquisition), dans quel ordre. Extrait de `GarminSession` en un type sans
 //  dépendance à CoreBluetooth (même schéma que `GFDI/FileTransferReassembler.swift`
 //  pour la reprise de fragment) afin de rester testable sans `CBPeripheral`/
 //  `CommunicatorV2` — cf. `GarminSession.syncNewFiles()`, seul appelant.
@@ -22,25 +23,80 @@
 import Foundation
 
 enum SyncPlanner {
-    /// Fichiers dus, triés récent→ancien (`NEWEST_FIRST`) :
+    /// Statut d'une entrée listée vis-à-vis du journal du Spool.
+    enum Retention: Equatable {
+        /// Identité (type + index + nom) absente du journal : jamais acquise.
+        case new
+        /// Journalisée, et rien n'indique que la montre ait écrit depuis
+        /// (taille listée identique, ou aucune taille enregistrée — entrée
+        /// antérieure à `SpoolEntry.listedSize`, tenue par défaut : pas de
+        /// re-téléchargement massif à la mise à jour de l'app).
+        case held
+        /// Journalisée avec une taille enregistrée DIFFÉRENTE de la taille
+        /// actuellement listée : la montre a continué d'écrire dans ce fichier
+        /// (HYPOTHÈSE, preuve = le journal `info` de `GarminSession.syncNewFiles`).
+        /// Porte l'ancienne taille.
+        case resized(recordedSize: Int)
+    }
+
+    /// Décision PURE pour une entrée du listing — l'identité reste
+    /// `SpoolStore.identity(for:)` (type + index + nom, SANS la taille : la
+    /// taille n'est pas dans l'identité, sinon un fichier qui grossit serait
+    /// pris pour un nouveau fichier et le journal garderait deux entrées pour
+    /// le même fichier montre). Toute progression d'état (`acquired`/
+    /// `delivered`/`archived`) vaut « tenu » tant que la taille ne bouge pas.
+    static func retention(of entry: GarminDirectoryEntry, journal: [WatchFileID: SpoolEntry]) -> Retention {
+        guard let held = journal[SpoolStore.identity(for: entry).id] else { return .new }
+        guard let recorded = held.listedSize, recorded != entry.sizeBytes else { return .held }
+        return .resized(recordedSize: recorded)
+    }
+
+    /// Entrées de contenu candidates, avant tout filtre « déjà tenu » :
     /// - filtre les entrées DIRECTORY (jamais une cible de téléchargement de
     ///   contenu, cf. `GarminDirectoryEntry.isDirectory` — c'est le manifeste
     ///   lui-même, pas un fichier) ;
-    /// - filtre celles déjà journalisées dans le Spool, quel que soit leur état
-    ///   (`acquired`/`delivered`/`archived` valent tous « déjà tenu », comme
-    ///   `AcquiredFiles.holds` côté pont, qui ne distingue pas non plus) —
-    ///   équivalent pur de `SpoolStore.pendingAcquisition(from:)`, mais opérant
-    ///   sur les entrées complètes plutôt que sur leurs seules identités, pour
-    ///   pouvoir ensuite trier par date/index.
+    /// - ne garde QUE les types que la montre sert sur DOWNLOAD_REQUEST (flag
+    ///   `pull` du pont). Sans ça, on demandait aussi les types non-`pull`
+    ///   (SETTINGS, SPORTS, DEVICE, GOALS…) que la Venu 2 refuse
+    ///   (`downloadStatus=3`), d'où une traversée qui échouait fichier après
+    ///   fichier sans rien acquérir. Cf. `GarminDirectoryEntry.isPullable`.
+    private static func candidates(from listing: [GarminDirectoryEntry]) -> [GarminDirectoryEntry] {
+        listing.filter { !$0.isDirectory && $0.isPullable }
+    }
+
+    /// Fichiers dus, triés récent→ancien (`NEWEST_FIRST`) : une entrée listée
+    /// est due si elle est absente du journal (`.new`) OU si elle y figure avec
+    /// une taille enregistrée différente de la taille listée (`.resized`) — la
+    /// montre a écrit depuis, le contenu du spool est périmé. Une entrée sans
+    /// taille enregistrée est tenue. Pur : la file est figée par appel, donc un
+    /// fichier dont la taille ne se stabilise jamais est relu AU PLUS UNE FOIS
+    /// par manifeste reçu (la taille enregistrée à l'acquisition est celle du
+    /// manifeste, pas celle du fichier reçu).
+    static func filesDue(from listing: [GarminDirectoryEntry], journal: [WatchFileID: SpoolEntry]) -> [GarminDirectoryEntry] {
+        candidates(from: listing)
+            .filter { retention(of: $0, journal: journal) != .held }
+            .sorted(by: isNewerFirst)
+    }
+
+    /// Sous-ensemble de `filesDue(from:journal:)` dû à un CHANGEMENT DE TAILLE
+    /// (et non à une première acquisition), avec l'ancienne taille — pour que
+    /// l'appelant journalise chaque re-téléchargement de ce type (la preuve de
+    /// l'hypothèse « la montre continue d'écrire dans un fichier déjà lu »).
+    static func resizedSinceAcquisition(from listing: [GarminDirectoryEntry], journal: [WatchFileID: SpoolEntry]) -> [(entry: GarminDirectoryEntry, recordedSize: Int)] {
+        candidates(from: listing).sorted(by: isNewerFirst).compactMap { entry in
+            if case .resized(let recorded) = retention(of: entry, journal: journal) { return (entry, recorded) }
+            return nil
+        }
+    }
+
+    /// Variante historique, sans tailles : « déjà tenu » = identité présente
+    /// dans `alreadyAcquired`, quel que soit son état (`acquired`/`delivered`/
+    /// `archived`, comme `AcquiredFiles.holds` côté pont, qui ne distingue pas
+    /// non plus) — équivalent pur de `SpoolStore.pendingAcquisition(from:)`.
+    /// Ne détecte PAS un fichier qui a grossi ; `GarminSession` utilise
+    /// `filesDue(from:journal:)`.
     static func filesDue(from listing: [GarminDirectoryEntry], alreadyAcquired: Set<WatchFileID>) -> [GarminDirectoryEntry] {
-        listing
-            .filter { !$0.isDirectory }
-            // Ne mettre en file QUE les types que la montre sert sur DOWNLOAD_REQUEST
-            // (flag `pull` du pont). Sans ça, on demandait aussi les types non-`pull`
-            // (SETTINGS, SPORTS, DEVICE, GOALS…) que la Venu 2 refuse
-            // (`downloadStatus=3`), d'où une traversée qui échouait fichier après
-            // fichier sans rien acquérir. Cf. `GarminDirectoryEntry.isPullable`.
-            .filter { $0.isPullable }
+        candidates(from: listing)
             .filter { !alreadyAcquired.contains(SpoolStore.identity(for: $0).id) }
             .sorted(by: isNewerFirst)
     }

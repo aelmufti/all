@@ -54,6 +54,13 @@ enum SettingsSyncSourceKind: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Sources proposées par le sélecteur de l'app. `legacy` (chaîne historique
+    /// par câble depuis le serveur) est masquée : son libellé « Téléphone »
+    /// laissait croire qu'il s'agissait de l'iPhone, et la choisir par erreur
+    /// fait refuser par Pulse (403) tous les envois de l'app. Elle reste
+    /// décodée et libellée (le serveur peut encore être réglé dessus).
+    static let selectable: [SettingsSyncSourceKind] = [.bridge, .phone]
+
     var label: String {
         switch self {
         case .legacy: return "Téléphone"

@@ -586,24 +586,38 @@ struct SommeilDatePickingTests {
     }
 
     @MainActor
-    @Test func maxReachableDateIsTomorrow() {
-        #expect(SommeilViewModel.maxReachableDate(today: "2026-10-05") == "2026-10-06")
-        #expect(SommeilViewModel.maxReachableDate(today: "2026-10-31") == "2026-11-01")
-        #expect(SommeilViewModel.maxReachableDate(today: "2026-12-31") == "2027-01-01")
-        #expect(SommeilViewModel.maxReachableDate(today: "2028-02-28") == "2028-02-29")
-        #expect(SommeilViewModel.maxReachableDate(today: "n'importe quoi") == "n'importe quoi")
+    @Test func maxReachableDateIsToday() {
+        // Horloge injectée : lundi 2026-10-05, 12 h locale.
+        let vm = SommeilViewModel(now: { fixedNow }, calendar: { utcCal }, alarms: { [:] })
+        #expect(vm.date == "2026-10-05")
+        #expect(vm.maxReachableDate == "2026-10-05")
+        #expect(vm.isLastDay == true)
+        #expect(vm.selectableRange.upperBound == "2026-10-05")
+        #expect(vm.selectableRange.lowerBound <= vm.selectableRange.upperBound)
     }
 
     @MainActor
-    @Test func viewModelRangeAndLastDayFollowMaxReachableDate() {
-        let vm = SommeilViewModel()
-        // Avant tout chargement : date = aujourd'hui, borne haute = demain.
-        #expect(vm.date == HealthViewModel.todayKey())
-        #expect(vm.maxReachableDate == SommeilViewModel.maxReachableDate(today: HealthViewModel.todayKey()))
-        #expect(vm.isLastDay == false)
-        #expect(vm.selectableRange.upperBound == vm.maxReachableDate)
-        #expect(vm.selectableRange.lowerBound <= vm.selectableRange.upperBound)
+    @Test func shiftingForwardFromTodayIsRefused() async {
+        let vm = SommeilViewModel(client: noNetworkClient(), now: { fixedNow }, calendar: { utcCal }, alarms: { [:] })
+        await vm.shiftDay(by: 1)
+        #expect(vm.date == "2026-10-05")
+        await vm.selectDate("2026-10-06")
+        #expect(vm.date == "2026-10-05")
     }
+}
+
+private let utcCal: Calendar = {
+    var c = Calendar(identifier: .gregorian)
+    c.timeZone = TimeZone(identifier: "UTC")!
+    return c
+}()
+
+/// Lundi 2026-10-05, 12:00 UTC.
+private let fixedNow = Date(timeIntervalSince1970: DashboardStatsTime.dayStartUnixUTC("2026-10-05") + 12 * 3600)
+
+/// Client dont aucune route ne répond (backend local qui jette) — aucun réseau.
+private func noNetworkClient() -> PulseAPIClient {
+    PulseAPIClient(baseURLProvider: { nil }, localBackend: StubLocalPulseBackend(), modeProvider: { .phone })
 }
 
 // MARK: - Endpoint local : `date`, champs optionnels, cache

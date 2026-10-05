@@ -17,7 +17,11 @@
 //    3. interleaving de `SET_FILE_FLAG(ARCHIVE)` (5008) pendant que le
 //       téléchargement suivant occupe déjà le slot unique, et re-list de
 //       manifeste différée (`pendingDirectoryRelisting`) rejouée seulement une
-//       fois le slot libéré.
+//       fois le slot libéré ;
+//    4. archivage confirmé par la montre (`archived` seulement sur accusé
+//       appliqué, une demande à la fois, retenté en début de session) et
+//       re-téléchargement d'un fichier dont la taille listée a changé
+//       (`GarminSessionArchiveAckTests`).
 //
 //  Pilote `GarminSession` avec un communicator FACTICE (`FakeGfdiCommunicator`,
 //  ci-dessous) — jamais de vrai CoreBluetooth/BLE, jamais de vraie donnée de
@@ -81,6 +85,18 @@ private func directoryEntryBytes(fileIndex: UInt16, dataType: UInt8, subType: UI
     writer.writeUInt8(0) // fileFlags
     writer.writeUInt32LE(fileSize)
     writer.writeUInt32LE(timestamp)
+    return writer.data
+}
+
+/// Payload de la trame RESPONSE(5000) « SET_FILE_FLAG_STATUS » renvoyée par la
+/// montre — miroir de `SetFileFlagStatus.parse` (`handleSetFileFlagStatus`).
+private func setFileFlagStatusPayload(status: UInt8 = 0, flagsStatus: UInt8 = 0, identifier: UInt16 = 0, flags: UInt8 = 0x10) -> Data {
+    var writer = GarminByteWriter()
+    writer.writeUInt16LE(Wire.setFileFlag)
+    writer.writeUInt8(status)
+    writer.writeUInt8(flagsStatus)
+    writer.writeUInt16LE(identifier)
+    writer.writeUInt8(flags)
     return writer.data
 }
 
@@ -165,6 +181,31 @@ private func makeSession() throws -> (session: GarminSession, fake: FakeGfdiComm
     let fake = FakeGfdiCommunicator()
     let session = GarminSession(communicator: fake, spoolStore: store, uploader: nil)
     return (session, fake, store, root)
+}
+
+/// Fait recevoir à la session un manifeste directory listant `entries` (chemin
+/// réel : DOWNLOAD_REQUEST index 0 → statut → fragment complet → `finishDownload`
+/// → archivages de début de session + `syncNewFiles`). Le slot doit être libre.
+private func deliverManifest(_ session: GarminSession, _ fake: FakeGfdiCommunicator, _ entries: [GarminDirectoryEntry]) {
+    session.requestDirectoryListing()
+    var bytes = Data()
+    for entry in entries {
+        bytes.append(directoryEntryBytes(
+            fileIndex: UInt16(entry.fileIndex), dataType: entry.dataType, subType: entry.subType,
+            fileNumber: UInt16(entry.fileNumber), fileSize: UInt32(entry.sizeBytes), timestamp: 0))
+    }
+    fake.deliver(messageType: Wire.response, payload: downloadRequestStatusPayload(maxFileSize: UInt32(bytes.count)))
+    fake.deliver(messageType: Wire.fileTransferData, payload: fileTransferDataPayload(dataOffset: 0, crc: Crc16.compute(bytes), chunk: bytes))
+}
+
+/// Index des SET_FILE_FLAG(ARCHIVE) émis jusque-là, dans l'ordre.
+private func archivedIndexes(_ fake: FakeGfdiCommunicator) -> [UInt16] {
+    fake.sentFrames.compactMap(parseSetFileFlag).map(\.fileIndex)
+}
+
+/// Index des DOWNLOAD_REQUEST émis jusque-là, dans l'ordre (0 = manifeste).
+private func requestedIndexes(_ fake: FakeGfdiCommunicator) -> [UInt16] {
+    fake.sentFrames.compactMap(parseDownloadRequestFileIndex)
 }
 
 // MARK: - 1) Reprise de fragment + 2) CRC invalide, au niveau GarminSession complet
@@ -358,41 +399,41 @@ struct GarminSessionSlotInterleavingTests {
     /// cours — `archiveFileOnWatch` envoie une trame directe (5008) qui ne
     /// touche jamais `downloadTarget`/`currentDownload`, tout comme
     /// `archiveOnWatch` côté pont (session/GarminSession.java) ne passe jamais
-    /// par le slot de transfert non plus.
+    /// par le slot de transfert non plus. L'accusé de la montre, lui, arrive
+    /// EN PLEIN téléchargement de B : c'est lui (et pas l'émission) qui marque A
+    /// `archived`.
     @Test func archivingAPriorFileDoesNotDisturbAFileCurrentlyDownloading() throws {
         let (session, fake, store, root) = try makeSession()
         defer { try? FileManager.default.removeItem(at: root) }
 
         // Fichier A : acquis et livré (Pulse a déjà 2xx'é, lien ou appel
         // précédent) mais pas encore archivé sur la montre — exactement le
-        // retard que `archivePendingDeliveries` rattrape.
+        // retard que l'archivage de début de session rattrape.
         let fileA = fileEntry(fileIndex: 5)
         let (idA, pathA) = SpoolStore.identity(for: fileA)
-        try store.recordAcquired(idA, relativePath: pathA, data: Data("déjà livré".utf8))
+        try store.recordAcquired(idA, relativePath: pathA, data: Data("déjà livré".utf8), listedSize: fileA.sizeBytes)
         store.markDelivered(idA)
 
-        // Fichier B : téléchargement en vol au moment où l'archive de A part.
+        // Manifeste = A (déjà tenu) + B (dû) : l'archive de A part, puis le
+        // téléchargement de B occupe le slot.
         let fileB = fileEntry(fileIndex: 6, sizeBytes: 16)
-        session.downloadFile(fileB)
-        fake.deliver(messageType: Wire.response, payload: downloadRequestStatusPayload(maxFileSize: 16))
+        deliverManifest(session, fake, [fileA, fileB])
+        #expect(session.downloadingFileIndex == 6, "B en vol")
+        let archiveFrame = try #require(fake.sentFrames.compactMap(parseSetFileFlag).first)
+        #expect(archiveFrame.fileIndex == 5)
+        #expect(archiveFrame.bitmask == 0x10, "bit ARCHIVE")
+        #expect(store.entries[idA]?.state == .delivered, "pas archivé à la seule émission")
 
+        fake.deliver(messageType: Wire.response, payload: downloadRequestStatusPayload(maxFileSize: 16))
         let content = syntheticContent(16, seed: 0x42)
         let firstHalf = content.prefix(8)
         let secondHalf = content.suffix(8)
         let crc1 = Crc16.compute(firstHalf)
         fake.deliver(messageType: Wire.fileTransferData, payload: fileTransferDataPayload(dataOffset: 0, crc: crc1, chunk: firstHalf))
-        #expect(session.downloadingFileIndex == 6, "B toujours en vol au moment de l'archive")
+        #expect(session.downloadingFileIndex == 6, "B toujours en vol")
 
-        let framesBeforeArchive = fake.sentFrames.count
-        session.archivePendingDeliveries()
-
-        // L'archive de A est bien partie — une seule trame, directe (5008),
-        // jamais un DOWNLOAD_REQUEST concurrent.
-        #expect(fake.sentFrames.count == framesBeforeArchive + 1)
-        let archiveFrame = try #require(fake.sentFrames.last)
-        let archived = try #require(parseSetFileFlag(archiveFrame))
-        #expect(archived.fileIndex == 5)
-        #expect(archived.bitmask == 0x10, "bit ARCHIVE")
+        // L'accusé de la montre pour A arrive pendant le transfert de B.
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
         #expect(store.entries[idA]?.state == .archived)
 
         // Le slot de B n'a pas bougé : la suite de SON transfert continue
@@ -452,5 +493,164 @@ struct GarminSessionSlotInterleavingTests {
 
         let (id55, _) = SpoolStore.identity(for: fileEntry(fileIndex: 55))
         #expect(store.entries[id55]?.state == .acquired, "le fichier 55 reste acquis normalement malgré la re-list interleaved")
+    }
+}
+
+// MARK: - 4) Archivage confirmé par la montre + re-téléchargement d'un fichier qui a grossi
+
+struct GarminSessionArchiveAckTests {
+    /// Entrée `delivered` dont la taille listée (8 par défaut de `fileEntry`) est
+    /// celle enregistrée à l'acquisition.
+    @discardableResult
+    private func holdDelivered(_ entry: GarminDirectoryEntry, in store: SpoolStore, content: String = "livré") throws -> WatchFileID {
+        let (id, path) = SpoolStore.identity(for: entry)
+        try store.recordAcquired(id, relativePath: path, data: Data(content.utf8), listedSize: entry.sizeBytes)
+        store.markDelivered(id)
+        return id
+    }
+
+    @Test func archivedIsMarkedOnlyOnceTheWatchAcknowledgesAnAppliedFlag() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(file, in: store)
+
+        deliverManifest(session, fake, [file])
+
+        #expect(archivedIndexes(fake) == [21], "demande émise au manifeste")
+        #expect(store.entries[id]?.state == .delivered, "pas archivé à l'émission")
+
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[id]?.state == .archived)
+    }
+
+    @Test func aRefusalLeavesTheEntryDeliveredAndANewSessionRetriesIt() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(file, in: store)
+
+        deliverManifest(session, fake, [file])
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload(flagsStatus: 1))
+
+        #expect(store.entries[id]?.state == .delivered)
+        #expect(archivedIndexes(fake) == [21], "pas de renvoi en boucle sur le même lien")
+
+        // Statut non-ACK : même issue.
+        let second = GarminSession(communicator: fake, spoolStore: store, uploader: nil)
+        deliverManifest(second, fake, [file])
+        #expect(archivedIndexes(fake) == [21, 21], "retenté au début de la session suivante")
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload(status: 1))
+        #expect(store.entries[id]?.state == .delivered)
+    }
+
+    @Test func noResponseLeavesTheEntryDeliveredStopsTheLinkAndALateAckIsIgnored() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = fileEntry(fileIndex: 21), b = fileEntry(fileIndex: 22)
+        let idA = try holdDelivered(a, in: store)
+        let idB = try holdDelivered(b, in: store)
+
+        deliverManifest(session, fake, [a, b])
+        #expect(archivedIndexes(fake).count == 1, "une seule demande en vol")
+
+        session.expireInFlightArchive() // pas de réponse à temps
+        #expect(archivedIndexes(fake).count == 1, "plus aucune demande sur ce lien après une absence de réponse")
+
+        // Réponse tardive de la montre : rien en vol, jamais attribuée à une entrée.
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[idA]?.state == .delivered)
+        #expect(store.entries[idB]?.state == .delivered)
+
+        // Session suivante : retenté.
+        let next = GarminSession(communicator: fake, spoolStore: store, uploader: nil)
+        let before = archivedIndexes(fake).count
+        deliverManifest(next, fake, [a, b])
+        #expect(archivedIndexes(fake).count == before + 1)
+    }
+
+    @Test func requestsGoOneAtATimeAndEachAckAdvancesTheNext() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let a = fileEntry(fileIndex: 21), b = fileEntry(fileIndex: 22)
+        let idA = try holdDelivered(a, in: store)
+        let idB = try holdDelivered(b, in: store)
+
+        deliverManifest(session, fake, [a, b])
+        #expect(archivedIndexes(fake).count == 1)
+        let first = try #require(archivedIndexes(fake).first)
+
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(archivedIndexes(fake).count == 2, "l'accusé libère la demande suivante")
+        #expect(Set(archivedIndexes(fake)) == [21, 22])
+        #expect(store.entries[first == 21 ? idA : idB]?.state == .archived)
+        #expect(store.entries[first == 21 ? idB : idA]?.state == .delivered, "la seconde n'est pas encore accusée")
+
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[idA]?.state == .archived)
+        #expect(store.entries[idB]?.state == .archived)
+    }
+
+    @Test func aDeliveredEntryAbsentFromTheManifestIsNeitherArchivedNorLost() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let absent = fileEntry(fileIndex: 21)
+        let id = try holdDelivered(absent, in: store)
+
+        deliverManifest(session, fake, [fileEntry(fileIndex: 99)]) // l'index 21 n'y est pas
+
+        #expect(archivedIndexes(fake).isEmpty, "jamais d'archivage à l'aveugle par index")
+        #expect(store.entries[id]?.state == .delivered)
+    }
+
+    @Test func aFileWhoseListedSizeChangedIsReDownloadedAndNotArchivedFirst() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = fileEntry(fileIndex: 21, sizeBytes: 8)
+        let id = try holdDelivered(original, in: store, content: "ancien")
+        store.markPushedToPulse(id)
+        let before = try #require(store.entries[id])
+
+        // La montre liste maintenant le MÊME fichier (même identité) avec 16 octets.
+        let grown = fileEntry(fileIndex: 21, sizeBytes: 16)
+        deliverManifest(session, fake, [grown])
+
+        #expect(archivedIndexes(fake).isEmpty, "jamais archivé avant d'avoir été relu")
+        #expect(requestedIndexes(fake) == [0, 21], "re-téléchargement demandé")
+        #expect(session.downloadingFileIndex == 21)
+
+        fake.deliver(messageType: Wire.response, payload: downloadRequestStatusPayload(maxFileSize: 16))
+        let content = syntheticContent(16, seed: 0x55)
+        fake.deliver(messageType: Wire.fileTransferData, payload: fileTransferDataPayload(dataOffset: 0, crc: Crc16.compute(content), chunk: content))
+
+        let after = try #require(store.entries[id])
+        #expect(after.state == .acquired, "repasse à acquired : nouvel envoi à Pulse puis nouvel archivage")
+        #expect(after.listedSize == 16)
+        #expect(after.pushedToPulse == false)
+        #expect(after.deliveredAt == nil)
+        #expect(after.acquiredAt > before.acquiredAt)
+        #expect(try Data(contentsOf: store.fileURL(for: after)) == content)
+
+        // Même manifeste revu : taille enregistrée = taille listée → pas de boucle,
+        // et l'entrée `acquired` n'est pas archivable.
+        let requestsBefore = requestedIndexes(fake).count
+        deliverManifest(session, fake, [grown])
+        #expect(requestedIndexes(fake).count == requestsBefore + 1, "seulement la demande de manifeste (index 0), aucun re-téléchargement")
+        #expect(archivedIndexes(fake).isEmpty)
+    }
+
+    /// Entrée antérieure à `listedSize` : jamais relue, archivable.
+    @Test func anOldEntryWithoutRecordedSizeIsNotReDownloaded() throws {
+        let (session, fake, store, root) = try makeSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21, sizeBytes: 8)
+        let (id, path) = SpoolStore.identity(for: file)
+        try store.recordAcquired(id, relativePath: path, data: Data("ancien".utf8)) // pas de listedSize
+        store.markDelivered(id)
+
+        deliverManifest(session, fake, [fileEntry(fileIndex: 21, sizeBytes: 500)])
+
+        #expect(requestedIndexes(fake) == [0], "pas de re-téléchargement massif à la mise à jour")
+        #expect(archivedIndexes(fake) == [21])
     }
 }

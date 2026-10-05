@@ -6,7 +6,8 @@
 //  Pensé « une nuit à la fois » comme l'écran Santé : navigation par nuit +
 //  analyse poussée de la nuit sélectionnée (hypnogramme, phases, efficacité,
 //  fragmentation, stress nocturne, composition vs référence, écart à la
-//  moyenne) + carte « Heure de coucher conseillée » (`sleep-recommendation`).
+//  moyenne) + heure de coucher conseillée (`sleep-recommendation`) : carte fixe
+//  « Ce soir » (nuit à venir, indépendante de la date) et carte par nuit.
 //
 
 import SwiftUI
@@ -35,6 +36,21 @@ struct SommeilView: View {
         // ci-dessus (ne recharge que si l'utilisateur est sur aujourd'hui).
         .reloadsOnLocalDataChange { await viewModel.reloadForNewDay() }
         .reloadsOnStorageModeChange { await viewModel.load() }
+        // La nuit à venir change au passage de l'heure de réveil prévu (pas
+        // seulement à minuit) : réévaluation à la minute, sans requête tant que
+        // la nuit visée est la même.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                if Task.isCancelled { break }
+                await viewModel.refreshTonight(force: false)
+            }
+        }
+        // Alarme modifiée : la nuit visée peut changer (l'heure, elle, se
+        // recalcule seule à l'affichage).
+        .onChange(of: WakeScheduleStore.shared.minutesByWeekday) {
+            Task { await viewModel.refreshTonight(force: false) }
+        }
     }
 
     private var content: some View {
@@ -42,13 +58,13 @@ struct SommeilView: View {
             VStack(spacing: PulseSpacing.lg) {
                 SommeilDayNavigator(viewModel: viewModel)
 
+                SommeilTonightCard(card: viewModel.tonightCard)
+
                 if let message = viewModel.errorMessage {
                     DashboardInlineError(message: message) { Task { await viewModel.retry() } }
                 }
 
-                if let reco = viewModel.recommendation, reco.isActionable {
-                    DashboardSleepRecommendationCard(reco: reco, nightDate: viewModel.date)
-                }
+                SommeilNightBedtimeCard(card: viewModel.nightCard)
 
                 if let main = viewModel.day?.sleep.main {
                     SommeilNightCard(viewModel: viewModel, main: main)

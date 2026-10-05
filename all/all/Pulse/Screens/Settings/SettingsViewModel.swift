@@ -139,6 +139,13 @@ final class SettingsViewModel {
                 "api/sync/source",
                 body: SettingsSyncSourceUpdateRequest(source: next)
             )
+            // Pulse accepte de nouveau les envois de l'app : on repousse tout de
+            // suite les fichiers restés dans le Spool pendant que la source
+            // était ailleurs (403), sans attendre le prochain lancement ni la
+            // prochaine synchro montre. Sans effet s'il n'y a rien en attente.
+            if source?.source == SettingsSyncSourceKind.phone.rawValue {
+                PulseBacklogPusher.pushIfNeeded()
+            }
         } catch {
             sourceError = (error as? PulseAPIError)?.errorDescription ?? "Changement de source refusé par le serveur."
         }

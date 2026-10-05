@@ -19,13 +19,19 @@ struct WatchFileID: Hashable, Codable {
 }
 
 /// État d'un fichier dans le spool. Progression **stricte** :
-/// `acquired` → `delivered` → `archived` (CADRAGE §5.2).
+/// `acquired` → `delivered` → `archived` (CADRAGE §5.2). Seule exception : un
+/// fichier relu parce que sa taille listée a changé (`SpoolStore.recordAcquired`
+/// sur une identité déjà journalisée) REPART à `acquired`, quel que soit son
+/// état précédent — son contenu est nouveau, il doit être renvoyé à Pulse puis
+/// archivé de nouveau.
 enum SpoolState: String, Codable {
     /// Octets sur le disque du téléphone (après download BLE réussi).
     case acquired
     /// 2xx reçu de Pulse (après upload background).
     case delivered
-    /// Flag ARCHIVE posé sur la montre (à la prochaine fenêtre BLE, après l'ack Pulse).
+    /// Flag ARCHIVE posé sur la montre ET **accusé par elle** (SET_FILE_FLAG
+    /// avec statut appliqué, cf. `GarminSession.handleSetFileFlagStatus`) —
+    /// jamais marqué à la simple émission de la commande.
     case archived
 }
 
@@ -47,11 +53,22 @@ struct SpoolEntry: Codable {
     /// retrouver, au basculement `phone` → `pulse`/`both`, les fichiers
     /// collectés localement qui n'ont jamais atteint Pulse.
     var pushedToPulse: Bool
+    /// Taille (octets) que le MANIFESTE directory annonçait pour ce fichier au
+    /// moment de son acquisition (`GarminDirectoryEntry.sizeBytes`) — pas
+    /// forcément la taille réellement reçue. `SyncPlanner` la compare à la
+    /// taille listée au manifeste suivant : une taille différente signifie que
+    /// la montre a continué d'écrire dans ce fichier (même identité type +
+    /// index + nom) et qu'il faut le relire ; `ArchivePlanner` ne demande
+    /// jamais l'archivage d'un fichier dont la taille listée a changé depuis.
+    /// `nil` = entrée écrite avant ce champ : traitée comme « tenue, taille
+    /// inconnue » (jamais de re-téléchargement massif à la mise à jour).
+    var listedSize: Int?
 
     init(
         id: WatchFileID, state: SpoolState, acquiredAt: Date,
         deliveredAt: Date? = nil, archivedAt: Date? = nil,
-        relativePath: String, pushedToPulse: Bool = false
+        relativePath: String, pushedToPulse: Bool = false,
+        listedSize: Int? = nil
     ) {
         self.id = id
         self.state = state
@@ -60,12 +77,13 @@ struct SpoolEntry: Codable {
         self.archivedAt = archivedAt
         self.relativePath = relativePath
         self.pushedToPulse = pushedToPulse
+        self.listedSize = listedSize
     }
 
-    /// Décodage manuel pour la seule rétrocompatibilité de `pushedToPulse` :
-    /// un journal écrit avant ce champ (tout journal mode Téléphone antérieur
-    /// à cet incrément) n'a pas la clé `pushedToPulse` — `decodeIfPresent` la
-    /// défaute à `false` plutôt que de faire échouer tout le décodage du
+    /// Décodage manuel pour la seule rétrocompatibilité de `pushedToPulse` et
+    /// `listedSize` : un journal écrit avant ces champs (tout journal mode
+    /// Téléphone antérieur à cet incrément, ou antérieur à `listedSize`) n'a
+    /// pas ces clés — `decodeIfPresent` les défaute à `false`/`nil` plutôt que de faire échouer tout le décodage du
     /// journal (`JSONDecoder().decode([SpoolEntry].self, ...)` dans
     /// `SpoolStore.loadJournal`, qui perdrait alors le journal ENTIER, pas
     /// seulement ce champ). `encode(to:)` reste synthétisé par le compilateur
@@ -79,5 +97,6 @@ struct SpoolEntry: Codable {
         archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
         relativePath = try container.decode(String.self, forKey: .relativePath)
         pushedToPulse = try container.decodeIfPresent(Bool.self, forKey: .pushedToPulse) ?? false
+        listedSize = try container.decodeIfPresent(Int.self, forKey: .listedSize)
     }
 }

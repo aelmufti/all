@@ -142,14 +142,15 @@ enum LocalIngestor {
     // (`GarminSession.advanceDownloadQueue`, transition vers `.done`).
     //
     // Ouvre sa PROPRE `SpoolStore`/`LocalDb` à chaque appel plutôt que de
-    // réutiliser une instance vivante passée par l'appelant : `SpoolStore.entries`
-    // est un dictionnaire **mutable**, lu/écrit sur le main actor ailleurs
-    // dans l'app (`GarminSession`) — le lire depuis une tâche détachée en
-    // même temps qu'une mutation main-actor serait une course. Une deuxième
-    // instance indépendante relit `journal.json` (petit fichier, coût
-    // négligeable) et élimine le problème plutôt que de le gérer. Ouvrir une
-    // deuxième connexion SQLite vers le même fichier `LocalDb` est sûr
-    // (`PRAGMA journal_mode = WAL`, cf. `SQLiteDatabase.init`).
+    // recevoir celles de l'appelant : on travaille hors main actor et on ne
+    // veut pas posséder/garder vivante une instance partagée. C'est sûr : le
+    // cache `SpoolStore.entries` est lu sous le verrou commun à toutes les
+    // instances, et le journal est relu/fusionné sur disque à chaque
+    // transition (cf. `Spool/SpoolStore.swift`) — cette tâche ne le modifie de
+    // toute façon qu'au plus par le rétro-remplissage de `listedSize` à
+    // l'ouverture, lui aussi fusionné (jamais d'écrasement d'un état plus
+    // récent). Ouvrir une deuxième connexion SQLite vers le même fichier
+    // `LocalDb` est sûr (`PRAGMA journal_mode = WAL`, cf. `SQLiteDatabase.init`).
     //
     // Toujours hors main actor (IO fichier + hachage SHA-256 + SQLite) via
     // `Task.detached` — jamais attendue par l'appelant (fire-and-forget,
