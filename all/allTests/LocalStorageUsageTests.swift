@@ -27,7 +27,9 @@ struct LocalStorageUsageTests {
         try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: database, withIntermediateDirectories: true)
         try Data(count: 1000).write(to: files.appendingPathComponent("a.fit"))
-        try Data(count: 500).write(to: files.appendingPathComponent("b.fit"))
+        let activities = spool.appendingPathComponent("files/ACTIVITY/2026")
+        try FileManager.default.createDirectory(at: activities, withIntermediateDirectories: true)
+        try Data(count: 500).write(to: activities.appendingPathComponent("b.fit"))
         // Le journal du spool n'est pas un fichier de la montre.
         try Data(count: 70).write(to: spool.appendingPathComponent("journal.json"))
         try Data(count: 4000).write(to: database.appendingPathComponent("pulse-embarque.sqlite"))
@@ -36,6 +38,7 @@ struct LocalStorageUsageTests {
         let usage = LocalStorageUsage.measure(spoolRoot: spool, databaseRoot: database)
         #expect(usage.watchFileCount == 2)
         #expect(usage.watchFileBytes == 1500)
+        #expect(usage.watchFileBytesByType == ["MONITOR": 1000, "ACTIVITY": 500])
         #expect(usage.databaseBytes == 4300)
         #expect(usage.totalBytes == 5800)
     }

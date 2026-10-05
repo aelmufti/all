@@ -214,12 +214,95 @@ private struct SettingsRow: View {
 
 // MARK: - Pages de second niveau
 
+// MARK: - Jauge de stockage
+//
+// Même lecture que Réglages › Stockage d'iOS : le total, un tube découpé en
+// segments de couleur proportionnels, puis la légende avec la taille de chacun.
+// Le tube représente ce que l'app occupe (pas la capacité de l'appareil : sa
+// part y serait invisible).
+
+private struct SettingsStorageGauge: View {
+    struct Segment: Identifiable {
+        let name: String
+        let bytes: Int64
+        let color: Color
+        var id: String { name }
+    }
+
+    let segments: [Segment]
+
+    private var shown: [Segment] { segments.filter { $0.bytes > 0 } }
+    private var total: Int64 { shown.reduce(0) { $0 + $1.bytes } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.md) {
+            Text(LocalStorageUsage.formatted(total))
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.pulseTextPrimary)
+
+            GeometryReader { proxy in
+                let gap: CGFloat = 2
+                // Largeur minimale : un petit poste reste visible dans le tube.
+                let minWidth: CGFloat = 4
+                let available = max(0, proxy.size.width - gap * CGFloat(max(0, shown.count - 1)))
+                HStack(spacing: gap) {
+                    if shown.isEmpty {
+                        Color.pulseEmpty
+                    } else {
+                        ForEach(shown) { segment in
+                            segment.color
+                                .frame(width: max(minWidth, available * CGFloat(segment.bytes) / CGFloat(total)))
+                        }
+                    }
+                }
+                .frame(width: proxy.size.width, alignment: .leading)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .frame(height: 22)
+            .accessibilityHidden(true)
+
+            VStack(spacing: PulseSpacing.sm) {
+                ForEach(shown) { segment in
+                    HStack(spacing: PulseSpacing.sm) {
+                        Circle().fill(segment.color).frame(width: 9, height: 9)
+                        Text(segment.name)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.pulseTextPrimary)
+                        Spacer()
+                        Text(LocalStorageUsage.formatted(segment.bytes))
+                            .font(.subheadline)
+                            .foregroundStyle(Color.pulseTextSecondary)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, PulseSpacing.sm)
+    }
+}
+
 /// Stockage : le choix, et juste dessous l'adresse de Pulse quand il en dépend.
 private struct SettingsStoragePage: View {
     @Bindable var viewModel: SettingsViewModel
     let onRequestServerLogin: (StorageMode) -> Void
     @State private var storageMode = StorageModeStore.shared
     @State private var usage: LocalStorageUsage?
+
+    /// Postes du tube côté iPhone : les `.fit` par type, puis la base.
+    private static func phoneSegments(_ usage: LocalStorageUsage) -> [SettingsStorageGauge.Segment] {
+        let known: [(folder: String, name: String, color: Color)] = [
+            ("ACTIVITY", "Activités", .pulseCalories),
+            ("MONITOR", "Suivi quotidien", .pulseSteps),
+            ("SLEEP", "Sommeil", .pulseSleep),
+        ]
+        var segments = known.map {
+            SettingsStorageGauge.Segment(name: $0.name, bytes: usage.watchFileBytesByType[$0.folder] ?? 0, color: $0.color)
+        }
+        let other = usage.watchFileBytesByType.filter { type, _ in !known.contains { $0.folder == type } }
+            .values.reduce(0, +)
+        segments.append(.init(name: "Autres fichiers", bytes: other, color: .pulseAbsent))
+        segments.append(.init(name: "Base de données", bytes: usage.databaseBytes, color: .pulseSpo2))
+        return segments
+    }
 
     var body: some View {
         Form {
@@ -230,27 +313,28 @@ private struct SettingsStoragePage: View {
             // Ce que l'app occupe sur l'iPhone — dans tous les modes : les `.fit`
             // de la montre y transitent même quand Pulse est la référence.
             Section("Sur cet iPhone") {
-                if let counts = usage?.counts {
-                    LabeledContent("Activités", value: "\(counts.activities)")
-                    LabeledContent("Nuits", value: "\(counts.nights)")
-                    LabeledContent("Jours", value: "\(counts.days)")
-                }
-                LabeledContent("Fichiers de la montre") {
-                    Text(usage.map { "\($0.watchFileCount) · \(LocalStorageUsage.formatted($0.watchFileBytes))" } ?? "…")
-                }
-                LabeledContent("Base de données") {
-                    Text(usage.map { LocalStorageUsage.formatted($0.databaseBytes) } ?? "…")
-                }
-                LabeledContent("Total") {
-                    Text(usage.map { LocalStorageUsage.formatted($0.totalBytes) } ?? "…")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.pulseTextPrimary)
+                if let usage {
+                    SettingsStorageGauge(segments: Self.phoneSegments(usage))
+                    if let counts = usage.counts {
+                        LabeledContent("Activités", value: "\(counts.activities)")
+                        LabeledContent("Nuits", value: "\(counts.nights)")
+                        LabeledContent("Jours", value: "\(counts.days)")
+                    }
+                    LabeledContent("Fichiers de la montre", value: "\(usage.watchFileCount)")
+                } else {
+                    ProgressView()
                 }
             }
-            // Ce que le serveur détient (inventaire de Pulse). Il ne donne que des
-            // nombres : la taille sur le disque du serveur n'est pas exposée.
+            // Ce que le serveur détient (inventaire de Pulse). Les tailles
+            // manquent tant que Pulse n'est pas redéployé : pas de jauge alors.
             if storageMode.mode != .phone, let inventory = viewModel.inventory {
                 Section("Sur Pulse") {
+                    if let filesBytes = inventory.filesBytes, filesBytes >= 0, let dbBytes = inventory.dbBytes {
+                        SettingsStorageGauge(segments: [
+                            .init(name: "Fichiers de la montre", bytes: filesBytes, color: .pulseSteps),
+                            .init(name: "Base de données", bytes: dbBytes, color: .pulseSpo2),
+                        ])
+                    }
                     LabeledContent("Activités", value: "\(inventory.activities)")
                     LabeledContent("Nuits", value: "\(inventory.nights)")
                     LabeledContent("Jours", value: "\(inventory.days)")

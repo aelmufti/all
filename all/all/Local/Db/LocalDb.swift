@@ -241,13 +241,15 @@ final class LocalDb {
     }
 
     func contentCounts() throws -> ContentCounts {
-        func count(_ table: String) throws -> Int {
+        func count(_ source: String) throws -> Int {
             var n = 0
-            try db.run("SELECT COUNT(*) FROM \(table)") { r in n = Int(r.double(0) ?? 0) }
+            try db.run("SELECT COUNT(*) FROM \(source)") { r in n = Int(r.double(0) ?? 0) }
             return n
         }
+        // Nuits : même filtre que le serveur (`duration_s > 0`).
         return ContentCounts(
-            activities: try count("activities"), nights: try count("wellness_sleep"), days: try count("wellness_days"))
+            activities: try count("activities"), nights: try count("wellness_sleep WHERE duration_s > 0"),
+            days: try count("wellness_days"))
     }
 
     /// Vrai si la base porte ce fichier : hash dans `imported_files`

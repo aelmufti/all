@@ -112,6 +112,10 @@ struct SettingsSyncInventory: Decodable, Equatable {
     let unaccounted: Int
     let nights: Int
     let days: Int
+    /// Place occupée sur le serveur (`.fit` conservés, base SQLite). Absents
+    /// d'un Pulse pas encore redéployé ; `filesBytes == -1` = dossier illisible.
+    let filesBytes: Int64?
+    let dbBytes: Int64?
 }
 
 // MARK: - `GET /api/profile`, `PUT /api/profile`

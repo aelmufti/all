@@ -13,6 +13,10 @@ struct LocalStorageUsage: Equatable {
     /// `.fit` présents dans le spool (les fichiers purgés n'y sont plus).
     var watchFileCount = 0
     var watchFileBytes: Int64 = 0
+    /// Taille des `.fit` par dossier de premier niveau du spool, c'est-à-dire par
+    /// type de fichier montre (`ACTIVITY`, `MONITOR`, `SLEEP`…, cf.
+    /// `SpoolStore.canonicalRelativePath`).
+    var watchFileBytesByType: [String: Int64] = [:]
     /// Base locale, journaux SQLite compris (`-wal`, `-shm`).
     var databaseBytes: Int64 = 0
 
@@ -35,10 +39,18 @@ struct LocalStorageUsage: Equatable {
     }
 
     static func measure(spoolRoot: URL, databaseRoot: URL) -> LocalStorageUsage {
-        let files = contents(of: spoolRoot.appendingPathComponent("files", isDirectory: true))
-        let database = contents(of: databaseRoot)
-        return LocalStorageUsage(
-            watchFileCount: files.count, watchFileBytes: files.bytes, databaseBytes: database.bytes)
+        let filesDir = spoolRoot.appendingPathComponent("files", isDirectory: true)
+        var usage = LocalStorageUsage(databaseBytes: contents(of: databaseRoot).bytes)
+        let typeFolders = (try? FileManager.default.contentsOfDirectory(
+            at: filesDir, includingPropertiesForKeys: nil)) ?? []
+        for folder in typeFolders {
+            let measured = contents(of: folder)
+            guard measured.count > 0 else { continue }
+            usage.watchFileCount += measured.count
+            usage.watchFileBytes += measured.bytes
+            usage.watchFileBytesByType[folder.lastPathComponent] = measured.bytes
+        }
+        return usage
     }
 
     /// Nombre et taille cumulée des fichiers d'un dossier, sous-dossiers compris.
