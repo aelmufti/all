@@ -6,8 +6,8 @@
 //
 //  Racine : uniquement des LIGNES (pastille, nom, valeur courante), en trois
 //  groupes — moi (Profil, Réveil, Programme), données (Stockage,
-//  Synchronisation, Montre), app (Apparence, Aide) — plus le compte serveur
-//  quand il y en a un. Aucun contrôle ni texte d'explication à ce niveau.
+//  Synchronisation, Montre), app (Apparence, Aide) — plus la déconnexion
+//  quand il y a un serveur. Aucun contrôle ni texte d'explication à ce niveau.
 //
 //  Second niveau : une page par réglage (`SettingsProfilePage`,
 //  `SettingsWakePage`, `SettingsStoragePage`, `SettingsSyncPage`). Programme,
@@ -26,7 +26,6 @@ import UIKit
 
 struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
-    private let auth = AuthStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showStatus = false
     @State private var showWatch = false
@@ -146,7 +145,6 @@ struct SettingsView: View {
 
                 if storageMode.mode != .phone {
                     Section {
-                        LabeledContent("Utilisateur", value: auth.username ?? "—")
                         Button("Déconnexion", role: .destructive) {
                             Task { await AuthStore.shared.logout() }
                         }
