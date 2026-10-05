@@ -115,6 +115,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     /// test double dans `allTests`, jamais `URLSessionOpenFoodFactsTransport`
     /// (la seule conformance qui touche vraiment le réseau) en test.
     private let offTransport: OpenFoodFactsTransport
+    /// Cache mémoire des ajustements de `stats/sleep-recommendation` (cf.
+    /// `SleepModelCache`) — propre à ce backend, donc à sa base.
+    let sleepModelCache = SleepModelCache()
 
     init() throws {
         db = try LocalDb()
@@ -186,7 +189,7 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             return try DashboardStatsBackend.sleepRegularity(db: db, query: query)
 
         case ("GET", "stats/sleep-recommendation"):
-            return try DashboardStatsBackend.sleepRecommendation(db: db, query: query)
+            return try DashboardStatsBackend.sleepRecommendation(db: db, query: query, cache: sleepModelCache)
 
         // MARK: Profil (incrément L6, miroir `ProfileController` — `profile.controller.ts`)
 

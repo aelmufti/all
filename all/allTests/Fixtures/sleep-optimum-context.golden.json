@@ -1,0 +1,6116 @@
+{
+  "description": "Fixture dorée de la couche contextuelle (spec duree-ideale-sommeil.md §10), générée par le port TS (sleep-optimum-context.ts) sur des entrées SYNTHÉTIQUES. `fitCases` : nuits agrégées -> modèle étendu p = 25 (n, alpha, d, gamma, stats, idéal global) + idéal brut/arrondi pour plusieurs contextes. `upcoming` : endormissement habituel, onsetRef et covariables d'une nuit à venir. Comparaison : champs arrondis égaux, flottants à 1e-9.",
+  "fitCases": [
+    {
+      "name": "120 nuits",
+      "todayKey": "2026-10-05",
+      "nights": [
+        {
+          "date": "2026-04-01",
+          "S": 7.811,
+          "bbMorning": 82.711,
+          "bbEvening": 65.892,
+          "wakeStress": 30.708,
+          "bbBed": null,
+          "stressPrevDay": 50.238,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.335,
+          "priorSleep": 6.661
+        },
+        {
+          "date": "2026-04-02",
+          "S": 6.072,
+          "bbMorning": 76.326,
+          "bbEvening": 60.825,
+          "wakeStress": null,
+          "bbBed": 41,
+          "stressPrevDay": 27.875,
+          "sportPrev": 0,
+          "sportNext": 54,
+          "workdayNext": 0,
+          "onsetShift": -0.693,
+          "priorSleep": 6.838
+        },
+        {
+          "date": "2026-04-03",
+          "S": 9.523,
+          "bbMorning": 96.007,
+          "bbEvening": 76.856,
+          "wakeStress": 26.427,
+          "bbBed": 26,
+          "stressPrevDay": null,
+          "sportPrev": 108,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.195,
+          "priorSleep": 8.651
+        },
+        {
+          "date": "2026-04-04",
+          "S": 5.519,
+          "bbMorning": 73.353,
+          "bbEvening": 57.271,
+          "wakeStress": 33.631,
+          "bbBed": 36,
+          "stressPrevDay": 59.143,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.166,
+          "priorSleep": 7.757
+        },
+        {
+          "date": "2026-04-05",
+          "S": 5.429,
+          "bbMorning": 72.148,
+          "bbEvening": 57.604,
+          "wakeStress": 33.873,
+          "bbBed": 61,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 45,
+          "workdayNext": 1,
+          "onsetShift": 0.732,
+          "priorSleep": 6.196
+        },
+        {
+          "date": "2026-04-06",
+          "S": 7.124,
+          "bbMorning": 77.494,
+          "bbEvening": 61.251,
+          "wakeStress": 32.381,
+          "bbBed": 79,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 36,
+          "workdayNext": 0,
+          "onsetShift": -0.044,
+          "priorSleep": 8.014
+        },
+        {
+          "date": "2026-04-07",
+          "S": 7.156,
+          "bbMorning": 82.596,
+          "bbEvening": 65.519,
+          "wakeStress": 30.48,
+          "bbBed": 38,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.375,
+          "priorSleep": 6.845
+        },
+        {
+          "date": "2026-04-08",
+          "S": 7.838,
+          "bbMorning": 86.775,
+          "bbEvening": 68.586,
+          "wakeStress": 29.274,
+          "bbBed": 32,
+          "stressPrevDay": null,
+          "sportPrev": 36,
+          "sportNext": 23,
+          "workdayNext": 1,
+          "onsetShift": 0.618,
+          "priorSleep": 6.794
+        },
+        {
+          "date": "2026-04-09",
+          "S": 9.128,
+          "bbMorning": 78.547,
+          "bbEvening": 62.48,
+          "wakeStress": 32.335,
+          "bbBed": 76,
+          "stressPrevDay": 48.027,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.272,
+          "priorSleep": 8.684
+        },
+        {
+          "date": "2026-04-10",
+          "S": 7.801,
+          "bbMorning": null,
+          "bbEvening": 66.266,
+          "wakeStress": 30.364,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.412,
+          "priorSleep": 8.521
+        },
+        {
+          "date": "2026-04-11",
+          "S": 6.703,
+          "bbMorning": 77.732,
+          "bbEvening": 61.359,
+          "wakeStress": 32.193,
+          "bbBed": 79,
+          "stressPrevDay": 22.109,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.496,
+          "priorSleep": 7.766
+        },
+        {
+          "date": "2026-04-12",
+          "S": 9.103,
+          "bbMorning": 87.869,
+          "bbEvening": 70.36,
+          "wakeStress": 29.302,
+          "bbBed": 69,
+          "stressPrevDay": 51.349,
+          "sportPrev": 117,
+          "sportNext": 33,
+          "workdayNext": 1,
+          "onsetShift": 0.263,
+          "priorSleep": 8.845
+        },
+        {
+          "date": "2026-04-13",
+          "S": 9.766,
+          "bbMorning": 86.44,
+          "bbEvening": 68.711,
+          "wakeStress": 29.826,
+          "bbBed": 34,
+          "stressPrevDay": 21.987,
+          "sportPrev": 31,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.282,
+          "priorSleep": 7.651
+        },
+        {
+          "date": "2026-04-14",
+          "S": 7.869,
+          "bbMorning": 87.544,
+          "bbEvening": 68.996,
+          "wakeStress": 29.504,
+          "bbBed": null,
+          "stressPrevDay": 24.154,
+          "sportPrev": 51,
+          "sportNext": 29,
+          "workdayNext": 1,
+          "onsetShift": 0.698,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-04-15",
+          "S": 8.193,
+          "bbMorning": 89.081,
+          "bbEvening": 70.719,
+          "wakeStress": 28.895,
+          "bbBed": 57,
+          "stressPrevDay": null,
+          "sportPrev": 47,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.537,
+          "priorSleep": 8.241
+        },
+        {
+          "date": "2026-04-16",
+          "S": 8.185,
+          "bbMorning": 78.157,
+          "bbEvening": 61.862,
+          "wakeStress": 32.271,
+          "bbBed": 78,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 26,
+          "workdayNext": 1,
+          "onsetShift": 0.197,
+          "priorSleep": 8.029
+        },
+        {
+          "date": "2026-04-17",
+          "S": 9.149,
+          "bbMorning": 79.828,
+          "bbEvening": 63.501,
+          "wakeStress": null,
+          "bbBed": 68,
+          "stressPrevDay": 26.416,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.225,
+          "priorSleep": 7.458
+        },
+        {
+          "date": "2026-04-18",
+          "S": 6.019,
+          "bbMorning": 75.828,
+          "bbEvening": 60.418,
+          "wakeStress": 32.735,
+          "bbBed": 73,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.215,
+          "priorSleep": 8.107
+        },
+        {
+          "date": "2026-04-19",
+          "S": 7.766,
+          "bbMorning": 86.58,
+          "bbEvening": 68.7,
+          "wakeStress": 29.471,
+          "bbBed": 37,
+          "stressPrevDay": 41.757,
+          "sportPrev": 97,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.019,
+          "priorSleep": 8.14
+        },
+        {
+          "date": "2026-04-20",
+          "S": 9.326,
+          "bbMorning": 88.481,
+          "bbEvening": 70.403,
+          "wakeStress": 28.679,
+          "bbBed": 67,
+          "stressPrevDay": 44.187,
+          "sportPrev": 105,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.214,
+          "priorSleep": 7.225
+        },
+        {
+          "date": "2026-04-21",
+          "S": 5.206,
+          "bbMorning": 71.604,
+          "bbEvening": 56.166,
+          "wakeStress": 34.262,
+          "bbBed": 64,
+          "stressPrevDay": 27.656,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.16,
+          "priorSleep": 8.319
+        },
+        {
+          "date": "2026-04-22",
+          "S": 8.555,
+          "bbMorning": 85.301,
+          "bbEvening": 67.934,
+          "wakeStress": 30.215,
+          "bbBed": 39,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.042,
+          "priorSleep": 8.511
+        },
+        {
+          "date": "2026-04-23",
+          "S": 9.384,
+          "bbMorning": 87.444,
+          "bbEvening": 69.48,
+          "wakeStress": 28.999,
+          "bbBed": 72,
+          "stressPrevDay": 55.432,
+          "sportPrev": 97,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.571,
+          "priorSleep": 7.761
+        },
+        {
+          "date": "2026-04-24",
+          "S": 8.958,
+          "bbMorning": null,
+          "bbEvening": 73.365,
+          "wakeStress": 27.938,
+          "bbBed": null,
+          "stressPrevDay": 27.838,
+          "sportPrev": 67,
+          "sportNext": 49,
+          "workdayNext": 1,
+          "onsetShift": -0.33,
+          "priorSleep": 6.644
+        },
+        {
+          "date": "2026-04-25",
+          "S": 9.573,
+          "bbMorning": 92.144,
+          "bbEvening": null,
+          "wakeStress": 27.697,
+          "bbBed": 49,
+          "stressPrevDay": null,
+          "sportPrev": 88,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.292,
+          "priorSleep": 8.168
+        },
+        {
+          "date": "2026-04-26",
+          "S": 7.372,
+          "bbMorning": 84.701,
+          "bbEvening": null,
+          "wakeStress": 30.524,
+          "bbBed": 41,
+          "stressPrevDay": 57.212,
+          "sportPrev": 33,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.103,
+          "priorSleep": 6.099
+        },
+        {
+          "date": "2026-04-27",
+          "S": 6.078,
+          "bbMorning": 76.227,
+          "bbEvening": 60.843,
+          "wakeStress": 32.826,
+          "bbBed": 27,
+          "stressPrevDay": 21.502,
+          "sportPrev": 33,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.209,
+          "priorSleep": 8.94
+        },
+        {
+          "date": "2026-04-28",
+          "S": 8.263,
+          "bbMorning": null,
+          "bbEvening": 66.302,
+          "wakeStress": null,
+          "bbBed": 51,
+          "stressPrevDay": 45.794,
+          "sportPrev": 0,
+          "sportNext": 74,
+          "workdayNext": 0,
+          "onsetShift": 0.207,
+          "priorSleep": 7.993
+        },
+        {
+          "date": "2026-04-29",
+          "S": 8.597,
+          "bbMorning": 87.403,
+          "bbEvening": 69.875,
+          "wakeStress": null,
+          "bbBed": 73,
+          "stressPrevDay": 33.297,
+          "sportPrev": 46,
+          "sportNext": 61,
+          "workdayNext": 1,
+          "onsetShift": -0.441,
+          "priorSleep": 6.247
+        },
+        {
+          "date": "2026-04-30",
+          "S": 5.616,
+          "bbMorning": 73.65,
+          "bbEvening": 57.729,
+          "wakeStress": 34.125,
+          "bbBed": 25,
+          "stressPrevDay": 50.493,
+          "sportPrev": 37,
+          "sportNext": 28,
+          "workdayNext": 0,
+          "onsetShift": 0.639,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-05-01",
+          "S": 5.522,
+          "bbMorning": 73.151,
+          "bbEvening": 57.384,
+          "wakeStress": 34.289,
+          "bbBed": 59,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 48,
+          "workdayNext": 1,
+          "onsetShift": -0.091,
+          "priorSleep": 7.798
+        },
+        {
+          "date": "2026-05-02",
+          "S": 5.567,
+          "bbMorning": 73.2,
+          "bbEvening": 57.777,
+          "wakeStress": 33.691,
+          "bbBed": 31,
+          "stressPrevDay": 47.468,
+          "sportPrev": 46,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.318,
+          "priorSleep": 6.218
+        },
+        {
+          "date": "2026-05-03",
+          "S": 5.999,
+          "bbMorning": 75.714,
+          "bbEvening": 60.225,
+          "wakeStress": 32.968,
+          "bbBed": 38,
+          "stressPrevDay": 57.963,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.418,
+          "priorSleep": 7.325
+        },
+        {
+          "date": "2026-05-04",
+          "S": 7.684,
+          "bbMorning": 86.311,
+          "bbEvening": null,
+          "wakeStress": 29.687,
+          "bbBed": 58,
+          "stressPrevDay": 21.819,
+          "sportPrev": 69,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.5,
+          "priorSleep": 8.217
+        },
+        {
+          "date": "2026-05-05",
+          "S": 9.509,
+          "bbMorning": 82.947,
+          "bbEvening": 66.12,
+          "wakeStress": 30.853,
+          "bbBed": null,
+          "stressPrevDay": 42.292,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.73,
+          "priorSleep": 8.588
+        },
+        {
+          "date": "2026-05-06",
+          "S": 8.099,
+          "bbMorning": 83.524,
+          "bbEvening": 65.888,
+          "wakeStress": 30.835,
+          "bbBed": 50,
+          "stressPrevDay": 45.647,
+          "sportPrev": 0,
+          "sportNext": 37,
+          "workdayNext": 0,
+          "onsetShift": -0.405,
+          "priorSleep": 8.865
+        },
+        {
+          "date": "2026-05-07",
+          "S": 7.321,
+          "bbMorning": 78.537,
+          "bbEvening": 62.397,
+          "wakeStress": 32.317,
+          "bbBed": 75,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 51,
+          "workdayNext": 1,
+          "onsetShift": -0.174,
+          "priorSleep": 7.461
+        },
+        {
+          "date": "2026-05-08",
+          "S": 7.729,
+          "bbMorning": 86.565,
+          "bbEvening": 68.929,
+          "wakeStress": 29.854,
+          "bbBed": 26,
+          "stressPrevDay": 24.185,
+          "sportPrev": 119,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.597,
+          "priorSleep": 6.608
+        },
+        {
+          "date": "2026-05-09",
+          "S": 9.209,
+          "bbMorning": 83.311,
+          "bbEvening": 66.281,
+          "wakeStress": 30.939,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 66,
+          "workdayNext": 1,
+          "onsetShift": -0.244,
+          "priorSleep": 7.982
+        },
+        {
+          "date": "2026-05-10",
+          "S": 6.677,
+          "bbMorning": 79.574,
+          "bbEvening": 63.003,
+          "wakeStress": 31.365,
+          "bbBed": 30,
+          "stressPrevDay": 30.372,
+          "sportPrev": 109,
+          "sportNext": 36,
+          "workdayNext": 1,
+          "onsetShift": 0.055,
+          "priorSleep": 6.392
+        },
+        {
+          "date": "2026-05-11",
+          "S": 6.053,
+          "bbMorning": null,
+          "bbEvening": 60.505,
+          "wakeStress": null,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 115,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.669,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-05-12",
+          "S": 8.114,
+          "bbMorning": 78.113,
+          "bbEvening": 61.884,
+          "wakeStress": 32.454,
+          "bbBed": 78,
+          "stressPrevDay": 55.518,
+          "sportPrev": 0,
+          "sportNext": 28,
+          "workdayNext": 1,
+          "onsetShift": -0.035,
+          "priorSleep": 8.973
+        },
+        {
+          "date": "2026-05-13",
+          "S": 7.672,
+          "bbMorning": null,
+          "bbEvening": 65.705,
+          "wakeStress": 30.938,
+          "bbBed": null,
+          "stressPrevDay": 31.187,
+          "sportPrev": 0,
+          "sportNext": 72,
+          "workdayNext": 0,
+          "onsetShift": 0.474,
+          "priorSleep": 7.377
+        },
+        {
+          "date": "2026-05-14",
+          "S": 5.458,
+          "bbMorning": 72.261,
+          "bbEvening": 57.731,
+          "wakeStress": 33.908,
+          "bbBed": 33,
+          "stressPrevDay": 54.884,
+          "sportPrev": 58,
+          "sportNext": 35,
+          "workdayNext": 1,
+          "onsetShift": -0.625,
+          "priorSleep": 7.895
+        },
+        {
+          "date": "2026-05-15",
+          "S": 5.533,
+          "bbMorning": 73.302,
+          "bbEvening": 58.025,
+          "wakeStress": 33.893,
+          "bbBed": 61,
+          "stressPrevDay": 32.687,
+          "sportPrev": 52,
+          "sportNext": 46,
+          "workdayNext": 1,
+          "onsetShift": -0.363,
+          "priorSleep": 6.12
+        },
+        {
+          "date": "2026-05-16",
+          "S": 8.167,
+          "bbMorning": 88.509,
+          "bbEvening": 71.237,
+          "wakeStress": 28.598,
+          "bbBed": null,
+          "stressPrevDay": 46.088,
+          "sportPrev": 56,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.63,
+          "priorSleep": 8.076
+        },
+        {
+          "date": "2026-05-17",
+          "S": 9.158,
+          "bbMorning": 91.218,
+          "bbEvening": 72.887,
+          "wakeStress": 27.693,
+          "bbBed": 53,
+          "stressPrevDay": null,
+          "sportPrev": 79,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.357,
+          "priorSleep": 7.535
+        },
+        {
+          "date": "2026-05-18",
+          "S": 6.696,
+          "bbMorning": 79.727,
+          "bbEvening": 63.171,
+          "wakeStress": 31.292,
+          "bbBed": 33,
+          "stressPrevDay": 50.255,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.41,
+          "priorSleep": 8.059
+        },
+        {
+          "date": "2026-05-19",
+          "S": 8.116,
+          "bbMorning": 89.187,
+          "bbEvening": 70.564,
+          "wakeStress": 28.459,
+          "bbBed": 47,
+          "stressPrevDay": 53.466,
+          "sportPrev": 82,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.126,
+          "priorSleep": 6.792
+        },
+        {
+          "date": "2026-05-20",
+          "S": 5.827,
+          "bbMorning": 75.344,
+          "bbEvening": 59.536,
+          "wakeStress": 33.221,
+          "bbBed": null,
+          "stressPrevDay": 37.437,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.523,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-05-21",
+          "S": 6.251,
+          "bbMorning": null,
+          "bbEvening": 61.175,
+          "wakeStress": 32.428,
+          "bbBed": 51,
+          "stressPrevDay": null,
+          "sportPrev": 60,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.746,
+          "priorSleep": 7.404
+        },
+        {
+          "date": "2026-05-22",
+          "S": 8.337,
+          "bbMorning": 84.74,
+          "bbEvening": 67.642,
+          "wakeStress": 29.7,
+          "bbBed": 41,
+          "stressPrevDay": 33.897,
+          "sportPrev": 0,
+          "sportNext": 47,
+          "workdayNext": 1,
+          "onsetShift": -0.328,
+          "priorSleep": 6.35
+        },
+        {
+          "date": "2026-05-23",
+          "S": 7.57,
+          "bbMorning": 82.828,
+          "bbEvening": 65.676,
+          "wakeStress": 30.374,
+          "bbBed": 52,
+          "stressPrevDay": 35.48,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.524,
+          "priorSleep": 7.144
+        },
+        {
+          "date": "2026-05-24",
+          "S": 7.407,
+          "bbMorning": 84.385,
+          "bbEvening": 66.762,
+          "wakeStress": 30.02,
+          "bbBed": 47,
+          "stressPrevDay": null,
+          "sportPrev": 60,
+          "sportNext": 21,
+          "workdayNext": 0,
+          "onsetShift": -0.554,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-05-25",
+          "S": 5.563,
+          "bbMorning": 73.311,
+          "bbEvening": 57.711,
+          "wakeStress": 33.539,
+          "bbBed": 68,
+          "stressPrevDay": 50.228,
+          "sportPrev": 0,
+          "sportNext": 75,
+          "workdayNext": 1,
+          "onsetShift": 0.376,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-05-26",
+          "S": 9.457,
+          "bbMorning": 86.096,
+          "bbEvening": 68.771,
+          "wakeStress": null,
+          "bbBed": 79,
+          "stressPrevDay": 27.22,
+          "sportPrev": 105,
+          "sportNext": 43,
+          "workdayNext": 1,
+          "onsetShift": -0.344,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-05-27",
+          "S": 6.315,
+          "bbMorning": 77.682,
+          "bbEvening": 61.412,
+          "wakeStress": 32.464,
+          "bbBed": 68,
+          "stressPrevDay": 27.27,
+          "sportPrev": 33,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.396,
+          "priorSleep": 7.159
+        },
+        {
+          "date": "2026-05-28",
+          "S": 6.79,
+          "bbMorning": 80.306,
+          "bbEvening": 63.927,
+          "wakeStress": 31.629,
+          "bbBed": 55,
+          "stressPrevDay": 32.659,
+          "sportPrev": 82,
+          "sportNext": 79,
+          "workdayNext": 1,
+          "onsetShift": 0.061,
+          "priorSleep": 8.086
+        },
+        {
+          "date": "2026-05-29",
+          "S": 5.722,
+          "bbMorning": 74.591,
+          "bbEvening": 58.327,
+          "wakeStress": 33.705,
+          "bbBed": 48,
+          "stressPrevDay": 55.796,
+          "sportPrev": 43,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.729,
+          "priorSleep": 8.913
+        },
+        {
+          "date": "2026-05-30",
+          "S": 5.562,
+          "bbMorning": 73.215,
+          "bbEvening": 57.798,
+          "wakeStress": 34.231,
+          "bbBed": 25,
+          "stressPrevDay": 44.088,
+          "sportPrev": 66,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.119,
+          "priorSleep": 6.308
+        },
+        {
+          "date": "2026-05-31",
+          "S": 8.844,
+          "bbMorning": 83.555,
+          "bbEvening": 66.36,
+          "wakeStress": null,
+          "bbBed": null,
+          "stressPrevDay": 58.454,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.101,
+          "priorSleep": 7.49
+        },
+        {
+          "date": "2026-06-01",
+          "S": 7.806,
+          "bbMorning": 83.203,
+          "bbEvening": 65.81,
+          "wakeStress": 30.527,
+          "bbBed": null,
+          "stressPrevDay": 32.587,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.38,
+          "priorSleep": 8.304
+        },
+        {
+          "date": "2026-06-02",
+          "S": 6.983,
+          "bbMorning": 79.137,
+          "bbEvening": 62.616,
+          "wakeStress": 32.025,
+          "bbBed": 70,
+          "stressPrevDay": 27.97,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.731,
+          "priorSleep": 8.92
+        },
+        {
+          "date": "2026-06-03",
+          "S": 5.226,
+          "bbMorning": null,
+          "bbEvening": 55.883,
+          "wakeStress": 34.612,
+          "bbBed": 51,
+          "stressPrevDay": 34.195,
+          "sportPrev": 32,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.65,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-06-04",
+          "S": 6.058,
+          "bbMorning": 76.766,
+          "bbEvening": 59.794,
+          "wakeStress": 32.98,
+          "bbBed": 37,
+          "stressPrevDay": 46.78,
+          "sportPrev": 113,
+          "sportNext": 79,
+          "workdayNext": 0,
+          "onsetShift": 0.175,
+          "priorSleep": 8.428
+        },
+        {
+          "date": "2026-06-05",
+          "S": 6.706,
+          "bbMorning": 79.994,
+          "bbEvening": 63.094,
+          "wakeStress": null,
+          "bbBed": 41,
+          "stressPrevDay": null,
+          "sportPrev": 59,
+          "sportNext": 41,
+          "workdayNext": 0,
+          "onsetShift": -0.49,
+          "priorSleep": 7.247
+        },
+        {
+          "date": "2026-06-06",
+          "S": 8.176,
+          "bbMorning": 88.692,
+          "bbEvening": 70.61,
+          "wakeStress": 28.981,
+          "bbBed": 57,
+          "stressPrevDay": 54.442,
+          "sportPrev": 119,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.048,
+          "priorSleep": 7.775
+        },
+        {
+          "date": "2026-06-07",
+          "S": 5.295,
+          "bbMorning": 71.918,
+          "bbEvening": null,
+          "wakeStress": 34.623,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.078,
+          "priorSleep": 6.448
+        },
+        {
+          "date": "2026-06-08",
+          "S": 8.744,
+          "bbMorning": 89.897,
+          "bbEvening": 71.517,
+          "wakeStress": 28.158,
+          "bbBed": 62,
+          "stressPrevDay": 48.567,
+          "sportPrev": 106,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.057,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-06-09",
+          "S": 8.685,
+          "bbMorning": 80.025,
+          "bbEvening": 63.638,
+          "wakeStress": 31.606,
+          "bbBed": 65,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 36,
+          "workdayNext": 1,
+          "onsetShift": -0.487,
+          "priorSleep": 7.639
+        },
+        {
+          "date": "2026-06-10",
+          "S": 5.683,
+          "bbMorning": 74.399,
+          "bbEvening": null,
+          "wakeStress": 33.79,
+          "bbBed": 77,
+          "stressPrevDay": 22.4,
+          "sportPrev": 0,
+          "sportNext": 74,
+          "workdayNext": 0,
+          "onsetShift": 0.667,
+          "priorSleep": 7.39
+        },
+        {
+          "date": "2026-06-11",
+          "S": 6.136,
+          "bbMorning": 76.399,
+          "bbEvening": null,
+          "wakeStress": 32.867,
+          "bbBed": 48,
+          "stressPrevDay": 43.725,
+          "sportPrev": 72,
+          "sportNext": 71,
+          "workdayNext": 1,
+          "onsetShift": -0.195,
+          "priorSleep": 7.354
+        },
+        {
+          "date": "2026-06-12",
+          "S": 6.366,
+          "bbMorning": 78.214,
+          "bbEvening": 61.994,
+          "wakeStress": 31.997,
+          "bbBed": null,
+          "stressPrevDay": 57.586,
+          "sportPrev": 68,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.098,
+          "priorSleep": 6.714
+        },
+        {
+          "date": "2026-06-13",
+          "S": 5.207,
+          "bbMorning": 70.874,
+          "bbEvening": 55.685,
+          "wakeStress": 34.448,
+          "bbBed": 29,
+          "stressPrevDay": 43.549,
+          "sportPrev": 0,
+          "sportNext": 25,
+          "workdayNext": 0,
+          "onsetShift": 0.026,
+          "priorSleep": 6.453
+        },
+        {
+          "date": "2026-06-14",
+          "S": 8.155,
+          "bbMorning": null,
+          "bbEvening": 70.671,
+          "wakeStress": null,
+          "bbBed": 43,
+          "stressPrevDay": 32.93,
+          "sportPrev": 70,
+          "sportNext": 78,
+          "workdayNext": 0,
+          "onsetShift": 0.179,
+          "priorSleep": 6.945
+        },
+        {
+          "date": "2026-06-15",
+          "S": 9.434,
+          "bbMorning": null,
+          "bbEvening": 66.097,
+          "wakeStress": 30.612,
+          "bbBed": null,
+          "stressPrevDay": 27.322,
+          "sportPrev": 0,
+          "sportNext": 45,
+          "workdayNext": 0,
+          "onsetShift": 0.33,
+          "priorSleep": 7.313
+        },
+        {
+          "date": "2026-06-16",
+          "S": 8.429,
+          "bbMorning": 90.201,
+          "bbEvening": null,
+          "wakeStress": 27.861,
+          "bbBed": 53,
+          "stressPrevDay": 30.307,
+          "sportPrev": 61,
+          "sportNext": 35,
+          "workdayNext": 1,
+          "onsetShift": 0.456,
+          "priorSleep": 6.913
+        },
+        {
+          "date": "2026-06-17",
+          "S": 6.718,
+          "bbMorning": 80.69,
+          "bbEvening": 63.912,
+          "wakeStress": 31.769,
+          "bbBed": null,
+          "stressPrevDay": 24.236,
+          "sportPrev": 43,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.436,
+          "priorSleep": 6.959
+        },
+        {
+          "date": "2026-06-18",
+          "S": 5.265,
+          "bbMorning": 71.656,
+          "bbEvening": 56.576,
+          "wakeStress": 34.69,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 60,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.683,
+          "priorSleep": 7.136
+        },
+        {
+          "date": "2026-06-19",
+          "S": 6.042,
+          "bbMorning": 76.166,
+          "bbEvening": 60.612,
+          "wakeStress": 32.966,
+          "bbBed": 68,
+          "stressPrevDay": null,
+          "sportPrev": 33,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.363,
+          "priorSleep": 8.892
+        },
+        {
+          "date": "2026-06-20",
+          "S": 8.404,
+          "bbMorning": null,
+          "bbEvening": 68.427,
+          "wakeStress": 29.304,
+          "bbBed": 34,
+          "stressPrevDay": 48.177,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.279,
+          "priorSleep": 7.188
+        },
+        {
+          "date": "2026-06-21",
+          "S": 8.839,
+          "bbMorning": null,
+          "bbEvening": 66.277,
+          "wakeStress": null,
+          "bbBed": null,
+          "stressPrevDay": 39.666,
+          "sportPrev": 35,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.494,
+          "priorSleep": 6.471
+        },
+        {
+          "date": "2026-06-22",
+          "S": 7.373,
+          "bbMorning": 84.668,
+          "bbEvening": 67.231,
+          "wakeStress": null,
+          "bbBed": 78,
+          "stressPrevDay": 30.179,
+          "sportPrev": 112,
+          "sportNext": 61,
+          "workdayNext": 0,
+          "onsetShift": 0.423,
+          "priorSleep": 7.338
+        },
+        {
+          "date": "2026-06-23",
+          "S": 8.909,
+          "bbMorning": 80.782,
+          "bbEvening": 63.83,
+          "wakeStress": 31.416,
+          "bbBed": 64,
+          "stressPrevDay": 21.494,
+          "sportPrev": 33,
+          "sportNext": 38,
+          "workdayNext": 0,
+          "onsetShift": 0.592,
+          "priorSleep": 7.217
+        },
+        {
+          "date": "2026-06-24",
+          "S": 7.114,
+          "bbMorning": 82.522,
+          "bbEvening": null,
+          "wakeStress": 30.821,
+          "bbBed": 59,
+          "stressPrevDay": 23.236,
+          "sportPrev": 82,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.64,
+          "priorSleep": 8.326
+        },
+        {
+          "date": "2026-06-25",
+          "S": 6.284,
+          "bbMorning": 77.793,
+          "bbEvening": 61.47,
+          "wakeStress": 32.162,
+          "bbBed": 72,
+          "stressPrevDay": 49.857,
+          "sportPrev": 0,
+          "sportNext": 36,
+          "workdayNext": 0,
+          "onsetShift": 0.222,
+          "priorSleep": 8.595
+        },
+        {
+          "date": "2026-06-26",
+          "S": 6.391,
+          "bbMorning": null,
+          "bbEvening": 61.857,
+          "wakeStress": 32.172,
+          "bbBed": 58,
+          "stressPrevDay": 49.302,
+          "sportPrev": 33,
+          "sportNext": 56,
+          "workdayNext": 1,
+          "onsetShift": 0.439,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-06-27",
+          "S": 7.216,
+          "bbMorning": 83.043,
+          "bbEvening": 65.78,
+          "wakeStress": 30.537,
+          "bbBed": 30,
+          "stressPrevDay": 25.675,
+          "sportPrev": 77,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.389,
+          "priorSleep": 6.817
+        },
+        {
+          "date": "2026-06-28",
+          "S": 7.264,
+          "bbMorning": 83.674,
+          "bbEvening": null,
+          "wakeStress": 30.501,
+          "bbBed": 39,
+          "stressPrevDay": 56.173,
+          "sportPrev": 77,
+          "sportNext": 47,
+          "workdayNext": 1,
+          "onsetShift": -0.24,
+          "priorSleep": 6.742
+        },
+        {
+          "date": "2026-06-29",
+          "S": 8.388,
+          "bbMorning": 90.8,
+          "bbEvening": 71.917,
+          "wakeStress": 28.538,
+          "bbBed": 53,
+          "stressPrevDay": 32.495,
+          "sportPrev": 57,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.083,
+          "priorSleep": 7.196
+        },
+        {
+          "date": "2026-06-30",
+          "S": 8.251,
+          "bbMorning": 89.672,
+          "bbEvening": 71.05,
+          "wakeStress": null,
+          "bbBed": null,
+          "stressPrevDay": 39.08,
+          "sportPrev": 87,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.382,
+          "priorSleep": 8.081
+        },
+        {
+          "date": "2026-07-01",
+          "S": 5.393,
+          "bbMorning": 72.755,
+          "bbEvening": 57.213,
+          "wakeStress": 34.364,
+          "bbBed": 60,
+          "stressPrevDay": 22.907,
+          "sportPrev": 107,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.488,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-07-02",
+          "S": 9.314,
+          "bbMorning": null,
+          "bbEvening": 65.791,
+          "wakeStress": 30.897,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.305,
+          "priorSleep": 7.37
+        },
+        {
+          "date": "2026-07-03",
+          "S": 9.223,
+          "bbMorning": 82.455,
+          "bbEvening": 65.322,
+          "wakeStress": 30.756,
+          "bbBed": 55,
+          "stressPrevDay": 59.949,
+          "sportPrev": 0,
+          "sportNext": 78,
+          "workdayNext": 1,
+          "onsetShift": 0.505,
+          "priorSleep": 6.493
+        },
+        {
+          "date": "2026-07-04",
+          "S": 8.504,
+          "bbMorning": 91.444,
+          "bbEvening": 72.3,
+          "wakeStress": null,
+          "bbBed": null,
+          "stressPrevDay": 41.547,
+          "sportPrev": 77,
+          "sportNext": 55,
+          "workdayNext": 0,
+          "onsetShift": 0.005,
+          "priorSleep": 8.747
+        },
+        {
+          "date": "2026-07-05",
+          "S": 6.995,
+          "bbMorning": 81.525,
+          "bbEvening": 64.969,
+          "wakeStress": 31.237,
+          "bbBed": null,
+          "stressPrevDay": 24.636,
+          "sportPrev": 0,
+          "sportNext": 49,
+          "workdayNext": 1,
+          "onsetShift": 0.242,
+          "priorSleep": 7.721
+        },
+        {
+          "date": "2026-07-06",
+          "S": 9.011,
+          "bbMorning": null,
+          "bbEvening": 75.266,
+          "wakeStress": 27.388,
+          "bbBed": 37,
+          "stressPrevDay": 28.616,
+          "sportPrev": 49,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.687,
+          "priorSleep": 8.503
+        },
+        {
+          "date": "2026-07-07",
+          "S": 6.603,
+          "bbMorning": 79.987,
+          "bbEvening": 62.719,
+          "wakeStress": 32.097,
+          "bbBed": 32,
+          "stressPrevDay": 33.951,
+          "sportPrev": 84,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.227,
+          "priorSleep": 6.174
+        },
+        {
+          "date": "2026-07-08",
+          "S": 8.354,
+          "bbMorning": 82.736,
+          "bbEvening": 66.428,
+          "wakeStress": 30.452,
+          "bbBed": null,
+          "stressPrevDay": 52.191,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.685,
+          "priorSleep": 6.012
+        },
+        {
+          "date": "2026-07-09",
+          "S": 9.2,
+          "bbMorning": 94.151,
+          "bbEvening": 75.366,
+          "wakeStress": null,
+          "bbBed": 36,
+          "stressPrevDay": 31.562,
+          "sportPrev": 103,
+          "sportNext": 21,
+          "workdayNext": 0,
+          "onsetShift": 0.537,
+          "priorSleep": 8.289
+        },
+        {
+          "date": "2026-07-10",
+          "S": 8.339,
+          "bbMorning": 85.958,
+          "bbEvening": 68.155,
+          "wakeStress": null,
+          "bbBed": 34,
+          "stressPrevDay": null,
+          "sportPrev": 38,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.107,
+          "priorSleep": 8.129
+        },
+        {
+          "date": "2026-07-11",
+          "S": 5.938,
+          "bbMorning": null,
+          "bbEvening": 59.441,
+          "wakeStress": 33.428,
+          "bbBed": 76,
+          "stressPrevDay": 55.831,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.382,
+          "priorSleep": 7.139
+        },
+        {
+          "date": "2026-07-12",
+          "S": 7.359,
+          "bbMorning": 83.212,
+          "bbEvening": 66.474,
+          "wakeStress": 30.954,
+          "bbBed": null,
+          "stressPrevDay": 54.666,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.099,
+          "priorSleep": 7.979
+        },
+        {
+          "date": "2026-07-13",
+          "S": 9.259,
+          "bbMorning": 83.589,
+          "bbEvening": null,
+          "wakeStress": 30.903,
+          "bbBed": null,
+          "stressPrevDay": 21.459,
+          "sportPrev": 0,
+          "sportNext": 68,
+          "workdayNext": 1,
+          "onsetShift": -0.696,
+          "priorSleep": 7.123
+        },
+        {
+          "date": "2026-07-14",
+          "S": 7.989,
+          "bbMorning": 88.273,
+          "bbEvening": 69.458,
+          "wakeStress": null,
+          "bbBed": null,
+          "stressPrevDay": 34.364,
+          "sportPrev": 65,
+          "sportNext": 29,
+          "workdayNext": 0,
+          "onsetShift": -0.039,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-07-15",
+          "S": 6.83,
+          "bbMorning": 81.359,
+          "bbEvening": 64.249,
+          "wakeStress": 31.374,
+          "bbBed": 50,
+          "stressPrevDay": 20.099,
+          "sportPrev": 85,
+          "sportNext": 68,
+          "workdayNext": 0,
+          "onsetShift": -0.705,
+          "priorSleep": 7.864
+        },
+        {
+          "date": "2026-07-16",
+          "S": 7.741,
+          "bbMorning": 82.308,
+          "bbEvening": 65.615,
+          "wakeStress": 30.927,
+          "bbBed": 55,
+          "stressPrevDay": 46.354,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.72,
+          "priorSleep": 6.205
+        },
+        {
+          "date": "2026-07-17",
+          "S": 8.573,
+          "bbMorning": 91.801,
+          "bbEvening": 72.394,
+          "wakeStress": 27.486,
+          "bbBed": 41,
+          "stressPrevDay": 26.767,
+          "sportPrev": 119,
+          "sportNext": 58,
+          "workdayNext": 1,
+          "onsetShift": 0.184,
+          "priorSleep": 7.933
+        },
+        {
+          "date": "2026-07-18",
+          "S": 9.119,
+          "bbMorning": 91.74,
+          "bbEvening": 73.16,
+          "wakeStress": 28.036,
+          "bbBed": null,
+          "stressPrevDay": 39.096,
+          "sportPrev": 74,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.601,
+          "priorSleep": 8.875
+        },
+        {
+          "date": "2026-07-19",
+          "S": 8.846,
+          "bbMorning": 82.658,
+          "bbEvening": 65.453,
+          "wakeStress": 30.841,
+          "bbBed": 54,
+          "stressPrevDay": 30.41,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.42,
+          "priorSleep": 8.729
+        },
+        {
+          "date": "2026-07-20",
+          "S": 7.291,
+          "bbMorning": null,
+          "bbEvening": 62.907,
+          "wakeStress": 31.327,
+          "bbBed": 68,
+          "stressPrevDay": 30.964,
+          "sportPrev": 0,
+          "sportNext": 71,
+          "workdayNext": 1,
+          "onsetShift": 0.316,
+          "priorSleep": 6.191
+        },
+        {
+          "date": "2026-07-21",
+          "S": 9.329,
+          "bbMorning": 95.402,
+          "bbEvening": 76.105,
+          "wakeStress": 26.372,
+          "bbBed": 29,
+          "stressPrevDay": 20.275,
+          "sportPrev": 61,
+          "sportNext": 65,
+          "workdayNext": 1,
+          "onsetShift": -0.167,
+          "priorSleep": 8.716
+        },
+        {
+          "date": "2026-07-22",
+          "S": 9.454,
+          "bbMorning": 87.246,
+          "bbEvening": null,
+          "wakeStress": 28.965,
+          "bbBed": 27,
+          "stressPrevDay": 39.507,
+          "sportPrev": 36,
+          "sportNext": 78,
+          "workdayNext": 0,
+          "onsetShift": 0.617,
+          "priorSleep": 7.316
+        },
+        {
+          "date": "2026-07-23",
+          "S": 6.971,
+          "bbMorning": 81.518,
+          "bbEvening": 65.095,
+          "wakeStress": 30.715,
+          "bbBed": 34,
+          "stressPrevDay": 25.986,
+          "sportPrev": 36,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.592,
+          "priorSleep": 8.618
+        },
+        {
+          "date": "2026-07-24",
+          "S": 5.479,
+          "bbMorning": 72.41,
+          "bbEvening": 57.363,
+          "wakeStress": 33.815,
+          "bbBed": null,
+          "stressPrevDay": 36.986,
+          "sportPrev": 50,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.032,
+          "priorSleep": 8.932
+        },
+        {
+          "date": "2026-07-25",
+          "S": 8.197,
+          "bbMorning": 89.45,
+          "bbEvening": 71.24,
+          "wakeStress": 28.395,
+          "bbBed": null,
+          "stressPrevDay": 22.998,
+          "sportPrev": 58,
+          "sportNext": 68,
+          "workdayNext": 0,
+          "onsetShift": 0.012,
+          "priorSleep": 8.015
+        },
+        {
+          "date": "2026-07-26",
+          "S": 7.226,
+          "bbMorning": 82.927,
+          "bbEvening": 66.398,
+          "wakeStress": 30.315,
+          "bbBed": null,
+          "stressPrevDay": 37.462,
+          "sportPrev": 44,
+          "sportNext": 23,
+          "workdayNext": 1,
+          "onsetShift": -0.614,
+          "priorSleep": 7.058
+        },
+        {
+          "date": "2026-07-27",
+          "S": 6.483,
+          "bbMorning": 79.1,
+          "bbEvening": 61.955,
+          "wakeStress": 31.99,
+          "bbBed": null,
+          "stressPrevDay": 30.045,
+          "sportPrev": 115,
+          "sportNext": 62,
+          "workdayNext": 0,
+          "onsetShift": -0.359,
+          "priorSleep": 8.295
+        },
+        {
+          "date": "2026-07-28",
+          "S": 7.772,
+          "bbMorning": 86.431,
+          "bbEvening": 68.391,
+          "wakeStress": 29.414,
+          "bbBed": 31,
+          "stressPrevDay": 44.592,
+          "sportPrev": 102,
+          "sportNext": 33,
+          "workdayNext": 1,
+          "onsetShift": 0.647,
+          "priorSleep": 7.097
+        },
+        {
+          "date": "2026-07-29",
+          "S": 8.684,
+          "bbMorning": 81.52,
+          "bbEvening": 65.134,
+          "wakeStress": 30.838,
+          "bbBed": 57,
+          "stressPrevDay": 38.009,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.565,
+          "priorSleep": null
+        }
+      ],
+      "expected": {
+        "n": 116,
+        "alpha": 2.487605745130203,
+        "d": [
+          -0.005367428082069877,
+          -0.004044467440349861,
+          0.006869957853840229,
+          0.019420481746935322,
+          0.030583432274574014,
+          0.10252754081420118,
+          0.1647654255834664,
+          0.21289442905820657,
+          0.20024583706506696,
+          0.047146959679116286,
+          -0.028535215124336554,
+          -0.03128340842202554
+        ],
+        "gamma": [
+          -0.11182223850884403,
+          -0.02009896003545396,
+          0.14765269524328123,
+          0.0024379378385915433
+        ],
+        "stats": [
+          {
+            "mean": 51.35632183908046,
+            "sd": 16.524434719317068
+          },
+          {
+            "mean": 38.12603260869565,
+            "sd": 11.997613672555604
+          },
+          {
+            "mean": 40.85344827586207,
+            "sd": 40.307279720346074
+          },
+          {
+            "mean": 7.588028846153849,
+            "sd": 0.8358209858108049
+          }
+        ],
+        "globalIdealRaw": 8.2,
+        "globalIdealHours": 8.25,
+        "contexts": [
+          {
+            "name": "tout absent",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": null,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "idealRaw": 8.15,
+            "idealHours": 8.25
+          },
+          {
+            "name": "sport nul seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": 0,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0,
+              -1.0135501219458456,
+              0
+            ],
+            "idealRaw": 7.95,
+            "idealHours": 7.916666666666667
+          },
+          {
+            "name": "sport 90 seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": 90,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0,
+              1.2192971608384184,
+              0
+            ],
+            "idealRaw": 8.45,
+            "idealHours": 8.416666666666666
+          },
+          {
+            "name": "contexte favorable",
+            "covariates": {
+              "bbBed": 80,
+              "stressPrevDay": 15,
+              "sportPrev": 120,
+              "priorSleep": 8.5
+            },
+            "z": [
+              1.733413496283481,
+              -1.9275526983833604,
+              1.9635795884331733,
+              1.0911082269147327
+            ],
+            "idealRaw": 8.35,
+            "idealHours": 8.333333333333334
+          },
+          {
+            "name": "contexte défavorable",
+            "covariates": {
+              "bbBed": 20,
+              "stressPrevDay": 60,
+              "sportPrev": 0,
+              "priorSleep": 6
+            },
+            "z": [
+              -1.8975730408753355,
+              1.8231931772683083,
+              -1.0135501219458456,
+              -1.8999628785503029
+            ],
+            "idealRaw": 8.2,
+            "idealHours": 8.166666666666666
+          },
+          {
+            "name": "extrême haut",
+            "covariates": {
+              "bbBed": 100,
+              "stressPrevDay": 0,
+              "sportPrev": 600,
+              "priorSleep": 12
+            },
+            "z": [
+              2.9437423420030866,
+              -3.1778013236005833,
+              13.872098429949247,
+              5.278607774565782
+            ],
+            "idealRaw": 9.2,
+            "idealHours": 9.166666666666666
+          },
+          {
+            "name": "extrême bas",
+            "covariates": {
+              "bbBed": 0,
+              "stressPrevDay": 100,
+              "sportPrev": 0,
+              "priorSleep": 3
+            },
+            "z": [
+              -3.107901886594941,
+              5.157189511180903,
+              -1.0135501219458456,
+              -5.489248205108345
+            ],
+            "idealRaw": 8.3,
+            "idealHours": 8.333333333333334
+          },
+          {
+            "name": "stress seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": 45,
+              "sportPrev": null,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0.5729445520510854,
+              0,
+              0
+            ],
+            "idealRaw": 8.15,
+            "idealHours": 8.166666666666666
+          },
+          {
+            "name": "sommeil précédent seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": null,
+              "priorSleep": 7
+            },
+            "z": [
+              0,
+              0,
+              0,
+              -0.7035344363642887
+            ],
+            "idealRaw": 8.15,
+            "idealHours": 8.166666666666666
+          }
+        ]
+      }
+    },
+    {
+      "name": "25 nuits (garde-fou < 30)",
+      "todayKey": "2026-10-05",
+      "nights": [
+        {
+          "date": "2026-04-01",
+          "S": 8.261,
+          "bbMorning": 83.685,
+          "bbEvening": 66.818,
+          "wakeStress": 30.278,
+          "bbBed": 46,
+          "stressPrevDay": 32.083,
+          "sportPrev": 34,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.535,
+          "priorSleep": 6.501
+        },
+        {
+          "date": "2026-04-02",
+          "S": 8.683,
+          "bbMorning": 91.74,
+          "bbEvening": 72.837,
+          "wakeStress": 28.038,
+          "bbBed": null,
+          "stressPrevDay": 29.292,
+          "sportPrev": 49,
+          "sportNext": 77,
+          "workdayNext": 1,
+          "onsetShift": 0.182,
+          "priorSleep": 8.755
+        },
+        {
+          "date": "2026-04-03",
+          "S": 6.92,
+          "bbMorning": null,
+          "bbEvening": 64.318,
+          "wakeStress": 31.084,
+          "bbBed": 61,
+          "stressPrevDay": 39.81,
+          "sportPrev": 87,
+          "sportNext": 69,
+          "workdayNext": 1,
+          "onsetShift": 0.486,
+          "priorSleep": 8.631
+        },
+        {
+          "date": "2026-04-04",
+          "S": 5.875,
+          "bbMorning": 75.375,
+          "bbEvening": 59.45,
+          "wakeStress": 33.184,
+          "bbBed": 71,
+          "stressPrevDay": null,
+          "sportPrev": 61,
+          "sportNext": 29,
+          "workdayNext": 1,
+          "onsetShift": 0.008,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-04-05",
+          "S": 9.48,
+          "bbMorning": 83.026,
+          "bbEvening": 66.017,
+          "wakeStress": 30.769,
+          "bbBed": null,
+          "stressPrevDay": 45.274,
+          "sportPrev": 0,
+          "sportNext": 31,
+          "workdayNext": 1,
+          "onsetShift": 0.076,
+          "priorSleep": 7.799
+        },
+        {
+          "date": "2026-04-06",
+          "S": 8.767,
+          "bbMorning": 85.925,
+          "bbEvening": 68.478,
+          "wakeStress": null,
+          "bbBed": 79,
+          "stressPrevDay": null,
+          "sportPrev": 118,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.139,
+          "priorSleep": 6.654
+        },
+        {
+          "date": "2026-04-07",
+          "S": 8.276,
+          "bbMorning": 89.62,
+          "bbEvening": 71.474,
+          "wakeStress": 28.495,
+          "bbBed": 33,
+          "stressPrevDay": 26.536,
+          "sportPrev": 101,
+          "sportNext": 41,
+          "workdayNext": 1,
+          "onsetShift": -0.31,
+          "priorSleep": 6.942
+        },
+        {
+          "date": "2026-04-08",
+          "S": 9.267,
+          "bbMorning": 84.197,
+          "bbEvening": 67.487,
+          "wakeStress": null,
+          "bbBed": 42,
+          "stressPrevDay": 33.198,
+          "sportPrev": 0,
+          "sportNext": 57,
+          "workdayNext": 0,
+          "onsetShift": 0.3,
+          "priorSleep": 8.314
+        },
+        {
+          "date": "2026-04-09",
+          "S": 8.605,
+          "bbMorning": 83.691,
+          "bbEvening": 66.129,
+          "wakeStress": 30.601,
+          "bbBed": null,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 38,
+          "workdayNext": 1,
+          "onsetShift": -0.449,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-04-10",
+          "S": 8.574,
+          "bbMorning": 83.213,
+          "bbEvening": 66.479,
+          "wakeStress": 30.905,
+          "bbBed": null,
+          "stressPrevDay": 29.761,
+          "sportPrev": 0,
+          "sportNext": 37,
+          "workdayNext": 1,
+          "onsetShift": -0.62,
+          "priorSleep": 7.733
+        },
+        {
+          "date": "2026-04-11",
+          "S": 7.315,
+          "bbMorning": 83.752,
+          "bbEvening": 66.353,
+          "wakeStress": 30.689,
+          "bbBed": 63,
+          "stressPrevDay": 21.721,
+          "sportPrev": 102,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.247,
+          "priorSleep": 8.206
+        },
+        {
+          "date": "2026-04-12",
+          "S": 7.289,
+          "bbMorning": 83.537,
+          "bbEvening": 66.245,
+          "wakeStress": 30.753,
+          "bbBed": 58,
+          "stressPrevDay": 25.361,
+          "sportPrev": 85,
+          "sportNext": 63,
+          "workdayNext": 1,
+          "onsetShift": 0.529,
+          "priorSleep": 8.066
+        },
+        {
+          "date": "2026-04-13",
+          "S": 6.26,
+          "bbMorning": 77.938,
+          "bbEvening": null,
+          "wakeStress": null,
+          "bbBed": 75,
+          "stressPrevDay": 22.995,
+          "sportPrev": 43,
+          "sportNext": 79,
+          "workdayNext": 1,
+          "onsetShift": 0.429,
+          "priorSleep": 8.936
+        },
+        {
+          "date": "2026-04-14",
+          "S": 9.195,
+          "bbMorning": 88.909,
+          "bbEvening": 71.227,
+          "wakeStress": 28.865,
+          "bbBed": 63,
+          "stressPrevDay": 26.16,
+          "sportPrev": 49,
+          "sportNext": 54,
+          "workdayNext": 0,
+          "onsetShift": 0.14,
+          "priorSleep": 8.016
+        },
+        {
+          "date": "2026-04-15",
+          "S": 5.666,
+          "bbMorning": 73.9,
+          "bbEvening": 58.606,
+          "wakeStress": 33.389,
+          "bbBed": 44,
+          "stressPrevDay": 32.833,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.504,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-04-16",
+          "S": 6.27,
+          "bbMorning": 77.219,
+          "bbEvening": 60.879,
+          "wakeStress": 32.441,
+          "bbBed": null,
+          "stressPrevDay": 58.811,
+          "sportPrev": 55,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.669,
+          "priorSleep": 6.403
+        },
+        {
+          "date": "2026-04-17",
+          "S": 8.119,
+          "bbMorning": 82.206,
+          "bbEvening": 64.625,
+          "wakeStress": 31.285,
+          "bbBed": 57,
+          "stressPrevDay": 56.084,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.073,
+          "priorSleep": 6.876
+        },
+        {
+          "date": "2026-04-18",
+          "S": 9.197,
+          "bbMorning": 94.708,
+          "bbEvening": 75.733,
+          "wakeStress": 26.667,
+          "bbBed": 25,
+          "stressPrevDay": 30.887,
+          "sportPrev": 103,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": -0.247,
+          "priorSleep": 7.892
+        },
+        {
+          "date": "2026-04-19",
+          "S": 6.045,
+          "bbMorning": 75.866,
+          "bbEvening": 60.234,
+          "wakeStress": 32.641,
+          "bbBed": null,
+          "stressPrevDay": 20.585,
+          "sportPrev": 50,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.338,
+          "priorSleep": null
+        },
+        {
+          "date": "2026-04-20",
+          "S": 8.683,
+          "bbMorning": 90.846,
+          "bbEvening": 72.212,
+          "wakeStress": 28.171,
+          "bbBed": 53,
+          "stressPrevDay": null,
+          "sportPrev": 50,
+          "sportNext": 78,
+          "workdayNext": 1,
+          "onsetShift": -0.062,
+          "priorSleep": 8.022
+        },
+        {
+          "date": "2026-04-21",
+          "S": 5.449,
+          "bbMorning": 73.18,
+          "bbEvening": 57.618,
+          "wakeStress": 34.042,
+          "bbBed": 67,
+          "stressPrevDay": null,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 1,
+          "onsetShift": 0.302,
+          "priorSleep": 8.799
+        },
+        {
+          "date": "2026-04-22",
+          "S": 9.276,
+          "bbMorning": 83.293,
+          "bbEvening": null,
+          "wakeStress": 30.693,
+          "bbBed": null,
+          "stressPrevDay": 31.218,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": 0.587,
+          "priorSleep": 7.37
+        },
+        {
+          "date": "2026-04-23",
+          "S": 9.457,
+          "bbMorning": 91.408,
+          "bbEvening": 72.664,
+          "wakeStress": 28.057,
+          "bbBed": 52,
+          "stressPrevDay": 44.77,
+          "sportPrev": 104,
+          "sportNext": 55,
+          "workdayNext": 0,
+          "onsetShift": 0.608,
+          "priorSleep": 8.723
+        },
+        {
+          "date": "2026-04-24",
+          "S": 9.539,
+          "bbMorning": 83.637,
+          "bbEvening": 65.986,
+          "wakeStress": 30.794,
+          "bbBed": null,
+          "stressPrevDay": 57.692,
+          "sportPrev": 0,
+          "sportNext": 0,
+          "workdayNext": 0,
+          "onsetShift": -0.152,
+          "priorSleep": 8.045
+        },
+        {
+          "date": "2026-04-25",
+          "S": 9.21,
+          "bbMorning": null,
+          "bbEvening": 61.966,
+          "wakeStress": 32.006,
+          "bbBed": 78,
+          "stressPrevDay": 22.764,
+          "sportPrev": 42,
+          "sportNext": 65,
+          "workdayNext": 1,
+          "onsetShift": 0.594,
+          "priorSleep": 6.117
+        }
+      ],
+      "expected": {
+        "n": 24,
+        "alpha": 2.1627751889728564,
+        "d": [
+          -0.0052360278530869525,
+          -0.005146094030721712,
+          -0.00440413999620847,
+          0.009372272989685989,
+          0.037782191336626865,
+          0.06506640271223058,
+          0.1475479086858809,
+          0.1939143541013162,
+          0.1825905696197308,
+          0.10578454243362229,
+          0.005396338378751708,
+          -0.00022816941082254318
+        ],
+        "gamma": [
+          -0.012079554994443142,
+          -0.016727505727380576,
+          0.04723349218092409,
+          0.022856002817495974
+        ],
+        "stats": [
+          {
+            "mean": 55.75,
+            "sd": 14.665009376062464
+          },
+          {
+            "mean": 34.99157894736842,
+            "sd": 11.77599701585609
+          },
+          {
+            "mean": 45.416666666666664,
+            "sd": 41.18648308473168
+          },
+          {
+            "mean": 7.6932,
+            "sd": 0.8201449018313777
+          }
+        ],
+        "globalIdealRaw": 8.35,
+        "globalIdealHours": 8.25,
+        "contexts": [
+          {
+            "name": "tout absent",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": null,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "idealRaw": 8.3,
+            "idealHours": 8.25
+          },
+          {
+            "name": "sport nul seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": 0,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0,
+              -1.1027080552916442,
+              0
+            ],
+            "idealRaw": 8.15,
+            "idealHours": 8.25
+          },
+          {
+            "name": "sport 90 seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": 90,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0,
+              1.082474879965192,
+              0
+            ],
+            "idealRaw": 8.35,
+            "idealHours": 8.25
+          },
+          {
+            "name": "contexte favorable",
+            "covariates": {
+              "bbBed": 80,
+              "stressPrevDay": 15,
+              "sportPrev": 120,
+              "priorSleep": 8.5
+            },
+            "z": [
+              1.6535959424330824,
+              -1.6976548924435229,
+              1.810869191717471,
+              0.9837286047848635
+            ],
+            "idealRaw": 8.45,
+            "idealHours": 8.25
+          },
+          {
+            "name": "contexte défavorable",
+            "covariates": {
+              "bbBed": 20,
+              "stressPrevDay": 60,
+              "sportPrev": 0,
+              "priorSleep": 6
+            },
+            "z": [
+              -2.4377754615250598,
+              2.1236775976554987,
+              -1.1027080552916442,
+              -2.0645132295757698
+            ],
+            "idealRaw": 8,
+            "idealHours": 8.25
+          },
+          {
+            "name": "extrême haut",
+            "covariates": {
+              "bbBed": 100,
+              "stressPrevDay": 0,
+              "sportPrev": 600,
+              "priorSleep": 12
+            },
+            "z": [
+              3.01738641041913,
+              -2.971432389143197,
+              13.46517817975393,
+              5.25126717288975
+            ],
+            "idealRaw": 9.100000000000001,
+            "idealHours": 8.25
+          },
+          {
+            "name": "extrême bas",
+            "covariates": {
+              "bbBed": 0,
+              "stressPrevDay": 100,
+              "sportPrev": 0,
+              "priorSleep": 3
+            },
+            "z": [
+              -3.801565929511107,
+              5.520417588854628,
+              -1.1027080552916442,
+              -5.722403430808529
+            ],
+            "idealRaw": 7.85,
+            "idealHours": 8.25
+          },
+          {
+            "name": "stress seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": 45,
+              "sportPrev": null,
+              "priorSleep": null
+            },
+            "z": [
+              0,
+              0.8499001009558248,
+              0,
+              0
+            ],
+            "idealRaw": 8.25,
+            "idealHours": 8.25
+          },
+          {
+            "name": "sommeil précédent seul",
+            "covariates": {
+              "bbBed": null,
+              "stressPrevDay": null,
+              "sportPrev": null,
+              "priorSleep": 7
+            },
+            "z": [
+              0,
+              0,
+              0,
+              -0.8452164958315164
+            ],
+            "idealRaw": 8.25,
+            "idealHours": 8.25
+          }
+        ]
+      }
+    }
+  ],
+  "upcoming": {
+    "date": "2026-10-06",
+    "offsetS": 7200,
+    "sleepByDate": {
+      "2026-10-05": 7.4,
+      "2026-10-04": 6.2,
+      "2026-10-02": 8.1,
+      "2026-09-30": 7.7,
+      "2026-09-29": 5.9
+    },
+    "habitualNights": [
+      {
+        "date": "2026-09-24",
+        "startTs": 1790197200,
+        "endTs": 1790222400,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-09-25",
+        "startTs": 1790285400,
+        "endTs": 1790310960,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-09-26",
+        "startTs": 1790375400,
+        "endTs": 1790401320,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-09-27",
+        "startTs": 1790463600,
+        "endTs": 1790489880,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-09-28",
+        "startTs": 1790543700,
+        "endTs": 1790570340,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-09-29",
+        "startTs": 1790628300,
+        "endTs": 1790655300,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-09-30",
+        "startTs": 1790720100,
+        "endTs": 1790747460,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-10-01",
+        "startTs": 1790804700,
+        "endTs": 1790832420,
+        "offsetS": 7200
+      },
+      {
+        "date": "2026-10-02",
+        "startTs": 1790888400,
+        "endTs": 1790916480,
+        "offsetS": 7200
+      }
+    ],
+    "expectedHabitualOnsetMin": 1425,
+    "modelCase": "120 nuits",
+    "cases": [
+      {
+        "name": "maintenant après l'endormissement habituel",
+        "nowS": 1791288000,
+        "bbSamples": [
+          {
+            "ts": 1791229517,
+            "value": 35
+          },
+          {
+            "ts": 1791229757,
+            "value": 62
+          },
+          {
+            "ts": 1791229997,
+            "value": 47
+          },
+          {
+            "ts": 1791230237,
+            "value": 64
+          },
+          {
+            "ts": 1791230477,
+            "value": 64
+          },
+          {
+            "ts": 1791230717,
+            "value": 33
+          },
+          {
+            "ts": 1791230957,
+            "value": 40
+          },
+          {
+            "ts": 1791231197,
+            "value": 29
+          },
+          {
+            "ts": 1791231437,
+            "value": 46
+          },
+          {
+            "ts": 1791231677,
+            "value": 34
+          },
+          {
+            "ts": 1791231917,
+            "value": 31
+          },
+          {
+            "ts": 1791232157,
+            "value": 47
+          },
+          {
+            "ts": 1791232397,
+            "value": 52
+          },
+          {
+            "ts": 1791232637,
+            "value": 61
+          },
+          {
+            "ts": 1791232877,
+            "value": 62
+          },
+          {
+            "ts": 1791233117,
+            "value": 41
+          },
+          {
+            "ts": 1791233357,
+            "value": 42
+          },
+          {
+            "ts": 1791233597,
+            "value": 20
+          },
+          {
+            "ts": 1791233837,
+            "value": 39
+          },
+          {
+            "ts": 1791234077,
+            "value": 26
+          },
+          {
+            "ts": 1791234317,
+            "value": 52
+          },
+          {
+            "ts": 1791234557,
+            "value": 24
+          },
+          {
+            "ts": 1791234797,
+            "value": 37
+          },
+          {
+            "ts": 1791235037,
+            "value": 45
+          },
+          {
+            "ts": 1791235277,
+            "value": 26
+          },
+          {
+            "ts": 1791235517,
+            "value": 43
+          },
+          {
+            "ts": 1791235757,
+            "value": 38
+          },
+          {
+            "ts": 1791235997,
+            "value": 52
+          },
+          {
+            "ts": 1791236237,
+            "value": 46
+          },
+          {
+            "ts": 1791236477,
+            "value": 49
+          },
+          {
+            "ts": 1791236717,
+            "value": 45
+          },
+          {
+            "ts": 1791236957,
+            "value": 63
+          },
+          {
+            "ts": 1791237197,
+            "value": 47
+          },
+          {
+            "ts": 1791237437,
+            "value": 63
+          },
+          {
+            "ts": 1791237677,
+            "value": 62
+          },
+          {
+            "ts": 1791237917,
+            "value": 36
+          },
+          {
+            "ts": 1791238157,
+            "value": 41
+          },
+          {
+            "ts": 1791238397,
+            "value": 60
+          },
+          {
+            "ts": 1791238637,
+            "value": 39
+          },
+          {
+            "ts": 1791238877,
+            "value": 25
+          }
+        ],
+        "stressSamples": [
+          {
+            "ts": 1791175507,
+            "value": 57
+          },
+          {
+            "ts": 1791175687,
+            "value": 33
+          },
+          {
+            "ts": 1791175867,
+            "value": 26
+          },
+          {
+            "ts": 1791176047,
+            "value": 42
+          },
+          {
+            "ts": 1791176227,
+            "value": 20
+          },
+          {
+            "ts": 1791176407,
+            "value": 20
+          },
+          {
+            "ts": 1791176587,
+            "value": 38
+          },
+          {
+            "ts": 1791176767,
+            "value": 28
+          },
+          {
+            "ts": 1791176947,
+            "value": 20
+          },
+          {
+            "ts": 1791177127,
+            "value": 45
+          },
+          {
+            "ts": 1791177307,
+            "value": 59
+          },
+          {
+            "ts": 1791177487,
+            "value": 37
+          },
+          {
+            "ts": 1791177667,
+            "value": 52
+          },
+          {
+            "ts": 1791177847,
+            "value": 38
+          },
+          {
+            "ts": 1791178027,
+            "value": 27
+          },
+          {
+            "ts": 1791178207,
+            "value": 58
+          },
+          {
+            "ts": 1791178387,
+            "value": 61
+          },
+          {
+            "ts": 1791178567,
+            "value": 21
+          },
+          {
+            "ts": 1791178747,
+            "value": 29
+          },
+          {
+            "ts": 1791178927,
+            "value": 42
+          },
+          {
+            "ts": 1791179107,
+            "value": 22
+          },
+          {
+            "ts": 1791179287,
+            "value": 25
+          },
+          {
+            "ts": 1791179467,
+            "value": 31
+          },
+          {
+            "ts": 1791179647,
+            "value": 27
+          },
+          {
+            "ts": 1791179827,
+            "value": 38
+          },
+          {
+            "ts": 1791180007,
+            "value": 22
+          },
+          {
+            "ts": 1791180187,
+            "value": 16
+          },
+          {
+            "ts": 1791180367,
+            "value": 42
+          },
+          {
+            "ts": 1791180547,
+            "value": 19
+          },
+          {
+            "ts": 1791180727,
+            "value": 28
+          },
+          {
+            "ts": 1791180907,
+            "value": 17
+          },
+          {
+            "ts": 1791181087,
+            "value": 61
+          },
+          {
+            "ts": 1791181267,
+            "value": 60
+          },
+          {
+            "ts": 1791181447,
+            "value": 44
+          },
+          {
+            "ts": 1791181627,
+            "value": 41
+          },
+          {
+            "ts": 1791181807,
+            "value": 54
+          },
+          {
+            "ts": 1791181987,
+            "value": 58
+          },
+          {
+            "ts": 1791182167,
+            "value": 49
+          },
+          {
+            "ts": 1791182347,
+            "value": 45
+          },
+          {
+            "ts": 1791182527,
+            "value": 41
+          },
+          {
+            "ts": 1791182707,
+            "value": 36
+          },
+          {
+            "ts": 1791182887,
+            "value": 17
+          },
+          {
+            "ts": 1791183067,
+            "value": 21
+          },
+          {
+            "ts": 1791183247,
+            "value": 62
+          },
+          {
+            "ts": 1791183427,
+            "value": 27
+          },
+          {
+            "ts": 1791183607,
+            "value": 54
+          },
+          {
+            "ts": 1791183787,
+            "value": 52
+          },
+          {
+            "ts": 1791183967,
+            "value": 48
+          },
+          {
+            "ts": 1791184147,
+            "value": 25
+          },
+          {
+            "ts": 1791184327,
+            "value": 19
+          },
+          {
+            "ts": 1791184507,
+            "value": 38
+          },
+          {
+            "ts": 1791184687,
+            "value": 37
+          },
+          {
+            "ts": 1791184867,
+            "value": 40
+          },
+          {
+            "ts": 1791185047,
+            "value": 19
+          },
+          {
+            "ts": 1791185227,
+            "value": 36
+          },
+          {
+            "ts": 1791185407,
+            "value": 19
+          },
+          {
+            "ts": 1791185587,
+            "value": 24
+          },
+          {
+            "ts": 1791185767,
+            "value": 44
+          },
+          {
+            "ts": 1791185947,
+            "value": 40
+          },
+          {
+            "ts": 1791186127,
+            "value": 65
+          },
+          {
+            "ts": 1791186307,
+            "value": 59
+          },
+          {
+            "ts": 1791186487,
+            "value": 61
+          },
+          {
+            "ts": 1791186667,
+            "value": 32
+          },
+          {
+            "ts": 1791186847,
+            "value": 47
+          },
+          {
+            "ts": 1791187027,
+            "value": 51
+          },
+          {
+            "ts": 1791187207,
+            "value": 54
+          },
+          {
+            "ts": 1791187387,
+            "value": 36
+          },
+          {
+            "ts": 1791187567,
+            "value": 60
+          },
+          {
+            "ts": 1791187747,
+            "value": 26
+          },
+          {
+            "ts": 1791187927,
+            "value": 50
+          },
+          {
+            "ts": 1791188107,
+            "value": 55
+          },
+          {
+            "ts": 1791188287,
+            "value": 60
+          },
+          {
+            "ts": 1791188467,
+            "value": 29
+          },
+          {
+            "ts": 1791188647,
+            "value": 27
+          },
+          {
+            "ts": 1791188827,
+            "value": 35
+          },
+          {
+            "ts": 1791189007,
+            "value": 43
+          },
+          {
+            "ts": 1791189187,
+            "value": 60
+          },
+          {
+            "ts": 1791189367,
+            "value": 47
+          },
+          {
+            "ts": 1791189547,
+            "value": 31
+          },
+          {
+            "ts": 1791189727,
+            "value": 44
+          },
+          {
+            "ts": 1791189907,
+            "value": 47
+          },
+          {
+            "ts": 1791190087,
+            "value": 34
+          },
+          {
+            "ts": 1791190267,
+            "value": 15
+          },
+          {
+            "ts": 1791190447,
+            "value": 40
+          },
+          {
+            "ts": 1791190627,
+            "value": 25
+          },
+          {
+            "ts": 1791190807,
+            "value": 28
+          },
+          {
+            "ts": 1791190987,
+            "value": 30
+          },
+          {
+            "ts": 1791191167,
+            "value": 44
+          },
+          {
+            "ts": 1791191347,
+            "value": 29
+          },
+          {
+            "ts": 1791191527,
+            "value": 41
+          },
+          {
+            "ts": 1791191707,
+            "value": 64
+          },
+          {
+            "ts": 1791191887,
+            "value": 45
+          },
+          {
+            "ts": 1791192067,
+            "value": 60
+          },
+          {
+            "ts": 1791192247,
+            "value": 17
+          },
+          {
+            "ts": 1791192427,
+            "value": 31
+          },
+          {
+            "ts": 1791192607,
+            "value": 51
+          },
+          {
+            "ts": 1791192787,
+            "value": 28
+          },
+          {
+            "ts": 1791192967,
+            "value": 27
+          },
+          {
+            "ts": 1791193147,
+            "value": 53
+          },
+          {
+            "ts": 1791193327,
+            "value": 33
+          },
+          {
+            "ts": 1791193507,
+            "value": 15
+          },
+          {
+            "ts": 1791193687,
+            "value": 30
+          },
+          {
+            "ts": 1791193867,
+            "value": 40
+          },
+          {
+            "ts": 1791194047,
+            "value": 24
+          },
+          {
+            "ts": 1791194227,
+            "value": 54
+          },
+          {
+            "ts": 1791194407,
+            "value": 30
+          },
+          {
+            "ts": 1791194587,
+            "value": 55
+          },
+          {
+            "ts": 1791194767,
+            "value": 29
+          },
+          {
+            "ts": 1791194947,
+            "value": 52
+          },
+          {
+            "ts": 1791195127,
+            "value": 36
+          },
+          {
+            "ts": 1791195307,
+            "value": 50
+          },
+          {
+            "ts": 1791195487,
+            "value": 35
+          },
+          {
+            "ts": 1791195667,
+            "value": 49
+          },
+          {
+            "ts": 1791195847,
+            "value": 32
+          },
+          {
+            "ts": 1791196027,
+            "value": 47
+          },
+          {
+            "ts": 1791196207,
+            "value": 17
+          },
+          {
+            "ts": 1791196387,
+            "value": 38
+          },
+          {
+            "ts": 1791196567,
+            "value": 37
+          },
+          {
+            "ts": 1791196747,
+            "value": 23
+          },
+          {
+            "ts": 1791196927,
+            "value": 36
+          },
+          {
+            "ts": 1791197107,
+            "value": 56
+          },
+          {
+            "ts": 1791197287,
+            "value": 46
+          },
+          {
+            "ts": 1791197467,
+            "value": 48
+          },
+          {
+            "ts": 1791197647,
+            "value": 31
+          },
+          {
+            "ts": 1791197827,
+            "value": 46
+          },
+          {
+            "ts": 1791198007,
+            "value": 52
+          },
+          {
+            "ts": 1791198187,
+            "value": 56
+          },
+          {
+            "ts": 1791198367,
+            "value": 62
+          },
+          {
+            "ts": 1791198547,
+            "value": 23
+          },
+          {
+            "ts": 1791198727,
+            "value": 42
+          },
+          {
+            "ts": 1791198907,
+            "value": 52
+          },
+          {
+            "ts": 1791199087,
+            "value": 40
+          },
+          {
+            "ts": 1791199267,
+            "value": 51
+          },
+          {
+            "ts": 1791199447,
+            "value": 33
+          },
+          {
+            "ts": 1791199627,
+            "value": 64
+          },
+          {
+            "ts": 1791199807,
+            "value": 42
+          },
+          {
+            "ts": 1791199987,
+            "value": 16
+          },
+          {
+            "ts": 1791200167,
+            "value": 30
+          },
+          {
+            "ts": 1791200347,
+            "value": 45
+          },
+          {
+            "ts": 1791200527,
+            "value": 64
+          },
+          {
+            "ts": 1791200707,
+            "value": 38
+          },
+          {
+            "ts": 1791200887,
+            "value": 22
+          },
+          {
+            "ts": 1791201067,
+            "value": 56
+          },
+          {
+            "ts": 1791201247,
+            "value": 38
+          },
+          {
+            "ts": 1791201427,
+            "value": 30
+          },
+          {
+            "ts": 1791201607,
+            "value": 36
+          },
+          {
+            "ts": 1791201787,
+            "value": 41
+          },
+          {
+            "ts": 1791201967,
+            "value": 49
+          },
+          {
+            "ts": 1791202147,
+            "value": 60
+          },
+          {
+            "ts": 1791202327,
+            "value": 40
+          },
+          {
+            "ts": 1791202507,
+            "value": 31
+          },
+          {
+            "ts": 1791202687,
+            "value": 17
+          },
+          {
+            "ts": 1791202867,
+            "value": 33
+          },
+          {
+            "ts": 1791203047,
+            "value": 21
+          },
+          {
+            "ts": 1791203227,
+            "value": 58
+          },
+          {
+            "ts": 1791203407,
+            "value": 27
+          },
+          {
+            "ts": 1791203587,
+            "value": 54
+          },
+          {
+            "ts": 1791203767,
+            "value": 34
+          },
+          {
+            "ts": 1791203947,
+            "value": 18
+          },
+          {
+            "ts": 1791204127,
+            "value": 55
+          },
+          {
+            "ts": 1791204307,
+            "value": 55
+          },
+          {
+            "ts": 1791204487,
+            "value": 56
+          },
+          {
+            "ts": 1791204667,
+            "value": 28
+          },
+          {
+            "ts": 1791204847,
+            "value": 63
+          },
+          {
+            "ts": 1791205027,
+            "value": 34
+          },
+          {
+            "ts": 1791205207,
+            "value": 19
+          },
+          {
+            "ts": 1791205387,
+            "value": 53
+          },
+          {
+            "ts": 1791205567,
+            "value": 58
+          },
+          {
+            "ts": 1791205747,
+            "value": 50
+          },
+          {
+            "ts": 1791205927,
+            "value": 21
+          },
+          {
+            "ts": 1791206107,
+            "value": 50
+          },
+          {
+            "ts": 1791206287,
+            "value": 46
+          },
+          {
+            "ts": 1791206467,
+            "value": 22
+          },
+          {
+            "ts": 1791206647,
+            "value": 27
+          },
+          {
+            "ts": 1791206827,
+            "value": 49
+          },
+          {
+            "ts": 1791207007,
+            "value": 36
+          },
+          {
+            "ts": 1791207187,
+            "value": 58
+          },
+          {
+            "ts": 1791207367,
+            "value": 35
+          },
+          {
+            "ts": 1791207547,
+            "value": 17
+          },
+          {
+            "ts": 1791207727,
+            "value": 25
+          },
+          {
+            "ts": 1791207907,
+            "value": 51
+          },
+          {
+            "ts": 1791208087,
+            "value": 20
+          },
+          {
+            "ts": 1791208267,
+            "value": 64
+          },
+          {
+            "ts": 1791208447,
+            "value": 30
+          },
+          {
+            "ts": 1791208627,
+            "value": 17
+          },
+          {
+            "ts": 1791208807,
+            "value": 33
+          },
+          {
+            "ts": 1791208987,
+            "value": 39
+          },
+          {
+            "ts": 1791209167,
+            "value": 21
+          },
+          {
+            "ts": 1791209347,
+            "value": 34
+          },
+          {
+            "ts": 1791209527,
+            "value": 52
+          },
+          {
+            "ts": 1791209707,
+            "value": 37
+          },
+          {
+            "ts": 1791209887,
+            "value": 61
+          },
+          {
+            "ts": 1791210067,
+            "value": 41
+          },
+          {
+            "ts": 1791210247,
+            "value": 21
+          },
+          {
+            "ts": 1791210427,
+            "value": 36
+          },
+          {
+            "ts": 1791210607,
+            "value": 17
+          },
+          {
+            "ts": 1791210787,
+            "value": 57
+          },
+          {
+            "ts": 1791210967,
+            "value": 55
+          },
+          {
+            "ts": 1791211147,
+            "value": 48
+          },
+          {
+            "ts": 1791211327,
+            "value": 40
+          },
+          {
+            "ts": 1791211507,
+            "value": 26
+          },
+          {
+            "ts": 1791211687,
+            "value": 39
+          },
+          {
+            "ts": 1791211867,
+            "value": 27
+          },
+          {
+            "ts": 1791212047,
+            "value": 24
+          },
+          {
+            "ts": 1791212227,
+            "value": 40
+          },
+          {
+            "ts": 1791212407,
+            "value": 16
+          },
+          {
+            "ts": 1791212587,
+            "value": 21
+          },
+          {
+            "ts": 1791212767,
+            "value": 33
+          },
+          {
+            "ts": 1791212947,
+            "value": 61
+          },
+          {
+            "ts": 1791213127,
+            "value": 49
+          },
+          {
+            "ts": 1791213307,
+            "value": 46
+          },
+          {
+            "ts": 1791213487,
+            "value": 22
+          },
+          {
+            "ts": 1791213667,
+            "value": 60
+          },
+          {
+            "ts": 1791213847,
+            "value": 46
+          },
+          {
+            "ts": 1791214027,
+            "value": 35
+          },
+          {
+            "ts": 1791214207,
+            "value": 39
+          },
+          {
+            "ts": 1791214387,
+            "value": 42
+          },
+          {
+            "ts": 1791214567,
+            "value": 35
+          },
+          {
+            "ts": 1791214747,
+            "value": 61
+          },
+          {
+            "ts": 1791214927,
+            "value": 20
+          },
+          {
+            "ts": 1791215107,
+            "value": 64
+          },
+          {
+            "ts": 1791215287,
+            "value": 48
+          },
+          {
+            "ts": 1791215467,
+            "value": 62
+          },
+          {
+            "ts": 1791215647,
+            "value": 48
+          },
+          {
+            "ts": 1791215827,
+            "value": 58
+          },
+          {
+            "ts": 1791216007,
+            "value": 22
+          },
+          {
+            "ts": 1791216187,
+            "value": 64
+          },
+          {
+            "ts": 1791216367,
+            "value": 15
+          },
+          {
+            "ts": 1791216547,
+            "value": 62
+          },
+          {
+            "ts": 1791216727,
+            "value": 21
+          },
+          {
+            "ts": 1791216907,
+            "value": 28
+          },
+          {
+            "ts": 1791217087,
+            "value": 56
+          },
+          {
+            "ts": 1791217267,
+            "value": 63
+          },
+          {
+            "ts": 1791217447,
+            "value": 30
+          },
+          {
+            "ts": 1791217627,
+            "value": 29
+          },
+          {
+            "ts": 1791217807,
+            "value": 29
+          },
+          {
+            "ts": 1791217987,
+            "value": 38
+          },
+          {
+            "ts": 1791218167,
+            "value": 25
+          },
+          {
+            "ts": 1791218347,
+            "value": 21
+          },
+          {
+            "ts": 1791218527,
+            "value": 53
+          },
+          {
+            "ts": 1791218707,
+            "value": 28
+          },
+          {
+            "ts": 1791218887,
+            "value": 30
+          },
+          {
+            "ts": 1791219067,
+            "value": 47
+          },
+          {
+            "ts": 1791219247,
+            "value": 36
+          },
+          {
+            "ts": 1791219427,
+            "value": 20
+          },
+          {
+            "ts": 1791219607,
+            "value": 45
+          },
+          {
+            "ts": 1791219787,
+            "value": 60
+          },
+          {
+            "ts": 1791219967,
+            "value": 21
+          },
+          {
+            "ts": 1791220147,
+            "value": 51
+          },
+          {
+            "ts": 1791220327,
+            "value": 64
+          },
+          {
+            "ts": 1791220507,
+            "value": 58
+          },
+          {
+            "ts": 1791220687,
+            "value": 42
+          },
+          {
+            "ts": 1791220867,
+            "value": 20
+          },
+          {
+            "ts": 1791221047,
+            "value": 63
+          },
+          {
+            "ts": 1791221227,
+            "value": 23
+          },
+          {
+            "ts": 1791221407,
+            "value": 47
+          },
+          {
+            "ts": 1791221587,
+            "value": 42
+          },
+          {
+            "ts": 1791221767,
+            "value": 24
+          },
+          {
+            "ts": 1791221947,
+            "value": 50
+          },
+          {
+            "ts": 1791222127,
+            "value": 51
+          },
+          {
+            "ts": 1791222307,
+            "value": 31
+          },
+          {
+            "ts": 1791222487,
+            "value": 56
+          },
+          {
+            "ts": 1791222667,
+            "value": 53
+          },
+          {
+            "ts": 1791222847,
+            "value": 29
+          },
+          {
+            "ts": 1791223027,
+            "value": 38
+          },
+          {
+            "ts": 1791223207,
+            "value": 59
+          },
+          {
+            "ts": 1791223387,
+            "value": 47
+          },
+          {
+            "ts": 1791223567,
+            "value": 48
+          },
+          {
+            "ts": 1791223747,
+            "value": 49
+          },
+          {
+            "ts": 1791223927,
+            "value": 30
+          },
+          {
+            "ts": 1791224107,
+            "value": 55
+          },
+          {
+            "ts": 1791224287,
+            "value": 49
+          },
+          {
+            "ts": 1791224467,
+            "value": 46
+          },
+          {
+            "ts": 1791224647,
+            "value": 49
+          },
+          {
+            "ts": 1791224827,
+            "value": 21
+          },
+          {
+            "ts": 1791225007,
+            "value": 35
+          },
+          {
+            "ts": 1791225187,
+            "value": 25
+          },
+          {
+            "ts": 1791225367,
+            "value": 31
+          },
+          {
+            "ts": 1791225547,
+            "value": 32
+          },
+          {
+            "ts": 1791225727,
+            "value": 17
+          },
+          {
+            "ts": 1791225907,
+            "value": 15
+          },
+          {
+            "ts": 1791226087,
+            "value": 50
+          },
+          {
+            "ts": 1791226267,
+            "value": 21
+          },
+          {
+            "ts": 1791226447,
+            "value": 51
+          },
+          {
+            "ts": 1791226627,
+            "value": 20
+          },
+          {
+            "ts": 1791226807,
+            "value": 20
+          },
+          {
+            "ts": 1791226987,
+            "value": 17
+          },
+          {
+            "ts": 1791227167,
+            "value": 27
+          },
+          {
+            "ts": 1791227347,
+            "value": 52
+          },
+          {
+            "ts": 1791227527,
+            "value": 59
+          },
+          {
+            "ts": 1791227707,
+            "value": 26
+          },
+          {
+            "ts": 1791227887,
+            "value": 50
+          },
+          {
+            "ts": 1791228067,
+            "value": 63
+          },
+          {
+            "ts": 1791228247,
+            "value": 43
+          },
+          {
+            "ts": 1791228427,
+            "value": 64
+          },
+          {
+            "ts": 1791228607,
+            "value": 33
+          },
+          {
+            "ts": 1791228787,
+            "value": 19
+          },
+          {
+            "ts": 1791228967,
+            "value": 24
+          },
+          {
+            "ts": 1791229147,
+            "value": 60
+          },
+          {
+            "ts": 1791229327,
+            "value": 43
+          },
+          {
+            "ts": 1791229507,
+            "value": 53
+          },
+          {
+            "ts": 1791229687,
+            "value": 18
+          },
+          {
+            "ts": 1791229867,
+            "value": 43
+          },
+          {
+            "ts": 1791230047,
+            "value": 46
+          },
+          {
+            "ts": 1791230227,
+            "value": 41
+          },
+          {
+            "ts": 1791230407,
+            "value": 53
+          },
+          {
+            "ts": 1791230587,
+            "value": 17
+          },
+          {
+            "ts": 1791230767,
+            "value": 36
+          },
+          {
+            "ts": 1791230947,
+            "value": 55
+          },
+          {
+            "ts": 1791231127,
+            "value": 49
+          },
+          {
+            "ts": 1791231307,
+            "value": 44
+          },
+          {
+            "ts": 1791231487,
+            "value": 60
+          },
+          {
+            "ts": 1791231667,
+            "value": 16
+          },
+          {
+            "ts": 1791231847,
+            "value": 33
+          },
+          {
+            "ts": 1791232027,
+            "value": 22
+          },
+          {
+            "ts": 1791232207,
+            "value": 20
+          },
+          {
+            "ts": 1791232387,
+            "value": 19
+          },
+          {
+            "ts": 1791232567,
+            "value": 26
+          },
+          {
+            "ts": 1791232747,
+            "value": 32
+          },
+          {
+            "ts": 1791232927,
+            "value": 49
+          },
+          {
+            "ts": 1791233107,
+            "value": 43
+          },
+          {
+            "ts": 1791233287,
+            "value": 19
+          },
+          {
+            "ts": 1791233467,
+            "value": 48
+          },
+          {
+            "ts": 1791233647,
+            "value": 41
+          },
+          {
+            "ts": 1791233827,
+            "value": 44
+          },
+          {
+            "ts": 1791234007,
+            "value": 22
+          },
+          {
+            "ts": 1791234187,
+            "value": 65
+          },
+          {
+            "ts": 1791234367,
+            "value": 54
+          },
+          {
+            "ts": 1791234547,
+            "value": 38
+          },
+          {
+            "ts": 1791234727,
+            "value": 63
+          },
+          {
+            "ts": 1791234907,
+            "value": 24
+          },
+          {
+            "ts": 1791235087,
+            "value": 31
+          },
+          {
+            "ts": 1791235267,
+            "value": 59
+          },
+          {
+            "ts": 1791235447,
+            "value": 55
+          },
+          {
+            "ts": 1791235627,
+            "value": 39
+          },
+          {
+            "ts": 1791235807,
+            "value": 59
+          },
+          {
+            "ts": 1791235987,
+            "value": 35
+          },
+          {
+            "ts": 1791236167,
+            "value": 42
+          },
+          {
+            "ts": 1791236347,
+            "value": 53
+          },
+          {
+            "ts": 1791236527,
+            "value": 17
+          },
+          {
+            "ts": 1791236707,
+            "value": 26
+          },
+          {
+            "ts": 1791236887,
+            "value": 58
+          },
+          {
+            "ts": 1791237067,
+            "value": 28
+          },
+          {
+            "ts": 1791237247,
+            "value": 34
+          },
+          {
+            "ts": 1791237427,
+            "value": 34
+          },
+          {
+            "ts": 1791237607,
+            "value": 16
+          },
+          {
+            "ts": 1791237787,
+            "value": 18
+          },
+          {
+            "ts": 1791237967,
+            "value": 52
+          },
+          {
+            "ts": 1791238147,
+            "value": 24
+          },
+          {
+            "ts": 1791238327,
+            "value": 57
+          },
+          {
+            "ts": 1791238507,
+            "value": 38
+          },
+          {
+            "ts": 1791238687,
+            "value": 49
+          },
+          {
+            "ts": 1791238867,
+            "value": 41
+          },
+          {
+            "ts": 1791239047,
+            "value": 37
+          },
+          {
+            "ts": 1791239227,
+            "value": 28
+          },
+          {
+            "ts": 1791239407,
+            "value": 36
+          },
+          {
+            "ts": 1791239587,
+            "value": 42
+          },
+          {
+            "ts": 1791239767,
+            "value": 49
+          },
+          {
+            "ts": 1791239947,
+            "value": 16
+          },
+          {
+            "ts": 1791240127,
+            "value": 56
+          },
+          {
+            "ts": 1791240307,
+            "value": 31
+          },
+          {
+            "ts": 1791240487,
+            "value": 64
+          },
+          {
+            "ts": 1791240667,
+            "value": 58
+          },
+          {
+            "ts": 1791240847,
+            "value": 18
+          },
+          {
+            "ts": 1791241027,
+            "value": 64
+          },
+          {
+            "ts": 1791241207,
+            "value": 38
+          },
+          {
+            "ts": 1791241387,
+            "value": 24
+          },
+          {
+            "ts": 1791241567,
+            "value": 40
+          },
+          {
+            "ts": 1791241747,
+            "value": 32
+          },
+          {
+            "ts": 1791241927,
+            "value": 47
+          },
+          {
+            "ts": 1791242107,
+            "value": 45
+          },
+          {
+            "ts": 1791242287,
+            "value": 33
+          },
+          {
+            "ts": 1791242467,
+            "value": 47
+          },
+          {
+            "ts": 1791242647,
+            "value": 52
+          },
+          {
+            "ts": 1791242827,
+            "value": 52
+          },
+          {
+            "ts": 1791243007,
+            "value": 60
+          },
+          {
+            "ts": 1791243187,
+            "value": 50
+          },
+          {
+            "ts": 1791243367,
+            "value": 46
+          },
+          {
+            "ts": 1791243547,
+            "value": 18
+          },
+          {
+            "ts": 1791243727,
+            "value": 53
+          },
+          {
+            "ts": 1791243907,
+            "value": 55
+          },
+          {
+            "ts": 1791244087,
+            "value": 57
+          },
+          {
+            "ts": 1791244267,
+            "value": 32
+          },
+          {
+            "ts": 1791244447,
+            "value": 39
+          },
+          {
+            "ts": 1791244627,
+            "value": 35
+          },
+          {
+            "ts": 1791244807,
+            "value": 16
+          },
+          {
+            "ts": 1791244987,
+            "value": 61
+          },
+          {
+            "ts": 1791245167,
+            "value": 18
+          },
+          {
+            "ts": 1791245347,
+            "value": 24
+          },
+          {
+            "ts": 1791245527,
+            "value": 25
+          },
+          {
+            "ts": 1791245707,
+            "value": 20
+          },
+          {
+            "ts": 1791245887,
+            "value": 59
+          },
+          {
+            "ts": 1791246067,
+            "value": 39
+          },
+          {
+            "ts": 1791246247,
+            "value": 61
+          },
+          {
+            "ts": 1791246427,
+            "value": 35
+          },
+          {
+            "ts": 1791246607,
+            "value": 55
+          },
+          {
+            "ts": 1791246787,
+            "value": 35
+          },
+          {
+            "ts": 1791246967,
+            "value": 40
+          },
+          {
+            "ts": 1791247147,
+            "value": 41
+          },
+          {
+            "ts": 1791247327,
+            "value": 18
+          }
+        ],
+        "activities": [
+          {
+            "startTs": 1791128700,
+            "durationS": 3000
+          },
+          {
+            "startTs": 1791164700,
+            "durationS": 2700
+          },
+          {
+            "startTs": 1791218700,
+            "durationS": 1800
+          },
+          {
+            "startTs": 1791229500,
+            "durationS": null
+          },
+          {
+            "startTs": 1791240300,
+            "durationS": 4000
+          }
+        ],
+        "expected": {
+          "onsetRef": 1791236700,
+          "covariates": {
+            "bbBed": 49,
+            "stressPrevDay": 39.766666666666666,
+            "sportPrev": 75,
+            "priorSleep": 7.085046728971962
+          },
+          "nightIdealHours": 8.333333333333334
+        }
+      },
+      {
+        "name": "maintenant avant l'endormissement habituel",
+        "nowS": 1791231300,
+        "bbSamples": [
+          {
+            "ts": 1791224117,
+            "value": 49
+          },
+          {
+            "ts": 1791224357,
+            "value": 60
+          },
+          {
+            "ts": 1791224597,
+            "value": 30
+          },
+          {
+            "ts": 1791224837,
+            "value": 25
+          },
+          {
+            "ts": 1791225077,
+            "value": 64
+          },
+          {
+            "ts": 1791225317,
+            "value": 53
+          },
+          {
+            "ts": 1791225557,
+            "value": 44
+          },
+          {
+            "ts": 1791225797,
+            "value": 29
+          },
+          {
+            "ts": 1791226037,
+            "value": 47
+          },
+          {
+            "ts": 1791226277,
+            "value": 21
+          },
+          {
+            "ts": 1791226517,
+            "value": 46
+          },
+          {
+            "ts": 1791226757,
+            "value": 44
+          },
+          {
+            "ts": 1791226997,
+            "value": 61
+          },
+          {
+            "ts": 1791227237,
+            "value": 61
+          },
+          {
+            "ts": 1791227477,
+            "value": 51
+          },
+          {
+            "ts": 1791227717,
+            "value": 41
+          },
+          {
+            "ts": 1791227957,
+            "value": 62
+          },
+          {
+            "ts": 1791228197,
+            "value": 21
+          },
+          {
+            "ts": 1791228437,
+            "value": 25
+          },
+          {
+            "ts": 1791228677,
+            "value": 56
+          },
+          {
+            "ts": 1791228917,
+            "value": 21
+          },
+          {
+            "ts": 1791229157,
+            "value": 46
+          },
+          {
+            "ts": 1791229397,
+            "value": 34
+          },
+          {
+            "ts": 1791229637,
+            "value": 65
+          },
+          {
+            "ts": 1791229877,
+            "value": 51
+          },
+          {
+            "ts": 1791230117,
+            "value": 31
+          },
+          {
+            "ts": 1791230357,
+            "value": 36
+          },
+          {
+            "ts": 1791230597,
+            "value": 60
+          },
+          {
+            "ts": 1791230837,
+            "value": 60
+          },
+          {
+            "ts": 1791231077,
+            "value": 60
+          },
+          {
+            "ts": 1791231317,
+            "value": 27
+          },
+          {
+            "ts": 1791231557,
+            "value": 53
+          },
+          {
+            "ts": 1791231797,
+            "value": 61
+          },
+          {
+            "ts": 1791232037,
+            "value": 26
+          },
+          {
+            "ts": 1791232277,
+            "value": 54
+          },
+          {
+            "ts": 1791232517,
+            "value": 28
+          },
+          {
+            "ts": 1791232757,
+            "value": 28
+          },
+          {
+            "ts": 1791232997,
+            "value": 43
+          },
+          {
+            "ts": 1791233237,
+            "value": 42
+          },
+          {
+            "ts": 1791233477,
+            "value": 52
+          }
+        ],
+        "stressSamples": [
+          {
+            "ts": 1791170107,
+            "value": 22
+          },
+          {
+            "ts": 1791170287,
+            "value": 19
+          },
+          {
+            "ts": 1791170467,
+            "value": 31
+          },
+          {
+            "ts": 1791170647,
+            "value": 43
+          },
+          {
+            "ts": 1791170827,
+            "value": 56
+          },
+          {
+            "ts": 1791171007,
+            "value": 22
+          },
+          {
+            "ts": 1791171187,
+            "value": 20
+          },
+          {
+            "ts": 1791171367,
+            "value": 50
+          },
+          {
+            "ts": 1791171547,
+            "value": 43
+          },
+          {
+            "ts": 1791171727,
+            "value": 27
+          },
+          {
+            "ts": 1791171907,
+            "value": 48
+          },
+          {
+            "ts": 1791172087,
+            "value": 25
+          },
+          {
+            "ts": 1791172267,
+            "value": 33
+          },
+          {
+            "ts": 1791172447,
+            "value": 37
+          },
+          {
+            "ts": 1791172627,
+            "value": 38
+          },
+          {
+            "ts": 1791172807,
+            "value": 29
+          },
+          {
+            "ts": 1791172987,
+            "value": 36
+          },
+          {
+            "ts": 1791173167,
+            "value": 38
+          },
+          {
+            "ts": 1791173347,
+            "value": 36
+          },
+          {
+            "ts": 1791173527,
+            "value": 38
+          },
+          {
+            "ts": 1791173707,
+            "value": 56
+          },
+          {
+            "ts": 1791173887,
+            "value": 62
+          },
+          {
+            "ts": 1791174067,
+            "value": 27
+          },
+          {
+            "ts": 1791174247,
+            "value": 36
+          },
+          {
+            "ts": 1791174427,
+            "value": 54
+          },
+          {
+            "ts": 1791174607,
+            "value": 39
+          },
+          {
+            "ts": 1791174787,
+            "value": 60
+          },
+          {
+            "ts": 1791174967,
+            "value": 49
+          },
+          {
+            "ts": 1791175147,
+            "value": 22
+          },
+          {
+            "ts": 1791175327,
+            "value": 23
+          },
+          {
+            "ts": 1791175507,
+            "value": 51
+          },
+          {
+            "ts": 1791175687,
+            "value": 16
+          },
+          {
+            "ts": 1791175867,
+            "value": 57
+          },
+          {
+            "ts": 1791176047,
+            "value": 43
+          },
+          {
+            "ts": 1791176227,
+            "value": 49
+          },
+          {
+            "ts": 1791176407,
+            "value": 23
+          },
+          {
+            "ts": 1791176587,
+            "value": 58
+          },
+          {
+            "ts": 1791176767,
+            "value": 26
+          },
+          {
+            "ts": 1791176947,
+            "value": 29
+          },
+          {
+            "ts": 1791177127,
+            "value": 47
+          },
+          {
+            "ts": 1791177307,
+            "value": 45
+          },
+          {
+            "ts": 1791177487,
+            "value": 43
+          },
+          {
+            "ts": 1791177667,
+            "value": 55
+          },
+          {
+            "ts": 1791177847,
+            "value": 61
+          },
+          {
+            "ts": 1791178027,
+            "value": 41
+          },
+          {
+            "ts": 1791178207,
+            "value": 38
+          },
+          {
+            "ts": 1791178387,
+            "value": 45
+          },
+          {
+            "ts": 1791178567,
+            "value": 23
+          },
+          {
+            "ts": 1791178747,
+            "value": 39
+          },
+          {
+            "ts": 1791178927,
+            "value": 29
+          },
+          {
+            "ts": 1791179107,
+            "value": 65
+          },
+          {
+            "ts": 1791179287,
+            "value": 44
+          },
+          {
+            "ts": 1791179467,
+            "value": 20
+          },
+          {
+            "ts": 1791179647,
+            "value": 54
+          },
+          {
+            "ts": 1791179827,
+            "value": 24
+          },
+          {
+            "ts": 1791180007,
+            "value": 35
+          },
+          {
+            "ts": 1791180187,
+            "value": 28
+          },
+          {
+            "ts": 1791180367,
+            "value": 41
+          },
+          {
+            "ts": 1791180547,
+            "value": 44
+          },
+          {
+            "ts": 1791180727,
+            "value": 42
+          },
+          {
+            "ts": 1791180907,
+            "value": 17
+          },
+          {
+            "ts": 1791181087,
+            "value": 49
+          },
+          {
+            "ts": 1791181267,
+            "value": 59
+          },
+          {
+            "ts": 1791181447,
+            "value": 17
+          },
+          {
+            "ts": 1791181627,
+            "value": 42
+          },
+          {
+            "ts": 1791181807,
+            "value": 28
+          },
+          {
+            "ts": 1791181987,
+            "value": 25
+          },
+          {
+            "ts": 1791182167,
+            "value": 58
+          },
+          {
+            "ts": 1791182347,
+            "value": 29
+          },
+          {
+            "ts": 1791182527,
+            "value": 64
+          },
+          {
+            "ts": 1791182707,
+            "value": 18
+          },
+          {
+            "ts": 1791182887,
+            "value": 23
+          },
+          {
+            "ts": 1791183067,
+            "value": 23
+          },
+          {
+            "ts": 1791183247,
+            "value": 55
+          },
+          {
+            "ts": 1791183427,
+            "value": 55
+          },
+          {
+            "ts": 1791183607,
+            "value": 51
+          },
+          {
+            "ts": 1791183787,
+            "value": 17
+          },
+          {
+            "ts": 1791183967,
+            "value": 25
+          },
+          {
+            "ts": 1791184147,
+            "value": 30
+          },
+          {
+            "ts": 1791184327,
+            "value": 61
+          },
+          {
+            "ts": 1791184507,
+            "value": 15
+          },
+          {
+            "ts": 1791184687,
+            "value": 47
+          },
+          {
+            "ts": 1791184867,
+            "value": 23
+          },
+          {
+            "ts": 1791185047,
+            "value": 37
+          },
+          {
+            "ts": 1791185227,
+            "value": 44
+          },
+          {
+            "ts": 1791185407,
+            "value": 31
+          },
+          {
+            "ts": 1791185587,
+            "value": 23
+          },
+          {
+            "ts": 1791185767,
+            "value": 55
+          },
+          {
+            "ts": 1791185947,
+            "value": 34
+          },
+          {
+            "ts": 1791186127,
+            "value": 20
+          },
+          {
+            "ts": 1791186307,
+            "value": 18
+          },
+          {
+            "ts": 1791186487,
+            "value": 24
+          },
+          {
+            "ts": 1791186667,
+            "value": 38
+          },
+          {
+            "ts": 1791186847,
+            "value": 52
+          },
+          {
+            "ts": 1791187027,
+            "value": 17
+          },
+          {
+            "ts": 1791187207,
+            "value": 57
+          },
+          {
+            "ts": 1791187387,
+            "value": 26
+          },
+          {
+            "ts": 1791187567,
+            "value": 24
+          },
+          {
+            "ts": 1791187747,
+            "value": 28
+          },
+          {
+            "ts": 1791187927,
+            "value": 22
+          },
+          {
+            "ts": 1791188107,
+            "value": 25
+          },
+          {
+            "ts": 1791188287,
+            "value": 47
+          },
+          {
+            "ts": 1791188467,
+            "value": 55
+          },
+          {
+            "ts": 1791188647,
+            "value": 49
+          },
+          {
+            "ts": 1791188827,
+            "value": 55
+          },
+          {
+            "ts": 1791189007,
+            "value": 62
+          },
+          {
+            "ts": 1791189187,
+            "value": 20
+          },
+          {
+            "ts": 1791189367,
+            "value": 24
+          },
+          {
+            "ts": 1791189547,
+            "value": 26
+          },
+          {
+            "ts": 1791189727,
+            "value": 27
+          },
+          {
+            "ts": 1791189907,
+            "value": 49
+          },
+          {
+            "ts": 1791190087,
+            "value": 57
+          },
+          {
+            "ts": 1791190267,
+            "value": 62
+          },
+          {
+            "ts": 1791190447,
+            "value": 57
+          },
+          {
+            "ts": 1791190627,
+            "value": 29
+          },
+          {
+            "ts": 1791190807,
+            "value": 41
+          },
+          {
+            "ts": 1791190987,
+            "value": 19
+          },
+          {
+            "ts": 1791191167,
+            "value": 39
+          },
+          {
+            "ts": 1791191347,
+            "value": 38
+          },
+          {
+            "ts": 1791191527,
+            "value": 16
+          },
+          {
+            "ts": 1791191707,
+            "value": 24
+          },
+          {
+            "ts": 1791191887,
+            "value": 53
+          },
+          {
+            "ts": 1791192067,
+            "value": 29
+          },
+          {
+            "ts": 1791192247,
+            "value": 23
+          },
+          {
+            "ts": 1791192427,
+            "value": 17
+          },
+          {
+            "ts": 1791192607,
+            "value": 51
+          },
+          {
+            "ts": 1791192787,
+            "value": 56
+          },
+          {
+            "ts": 1791192967,
+            "value": 25
+          },
+          {
+            "ts": 1791193147,
+            "value": 63
+          },
+          {
+            "ts": 1791193327,
+            "value": 17
+          },
+          {
+            "ts": 1791193507,
+            "value": 22
+          },
+          {
+            "ts": 1791193687,
+            "value": 15
+          },
+          {
+            "ts": 1791193867,
+            "value": 33
+          },
+          {
+            "ts": 1791194047,
+            "value": 20
+          },
+          {
+            "ts": 1791194227,
+            "value": 64
+          },
+          {
+            "ts": 1791194407,
+            "value": 50
+          },
+          {
+            "ts": 1791194587,
+            "value": 58
+          },
+          {
+            "ts": 1791194767,
+            "value": 54
+          },
+          {
+            "ts": 1791194947,
+            "value": 59
+          },
+          {
+            "ts": 1791195127,
+            "value": 27
+          },
+          {
+            "ts": 1791195307,
+            "value": 33
+          },
+          {
+            "ts": 1791195487,
+            "value": 49
+          },
+          {
+            "ts": 1791195667,
+            "value": 46
+          },
+          {
+            "ts": 1791195847,
+            "value": 21
+          },
+          {
+            "ts": 1791196027,
+            "value": 40
+          },
+          {
+            "ts": 1791196207,
+            "value": 40
+          },
+          {
+            "ts": 1791196387,
+            "value": 57
+          },
+          {
+            "ts": 1791196567,
+            "value": 17
+          },
+          {
+            "ts": 1791196747,
+            "value": 17
+          },
+          {
+            "ts": 1791196927,
+            "value": 51
+          },
+          {
+            "ts": 1791197107,
+            "value": 29
+          },
+          {
+            "ts": 1791197287,
+            "value": 24
+          },
+          {
+            "ts": 1791197467,
+            "value": 37
+          },
+          {
+            "ts": 1791197647,
+            "value": 30
+          },
+          {
+            "ts": 1791197827,
+            "value": 42
+          },
+          {
+            "ts": 1791198007,
+            "value": 43
+          },
+          {
+            "ts": 1791198187,
+            "value": 62
+          },
+          {
+            "ts": 1791198367,
+            "value": 34
+          },
+          {
+            "ts": 1791198547,
+            "value": 64
+          },
+          {
+            "ts": 1791198727,
+            "value": 38
+          },
+          {
+            "ts": 1791198907,
+            "value": 29
+          },
+          {
+            "ts": 1791199087,
+            "value": 43
+          },
+          {
+            "ts": 1791199267,
+            "value": 57
+          },
+          {
+            "ts": 1791199447,
+            "value": 59
+          },
+          {
+            "ts": 1791199627,
+            "value": 31
+          },
+          {
+            "ts": 1791199807,
+            "value": 31
+          },
+          {
+            "ts": 1791199987,
+            "value": 22
+          },
+          {
+            "ts": 1791200167,
+            "value": 49
+          },
+          {
+            "ts": 1791200347,
+            "value": 19
+          },
+          {
+            "ts": 1791200527,
+            "value": 33
+          },
+          {
+            "ts": 1791200707,
+            "value": 38
+          },
+          {
+            "ts": 1791200887,
+            "value": 42
+          },
+          {
+            "ts": 1791201067,
+            "value": 57
+          },
+          {
+            "ts": 1791201247,
+            "value": 25
+          },
+          {
+            "ts": 1791201427,
+            "value": 37
+          },
+          {
+            "ts": 1791201607,
+            "value": 52
+          },
+          {
+            "ts": 1791201787,
+            "value": 25
+          },
+          {
+            "ts": 1791201967,
+            "value": 47
+          },
+          {
+            "ts": 1791202147,
+            "value": 45
+          },
+          {
+            "ts": 1791202327,
+            "value": 53
+          },
+          {
+            "ts": 1791202507,
+            "value": 19
+          },
+          {
+            "ts": 1791202687,
+            "value": 39
+          },
+          {
+            "ts": 1791202867,
+            "value": 62
+          },
+          {
+            "ts": 1791203047,
+            "value": 34
+          },
+          {
+            "ts": 1791203227,
+            "value": 58
+          },
+          {
+            "ts": 1791203407,
+            "value": 29
+          },
+          {
+            "ts": 1791203587,
+            "value": 57
+          },
+          {
+            "ts": 1791203767,
+            "value": 65
+          },
+          {
+            "ts": 1791203947,
+            "value": 38
+          },
+          {
+            "ts": 1791204127,
+            "value": 30
+          },
+          {
+            "ts": 1791204307,
+            "value": 47
+          },
+          {
+            "ts": 1791204487,
+            "value": 34
+          },
+          {
+            "ts": 1791204667,
+            "value": 26
+          },
+          {
+            "ts": 1791204847,
+            "value": 52
+          },
+          {
+            "ts": 1791205027,
+            "value": 33
+          },
+          {
+            "ts": 1791205207,
+            "value": 22
+          },
+          {
+            "ts": 1791205387,
+            "value": 46
+          },
+          {
+            "ts": 1791205567,
+            "value": 51
+          },
+          {
+            "ts": 1791205747,
+            "value": 40
+          },
+          {
+            "ts": 1791205927,
+            "value": 35
+          },
+          {
+            "ts": 1791206107,
+            "value": 16
+          },
+          {
+            "ts": 1791206287,
+            "value": 33
+          },
+          {
+            "ts": 1791206467,
+            "value": 55
+          },
+          {
+            "ts": 1791206647,
+            "value": 57
+          },
+          {
+            "ts": 1791206827,
+            "value": 46
+          },
+          {
+            "ts": 1791207007,
+            "value": 50
+          },
+          {
+            "ts": 1791207187,
+            "value": 45
+          },
+          {
+            "ts": 1791207367,
+            "value": 65
+          },
+          {
+            "ts": 1791207547,
+            "value": 36
+          },
+          {
+            "ts": 1791207727,
+            "value": 17
+          },
+          {
+            "ts": 1791207907,
+            "value": 48
+          },
+          {
+            "ts": 1791208087,
+            "value": 21
+          },
+          {
+            "ts": 1791208267,
+            "value": 22
+          },
+          {
+            "ts": 1791208447,
+            "value": 53
+          },
+          {
+            "ts": 1791208627,
+            "value": 27
+          },
+          {
+            "ts": 1791208807,
+            "value": 64
+          },
+          {
+            "ts": 1791208987,
+            "value": 34
+          },
+          {
+            "ts": 1791209167,
+            "value": 22
+          },
+          {
+            "ts": 1791209347,
+            "value": 45
+          },
+          {
+            "ts": 1791209527,
+            "value": 37
+          },
+          {
+            "ts": 1791209707,
+            "value": 16
+          },
+          {
+            "ts": 1791209887,
+            "value": 41
+          },
+          {
+            "ts": 1791210067,
+            "value": 31
+          },
+          {
+            "ts": 1791210247,
+            "value": 29
+          },
+          {
+            "ts": 1791210427,
+            "value": 61
+          },
+          {
+            "ts": 1791210607,
+            "value": 64
+          },
+          {
+            "ts": 1791210787,
+            "value": 26
+          },
+          {
+            "ts": 1791210967,
+            "value": 48
+          },
+          {
+            "ts": 1791211147,
+            "value": 43
+          },
+          {
+            "ts": 1791211327,
+            "value": 21
+          },
+          {
+            "ts": 1791211507,
+            "value": 52
+          },
+          {
+            "ts": 1791211687,
+            "value": 16
+          },
+          {
+            "ts": 1791211867,
+            "value": 44
+          },
+          {
+            "ts": 1791212047,
+            "value": 22
+          },
+          {
+            "ts": 1791212227,
+            "value": 28
+          },
+          {
+            "ts": 1791212407,
+            "value": 49
+          },
+          {
+            "ts": 1791212587,
+            "value": 45
+          },
+          {
+            "ts": 1791212767,
+            "value": 53
+          },
+          {
+            "ts": 1791212947,
+            "value": 36
+          },
+          {
+            "ts": 1791213127,
+            "value": 56
+          },
+          {
+            "ts": 1791213307,
+            "value": 17
+          },
+          {
+            "ts": 1791213487,
+            "value": 64
+          },
+          {
+            "ts": 1791213667,
+            "value": 24
+          },
+          {
+            "ts": 1791213847,
+            "value": 58
+          },
+          {
+            "ts": 1791214027,
+            "value": 50
+          },
+          {
+            "ts": 1791214207,
+            "value": 18
+          },
+          {
+            "ts": 1791214387,
+            "value": 43
+          },
+          {
+            "ts": 1791214567,
+            "value": 18
+          },
+          {
+            "ts": 1791214747,
+            "value": 52
+          },
+          {
+            "ts": 1791214927,
+            "value": 38
+          },
+          {
+            "ts": 1791215107,
+            "value": 32
+          },
+          {
+            "ts": 1791215287,
+            "value": 53
+          },
+          {
+            "ts": 1791215467,
+            "value": 45
+          },
+          {
+            "ts": 1791215647,
+            "value": 49
+          },
+          {
+            "ts": 1791215827,
+            "value": 30
+          },
+          {
+            "ts": 1791216007,
+            "value": 28
+          },
+          {
+            "ts": 1791216187,
+            "value": 64
+          },
+          {
+            "ts": 1791216367,
+            "value": 59
+          },
+          {
+            "ts": 1791216547,
+            "value": 52
+          },
+          {
+            "ts": 1791216727,
+            "value": 37
+          },
+          {
+            "ts": 1791216907,
+            "value": 19
+          },
+          {
+            "ts": 1791217087,
+            "value": 16
+          },
+          {
+            "ts": 1791217267,
+            "value": 34
+          },
+          {
+            "ts": 1791217447,
+            "value": 20
+          },
+          {
+            "ts": 1791217627,
+            "value": 64
+          },
+          {
+            "ts": 1791217807,
+            "value": 23
+          },
+          {
+            "ts": 1791217987,
+            "value": 38
+          },
+          {
+            "ts": 1791218167,
+            "value": 17
+          },
+          {
+            "ts": 1791218347,
+            "value": 23
+          },
+          {
+            "ts": 1791218527,
+            "value": 24
+          },
+          {
+            "ts": 1791218707,
+            "value": 57
+          },
+          {
+            "ts": 1791218887,
+            "value": 30
+          },
+          {
+            "ts": 1791219067,
+            "value": 17
+          },
+          {
+            "ts": 1791219247,
+            "value": 65
+          },
+          {
+            "ts": 1791219427,
+            "value": 51
+          },
+          {
+            "ts": 1791219607,
+            "value": 41
+          },
+          {
+            "ts": 1791219787,
+            "value": 24
+          },
+          {
+            "ts": 1791219967,
+            "value": 44
+          },
+          {
+            "ts": 1791220147,
+            "value": 55
+          },
+          {
+            "ts": 1791220327,
+            "value": 65
+          },
+          {
+            "ts": 1791220507,
+            "value": 44
+          },
+          {
+            "ts": 1791220687,
+            "value": 33
+          },
+          {
+            "ts": 1791220867,
+            "value": 33
+          },
+          {
+            "ts": 1791221047,
+            "value": 48
+          },
+          {
+            "ts": 1791221227,
+            "value": 44
+          },
+          {
+            "ts": 1791221407,
+            "value": 36
+          },
+          {
+            "ts": 1791221587,
+            "value": 25
+          },
+          {
+            "ts": 1791221767,
+            "value": 21
+          },
+          {
+            "ts": 1791221947,
+            "value": 47
+          },
+          {
+            "ts": 1791222127,
+            "value": 33
+          },
+          {
+            "ts": 1791222307,
+            "value": 52
+          },
+          {
+            "ts": 1791222487,
+            "value": 25
+          },
+          {
+            "ts": 1791222667,
+            "value": 26
+          },
+          {
+            "ts": 1791222847,
+            "value": 56
+          },
+          {
+            "ts": 1791223027,
+            "value": 32
+          },
+          {
+            "ts": 1791223207,
+            "value": 57
+          },
+          {
+            "ts": 1791223387,
+            "value": 31
+          },
+          {
+            "ts": 1791223567,
+            "value": 20
+          },
+          {
+            "ts": 1791223747,
+            "value": 20
+          },
+          {
+            "ts": 1791223927,
+            "value": 50
+          },
+          {
+            "ts": 1791224107,
+            "value": 49
+          },
+          {
+            "ts": 1791224287,
+            "value": 46
+          },
+          {
+            "ts": 1791224467,
+            "value": 26
+          },
+          {
+            "ts": 1791224647,
+            "value": 20
+          },
+          {
+            "ts": 1791224827,
+            "value": 63
+          },
+          {
+            "ts": 1791225007,
+            "value": 16
+          },
+          {
+            "ts": 1791225187,
+            "value": 39
+          },
+          {
+            "ts": 1791225367,
+            "value": 18
+          },
+          {
+            "ts": 1791225547,
+            "value": 43
+          },
+          {
+            "ts": 1791225727,
+            "value": 37
+          },
+          {
+            "ts": 1791225907,
+            "value": 52
+          },
+          {
+            "ts": 1791226087,
+            "value": 41
+          },
+          {
+            "ts": 1791226267,
+            "value": 16
+          },
+          {
+            "ts": 1791226447,
+            "value": 61
+          },
+          {
+            "ts": 1791226627,
+            "value": 29
+          },
+          {
+            "ts": 1791226807,
+            "value": 45
+          },
+          {
+            "ts": 1791226987,
+            "value": 20
+          },
+          {
+            "ts": 1791227167,
+            "value": 49
+          },
+          {
+            "ts": 1791227347,
+            "value": 18
+          },
+          {
+            "ts": 1791227527,
+            "value": 61
+          },
+          {
+            "ts": 1791227707,
+            "value": 28
+          },
+          {
+            "ts": 1791227887,
+            "value": 40
+          },
+          {
+            "ts": 1791228067,
+            "value": 56
+          },
+          {
+            "ts": 1791228247,
+            "value": 46
+          },
+          {
+            "ts": 1791228427,
+            "value": 39
+          },
+          {
+            "ts": 1791228607,
+            "value": 55
+          },
+          {
+            "ts": 1791228787,
+            "value": 59
+          },
+          {
+            "ts": 1791228967,
+            "value": 52
+          },
+          {
+            "ts": 1791229147,
+            "value": 24
+          },
+          {
+            "ts": 1791229327,
+            "value": 28
+          },
+          {
+            "ts": 1791229507,
+            "value": 31
+          },
+          {
+            "ts": 1791229687,
+            "value": 59
+          },
+          {
+            "ts": 1791229867,
+            "value": 20
+          },
+          {
+            "ts": 1791230047,
+            "value": 29
+          },
+          {
+            "ts": 1791230227,
+            "value": 32
+          },
+          {
+            "ts": 1791230407,
+            "value": 46
+          },
+          {
+            "ts": 1791230587,
+            "value": 55
+          },
+          {
+            "ts": 1791230767,
+            "value": 21
+          },
+          {
+            "ts": 1791230947,
+            "value": 44
+          },
+          {
+            "ts": 1791231127,
+            "value": 37
+          },
+          {
+            "ts": 1791231307,
+            "value": 65
+          },
+          {
+            "ts": 1791231487,
+            "value": 60
+          },
+          {
+            "ts": 1791231667,
+            "value": 57
+          },
+          {
+            "ts": 1791231847,
+            "value": 44
+          },
+          {
+            "ts": 1791232027,
+            "value": 51
+          },
+          {
+            "ts": 1791232207,
+            "value": 25
+          },
+          {
+            "ts": 1791232387,
+            "value": 40
+          },
+          {
+            "ts": 1791232567,
+            "value": 26
+          },
+          {
+            "ts": 1791232747,
+            "value": 56
+          },
+          {
+            "ts": 1791232927,
+            "value": 21
+          },
+          {
+            "ts": 1791233107,
+            "value": 29
+          },
+          {
+            "ts": 1791233287,
+            "value": 26
+          },
+          {
+            "ts": 1791233467,
+            "value": 60
+          },
+          {
+            "ts": 1791233647,
+            "value": 37
+          },
+          {
+            "ts": 1791233827,
+            "value": 31
+          },
+          {
+            "ts": 1791234007,
+            "value": 39
+          },
+          {
+            "ts": 1791234187,
+            "value": 32
+          },
+          {
+            "ts": 1791234367,
+            "value": 17
+          },
+          {
+            "ts": 1791234547,
+            "value": 31
+          },
+          {
+            "ts": 1791234727,
+            "value": 25
+          },
+          {
+            "ts": 1791234907,
+            "value": 54
+          },
+          {
+            "ts": 1791235087,
+            "value": 22
+          },
+          {
+            "ts": 1791235267,
+            "value": 60
+          },
+          {
+            "ts": 1791235447,
+            "value": 26
+          },
+          {
+            "ts": 1791235627,
+            "value": 61
+          },
+          {
+            "ts": 1791235807,
+            "value": 44
+          },
+          {
+            "ts": 1791235987,
+            "value": 40
+          },
+          {
+            "ts": 1791236167,
+            "value": 55
+          },
+          {
+            "ts": 1791236347,
+            "value": 33
+          },
+          {
+            "ts": 1791236527,
+            "value": 39
+          },
+          {
+            "ts": 1791236707,
+            "value": 51
+          },
+          {
+            "ts": 1791236887,
+            "value": 28
+          },
+          {
+            "ts": 1791237067,
+            "value": 38
+          },
+          {
+            "ts": 1791237247,
+            "value": 16
+          },
+          {
+            "ts": 1791237427,
+            "value": 58
+          },
+          {
+            "ts": 1791237607,
+            "value": 44
+          },
+          {
+            "ts": 1791237787,
+            "value": 22
+          },
+          {
+            "ts": 1791237967,
+            "value": 17
+          },
+          {
+            "ts": 1791238147,
+            "value": 54
+          },
+          {
+            "ts": 1791238327,
+            "value": 51
+          },
+          {
+            "ts": 1791238507,
+            "value": 30
+          },
+          {
+            "ts": 1791238687,
+            "value": 16
+          },
+          {
+            "ts": 1791238867,
+            "value": 27
+          },
+          {
+            "ts": 1791239047,
+            "value": 49
+          },
+          {
+            "ts": 1791239227,
+            "value": 52
+          },
+          {
+            "ts": 1791239407,
+            "value": 22
+          },
+          {
+            "ts": 1791239587,
+            "value": 15
+          },
+          {
+            "ts": 1791239767,
+            "value": 64
+          },
+          {
+            "ts": 1791239947,
+            "value": 52
+          },
+          {
+            "ts": 1791240127,
+            "value": 33
+          },
+          {
+            "ts": 1791240307,
+            "value": 44
+          },
+          {
+            "ts": 1791240487,
+            "value": 49
+          },
+          {
+            "ts": 1791240667,
+            "value": 22
+          },
+          {
+            "ts": 1791240847,
+            "value": 58
+          },
+          {
+            "ts": 1791241027,
+            "value": 32
+          },
+          {
+            "ts": 1791241207,
+            "value": 59
+          },
+          {
+            "ts": 1791241387,
+            "value": 22
+          },
+          {
+            "ts": 1791241567,
+            "value": 56
+          },
+          {
+            "ts": 1791241747,
+            "value": 26
+          },
+          {
+            "ts": 1791241927,
+            "value": 41
+          }
+        ],
+        "activities": [
+          {
+            "startTs": 1791123300,
+            "durationS": 3000
+          },
+          {
+            "startTs": 1791159300,
+            "durationS": 2700
+          },
+          {
+            "startTs": 1791213300,
+            "durationS": 1800
+          },
+          {
+            "startTs": 1791224100,
+            "durationS": null
+          },
+          {
+            "startTs": 1791234900,
+            "durationS": 4000
+          }
+        ],
+        "expected": {
+          "onsetRef": 1791231300,
+          "covariates": {
+            "bbBed": 60,
+            "stressPrevDay": 38.385185185185186,
+            "sportPrev": 75,
+            "priorSleep": 7.085046728971962
+          },
+          "nightIdealHours": 8.333333333333334
+        }
+      }
+    ]
+  }
+}

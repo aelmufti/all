@@ -179,6 +179,24 @@ enum SleepOptimumFeatures {
         let X: [[Double]]
         let y: [Double]
         let nightsUsed: [SleepOptimumNightInput]
+        /// Moyenne / écart-type (population) de chacune des 7 covariables sur
+        /// les nuits RETENUES, valeurs présentes seulement — exactement ceux
+        /// qui ont servi au z-score de `X` (ordre spec §4). Exposés pour la
+        /// couche contextuelle (`SleepOptimumContext`), qui doit z-scorer une
+        /// nuit hors modèle de la même façon. N'influencent ni `X` ni `y`.
+        let covariateStats: [CovariateStat]
+    }
+
+    struct CovariateStat: Equatable {
+        let mean: Double
+        let sd: Double
+
+        /// z-score d'une valeur brute : manquant → 0, écart-type nul → 0
+        /// (mêmes règles que `build`, spec §4).
+        func z(_ raw: Double?) -> Double {
+            guard let raw, sd > 0 else { return 0 }
+            return (raw - mean) / sd
+        }
     }
 
     /// Spec §3 (composite `Y`) + §4 (7 covariables) — fonction PURE, exercée
@@ -218,11 +236,13 @@ enum SleepOptimumFeatures {
         // §4 : covariables — z-scorées SUR LES NUITS RETENUES ; manquant → 0
         // après standardisation (imputation par la moyenne, calculée sur les
         // valeurs présentes SEULEMENT) ; écart-type nul → colonne à 0.
+        var covStats: [CovariateStat] = []
         func covColumn(_ values: [Double?]) -> [Double] {
             let retainedValues = retainedIdx.compactMap { values[$0] }
             let sd = DashboardStatsMath.stdev(retainedValues)
-            guard sd > 0 else { return retainedIdx.map { _ in 0 } }
             let m = DashboardStatsMath.mean(retainedValues)
+            covStats.append(CovariateStat(mean: m, sd: sd))
+            guard sd > 0 else { return retainedIdx.map { _ in 0 } }
             return retainedIdx.map { idx in
                 guard let raw = values[idx] else { return 0 }
                 return (raw - m) / sd
@@ -250,7 +270,7 @@ enum SleepOptimumFeatures {
             y.append(yi)
             used.append(night)
         }
-        return Built(X: X, y: y, nightsUsed: used)
+        return Built(X: X, y: y, nightsUsed: used, covariateStats: covStats)
     }
 }
 
@@ -356,11 +376,17 @@ enum SleepOptimumModel {
     /// Spec §6 : plus petite durée qui atteint 95 % du gain (rendements
     /// décroissants). `g(S) = α · h0(S) + Σ_k d_k · r_k(S)`.
     static func idealFromParams(alpha: Double, d: [Double]) -> Double {
-        func g(_ s: Double) -> Double {
+        idealFromCurve { s in
             var sum = alpha * h0(s)
             for i in knots.indices { sum += ramp(s, knots[i]) * d[i] }
             return sum
         }
+    }
+
+    /// Règle des 95 % du gain sur une courbe `g` quelconque — partagée avec la
+    /// couche contextuelle (`SleepOptimumContext`), dont `g` porte en plus un
+    /// terme d'interaction.
+    static func idealFromCurve(_ g: (Double) -> Double) -> Double {
         let g5 = g(5)
         var gmax = g5
         for s in grid { gmax = max(gmax, g(s)) }
@@ -400,7 +426,20 @@ enum SleepOptimumModel {
         let basis: String // "modele" | "prior"
     }
 
-    static func fit(X: [[Double]], y: [Double]) -> Fit {
+    /// A posteriori conjugué d'un modèle linéaire gaussien d'a priori
+    /// `(μ0, Λ0)` — mécanique COMMUNE à `fit` (p = 21) et au modèle contextuel
+    /// étendu (p = 25, `SleepOptimumContext`). `p` = `mu0.count`. Ordre des
+    /// opérations flottantes inchangé par rapport à l'ancien corps de `fit`
+    /// (parité bit-à-bit avec le TS, fixture dorée §8).
+    struct Posterior {
+        let n: Int
+        let mn: [Double]
+        let l: [[Double]]
+        let sigmaHat: Double
+    }
+
+    static func posterior(X: [[Double]], y: [Double], lambda0: [[Double]], mu0: [Double]) -> Posterior {
+        let p = mu0.count
         let n = X.count
         var lambdaN = lambda0
         for row in X {
@@ -434,7 +473,15 @@ enum SleepOptimumModel {
         let mnLambdaNMn = SleepOptimumLinAlg.dot(mn, rhs)
         let bn = b0 + 0.5 * (yty + mu0Lambda0Mu0 - mnLambdaNMn)
         let sigmaHatSq = max(bn / (an - 1), 0)
-        let sigmaHat = sigmaHatSq.squareRoot()
+        return Posterior(n: n, mn: mn, l: l, sigmaHat: sigmaHatSq.squareRoot())
+    }
+
+    static func fit(X: [[Double]], y: [Double]) -> Fit {
+        let post = posterior(X: X, y: y, lambda0: lambda0, mu0: mu0)
+        let n = post.n
+        let mn = post.mn
+        let l = post.l
+        let sigmaHat = post.sigmaHat
 
         let idealRaw = idealFromParams(alpha: mn[1], d: Array(mn[2...13]))
 

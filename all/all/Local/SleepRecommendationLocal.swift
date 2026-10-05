@@ -173,17 +173,7 @@ enum SleepRecommendationLocal {
 
             // §4.7 priorSleep : moyenne pondérée des S des nuits d-1...d-7
             // présentes dans le modèle, poids 0.5^(k-1) (demi-vie 1 nuit).
-            var weightedSum = 0.0
-            var weightTotal = 0.0
-            for k in 1...7 {
-                let candidateDate = FitWellnessExtractor.isoDate(
-                    DashboardStatsTime.dayStartUnixUTC(night.date) - Double(k) * 86400)
-                guard let s = sByDate[candidateDate] else { continue }
-                let weight = pow(0.5, Double(k - 1))
-                weightedSum += weight * s
-                weightTotal += weight
-            }
-            let priorSleep: Double? = weightTotal > 0 ? weightedSum / weightTotal : nil
+            let priorSleep = SleepOptimumContext.priorSleep(date: night.date, sleepByDate: sByDate)
 
             out.append(SleepOptimumNightInput(
                 date: night.date, S: night.S, bbMorning: bbMorning, bbEvening: bbEvening,
@@ -224,6 +214,11 @@ enum SleepRecommendationLocal {
         let targetHours: Double
         let avgSleepHours: Double
         let waketime: String
+        /// Lever habituel par type de jour (médiane des réveils locaux des nuits
+        /// de la fenêtre dont le jour de réveil est lun.-ven. / sam.-dim.) ;
+        /// `nil` sous 3 nuits de ce type (repli sur `waketime`).
+        let waketimeWorkday: String?
+        let waketimeFreeDay: String?
         let currentBedtime: String
         let recommendedBedtime: String
         let targetBedtime: String
@@ -259,6 +254,7 @@ enum SleepRecommendationLocal {
 
         let wakeMinutes = asc.map { mod($0.endTs + $0.offsetS, 86400) / 60 }
         let wakeAnchorMin = median(wakeMinutes)
+        let wakeByDayType = wakeMedianByDayType(asc)
 
         let bedRecentered = last7.map { n -> Double in
             let onsetMin = mod(n.startTs + n.offsetS, 86400) / 60
@@ -285,6 +281,8 @@ enum SleepRecommendationLocal {
             nights: nights.count, basis: fit.basis,
             targetHours: round1(reco.targetHours), avgSleepHours: round1(avgSleepHours),
             waketime: DashboardStatsTime.minToClock(wakeAnchorMin),
+            waketimeWorkday: wakeByDayType.workday.map(DashboardStatsTime.minToClock),
+            waketimeFreeDay: wakeByDayType.freeDay.map(DashboardStatsTime.minToClock),
             currentBedtime: DashboardStatsTime.minToClock(habitualLightsOutMin),
             recommendedBedtime: DashboardStatsTime.minToClock(tonightBedMin),
             targetBedtime: DashboardStatsTime.minToClock(targetBedMin),
@@ -293,6 +291,29 @@ enum SleepRecommendationLocal {
             debtHours: round1(reco.debtHours), debtBonusMin: reco.debtBonusMin,
             idealHours: fit.idealHours, idealLowHours: fit.idealLowHours, idealHighHours: fit.idealHighHours,
             belowFloor: fit.belowFloor, modelNights: fit.n, trial: reco.trial))
+    }
+
+    /// Nombre minimal de nuits d'un type de jour pour publier son lever habituel.
+    static let minNightsPerDayType = 3
+
+    /// Médiane des heures de réveil LOCALES (minutes depuis minuit) des nuits
+    /// dont le jour local de réveil est lun.-ven. (`workday`) ou sam.-dim.
+    /// (`freeDay`) ; `nil` sous `minNightsPerDayType` nuits de ce type.
+    static func wakeMedianByDayType(_ nights: [RecoNight]) -> (workday: Double?, freeDay: Double?) {
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = TimeZone(identifier: "UTC")!
+        var workday: [Double] = []
+        var freeDay: [Double] = []
+        for n in nights {
+            let localWake = n.endTs + n.offsetS
+            // Foundation : 1 = dim. … 7 = sam. → 2...6 = lun.-ven. (cf. `workdayNext`).
+            let weekday = utcCal.component(.weekday, from: Date(timeIntervalSince1970: localWake))
+            let minutes = mod(localWake, 86400) / 60
+            if (2...6).contains(weekday) { workday.append(minutes) } else { freeDay.append(minutes) }
+        }
+        return (
+            workday.count >= minNightsPerDayType ? median(workday) : nil,
+            freeDay.count >= minNightsPerDayType ? median(freeDay) : nil)
     }
 
     // MARK: - Utilitaires (miroir `mod`/`median`, `sleep-recommendation.ts`)

@@ -458,6 +458,17 @@ struct DashboardSleepRecommendation: Decodable, Equatable {
     let belowFloor: Bool?
     let modelNights: Int?
     let trial: Bool?
+    // Contexte par jour (v1.2, backend local ET serveur Pulse récent) : tous
+    // optionnels — un Pulse pas à jour ne les envoie pas, repli sur `idealHours` /
+    // `waketime`.
+    /// Lever habituel semaine (lun.-ven.) / week-end (sam.-dim.), « HH:mm ».
+    let waketimeWorkday: String?
+    let waketimeFreeDay: String?
+    /// Date (`YYYY-MM-DD`, jour de réveil) pour laquelle `nightIdealHours` a été
+    /// calculée — renvoyée seulement si la requête portait `date`.
+    let nightDate: String?
+    /// Durée idéale (h) de CETTE nuit, selon son contexte (couche contextuelle).
+    let nightIdealHours: Double?
 
     var isActionable: Bool { status == "ok" && recommendedBedtime != nil }
 }

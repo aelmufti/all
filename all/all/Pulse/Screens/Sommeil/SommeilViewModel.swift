@@ -25,8 +25,14 @@ final class SommeilViewModel {
     private(set) var days30: [WellnessDayRow] = []
     private(set) var day: WellnessDayDetail?
     private(set) var recommendation: DashboardSleepRecommendation?
+    /// Première date disponible (`api/wellness/dates`) — borne basse du
+    /// sélecteur de date.
+    private(set) var firstDate: String?
 
     private let client: PulseAPIClient
+    /// Rechargement de la reco lors d'un changement de date (annulé si une
+    /// nouvelle date arrive avant la réponse).
+    private var recoTask: Task<Void, Never>?
 
     init(client: PulseAPIClient = .shared) {
         self.client = client
@@ -44,6 +50,7 @@ final class SommeilViewModel {
             )
             let dates: [String] = try await client.get("api/wellness/dates")
             days30 = days
+            firstDate = dates.min()
             // Par défaut, la nuit la plus récente RÉELLEMENT dormie (le tout
             // dernier jour peut être aujourd'hui, sans nuit encore mesurée).
             let latest = days.last(where: { $0.sleepDurationS != nil })?.date
@@ -51,9 +58,8 @@ final class SommeilViewModel {
             if let latest { date = latest }
             await loadDay()
             // Reco non bloquante (endpoint récent : un Pulse pas à jour renvoie 404).
-            recommendation = try? await client.get(
-                "api/stats/sleep-recommendation", query: ["days": "30"]
-            )
+            recoTask?.cancel()
+            await fetchRecommendation(for: date, keepPreviousOnFailure: false)
         } catch {
             errorMessage = Self.message(for: error)
         }
@@ -63,9 +69,28 @@ final class SommeilViewModel {
 
     // MARK: - Navigation de jour (miroir du sous-ensemble de HealthViewModel)
 
-    var isLastDay: Bool {
-        guard let last = days30.last?.date else { return false }
-        return date >= last
+    /// Dernière date NAVIGABLE : demain (aujourd'hui + 1 jour). On autorise à
+    /// dépasser la dernière nuit mesurée pour atteindre la nuit À VENIR — c'est
+    /// là que la carte « Heure de coucher conseillée » est actionnable (elle se
+    /// cale sur l'alarme du jour, cf. `DashboardSleepRecommendationCard`). Au-delà
+    /// de demain, rien d'exploitable (ni sommeil, ni réveil imminent).
+    var maxReachableDate: String { Self.maxReachableDate(today: HealthViewModel.todayKey()) }
+
+    /// Aujourd'hui + 1 jour (calendrier UTC, comme `parseDate`/`formatDate`).
+    static func maxReachableDate(today: String) -> String {
+        guard let day = HealthViewModel.parseDate(today) else { return today }
+        return HealthViewModel.formatDate(day.addingTimeInterval(86_400))
+    }
+
+    var isLastDay: Bool { date >= maxReachableDate }
+
+    /// Bornes du sélecteur de date : première date disponible → `maxReachableDate`.
+    /// Sans première date connue, on retombe sur la plus ancienne des 30 jours
+    /// chargés, sinon sur la date affichée.
+    var selectableRange: ClosedRange<String> {
+        let upper = maxReachableDate
+        let lower = firstDate ?? days30.first?.date ?? date
+        return min(lower, upper)...upper
     }
 
     func shiftDay(by delta: Int) async {
@@ -77,7 +102,27 @@ final class SommeilViewModel {
     func selectDate(_ newDate: String) async {
         guard newDate != date else { return }
         date = newDate
+        // La reco de la nouvelle date se charge en parallèle du détail de la
+        // nuit : elle ne retarde pas son affichage, et son échec n'en fait pas
+        // un échec d'écran.
+        recoTask?.cancel()
+        recoTask = Task { [weak self] in
+            await self?.fetchRecommendation(for: newDate, keepPreviousOnFailure: true)
+        }
         await loadDay()
+    }
+
+    /// Reco pour la date `requested` (`date` envoyée à l'endpoint → durée idéale
+    /// de CETTE nuit). Échec silencieux (`try?`) ; réponse ignorée si l'écran a
+    /// changé de date entre-temps. `keepPreviousOnFailure` : garde la reco
+    /// précédente (la carte retombe alors sur l'idéal global) plutôt que de la
+    /// faire disparaître.
+    private func fetchRecommendation(for requested: String, keepPreviousOnFailure: Bool) async {
+        let reco: DashboardSleepRecommendation? = try? await client.get(
+            "api/stats/sleep-recommendation", query: ["days": "30", "date": requested]
+        )
+        guard !Task.isCancelled, date == requested else { return }
+        if reco != nil || !keepPreviousOnFailure { recommendation = reco }
     }
 
     private func loadDay() async {

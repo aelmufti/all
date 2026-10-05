@@ -39,6 +39,15 @@ struct DashboardSleepSection: View {
 struct DashboardSleepRecommendationCard: View {
     let reco: DashboardSleepRecommendation
 
+    /// Date (`YYYY-MM-DD`) de la nuit AFFICHÉE dans l'écran Sommeil — clé par
+    /// jour de RÉVEIL (cf. `SommeilViewModel`). Quand elle est fournie, l'heure
+    /// conseillée est calculée POUR CETTE nuit-là (`SleepBedtimePlan.plan`) :
+    /// réveil PRÉVU de ce jour (alarme réglée pour ce jour de semaine, sinon
+    /// lever habituel semaine/week-end, sinon global) moins la durée idéale de
+    /// la nuit (contexte du jour) — jamais le réveil réel. Marche aussi pour une
+    /// nuit à venir, sans sommeil mesuré. `nil` → reco prospective.
+    var nightDate: String? = nil
+
     /// Réveil réglé dans l'app pour DEMAIN (`Pulse/Core/WakeScheduleStore.swift`)
     /// prime sur l'heure de lever habituelle du serveur — recalcul purement
     /// local, aucun appel réseau. `nil` → reco serveur affichée telle quelle.
@@ -48,34 +57,42 @@ struct DashboardSleepRecommendationCard: View {
         WakeScheduleStore.shared.adaptedBedtime(reco: reco)
     }
 
+    /// Heure conseillée pour `nightDate` (`nil` sans date ou sans donnée
+    /// exploitable → repli sur la reco prospective).
+    private var plan: SleepBedtimePlan.Result? {
+        guard let nightDate,
+              let weekday = SleepBedtimePlan.weekday(ofDateKey: nightDate) else { return nil }
+        return SleepBedtimePlan.plan(
+            reco: reco, date: nightDate,
+            alarmMinutes: WakeScheduleStore.shared.minutes(for: weekday))
+    }
+
     var body: some View {
+        let plan = plan
         PulseCard {
             DashboardCardHeader("Heure de coucher conseillée")
 
-            HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
-                Text(adapted?.bedtime ?? reco.recommendedBedtime ?? "—")
-                    .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.pulseSleep)
-                if let target = reco.targetHours {
-                    Text("pour viser ~\(dashboardHoursHM(target))")
-                        .font(PulseFont.metricLabel)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
-            }
+            Text(plan?.bedtime ?? adapted?.bedtime ?? reco.recommendedBedtime ?? "—")
+                .font(.system(size: 44, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.pulseSleep)
 
-            // Ligne de contexte seulement quand un réveil cadre la nuit à venir.
-            // Sans réveil, le titre (« conseillée ») se suffit : la reco repose
-            // alors sur le lever habituel, inutile de l'écrire.
-            if let adapted {
+            // Ligne de contexte seulement quand un réveil cadre la nuit À VENIR
+            // (reco prospective, sans date). Avec une date (`plan`), le réveil
+            // prévu est déjà celui de CE jour : la ligne n'a plus lieu d'être.
+            if plan == nil, let adapted {
                 Text("Pour te réveiller à \(WakeScheduleStore.hhmm(adapted.wakeMinutes)) — réglé sur ton téléphone")
                     .font(PulseFont.body)
                     .foregroundStyle(Color.pulseTextPrimary)
             }
 
-            // Une seule ligne discrète (détail dans Paramètres › Aide) :
-            // priorité à « nuit d'essai » (c'est un fait ponctuel sur CE
-            // soir), sinon la durée idéale si le modèle en a une.
-            if reco.trial == true {
+            // Une seule ligne discrète (détail dans Paramètres › Aide) : la durée
+            // idéale de CETTE nuit quand elle existe ; sinon « nuit d'essai »
+            // (fait ponctuel sur CE soir) ou la durée idéale globale.
+            if let plan, plan.isNightSpecific {
+                Text("Durée idéale cette nuit : \(SleepBedtimePlan.durationLabel(hours: plan.idealHours))")
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseTextSecondary)
+            } else if reco.trial == true {
                 Text("Nuit d'essai")
                     .font(.footnote)
                     .foregroundStyle(Color.pulseSleep)

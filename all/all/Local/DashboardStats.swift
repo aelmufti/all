@@ -296,12 +296,21 @@ private struct StatsSleepRecommendationDTO: Encodable {
     var belowFloor: Bool? = nil
     var modelNights: Int? = nil
     var trial: Bool? = nil
+    // Ajouts v1.2 (couche contextuelle, `docs/duree-ideale-sommeil.md` §10) —
+    // tous optionnels : absents du JSON quand `nil` (`JSONEncoder` omet `nil`),
+    // donc contrat inchangé pour un client qui les ignore.
+    var waketimeWorkday: String? = nil
+    var waketimeFreeDay: String? = nil
+    var nightDate: String? = nil
+    var nightIdealHours: Double? = nil
 
     static func insufficient(nights: Int) -> StatsSleepRecommendationDTO {
         StatsSleepRecommendationDTO(nights: nights, status: "insufficient")
     }
 
-    static func ok(_ ok: SleepRecommendationLocal.OK) -> StatsSleepRecommendationDTO {
+    static func ok(
+        _ ok: SleepRecommendationLocal.OK, nightDate: String? = nil, nightIdealHours: Double? = nil
+    ) -> StatsSleepRecommendationDTO {
         StatsSleepRecommendationDTO(
             nights: ok.nights, status: "ok", basis: ok.basis, targetHours: ok.targetHours,
             avgSleepHours: ok.avgSleepHours, waketime: ok.waketime, currentBedtime: ok.currentBedtime,
@@ -309,7 +318,9 @@ private struct StatsSleepRecommendationDTO: Encodable {
             stepMin: ok.stepMin, latencyMin: ok.latencyMin, shiftMin: ok.shiftMin, avgAwakeMin: ok.avgAwakeMin,
             debtHours: ok.debtHours, debtBonusMin: ok.debtBonusMin, idealHours: ok.idealHours,
             idealLowHours: ok.idealLowHours, idealHighHours: ok.idealHighHours, belowFloor: ok.belowFloor,
-            modelNights: ok.modelNights, trial: ok.trial)
+            modelNights: ok.modelNights, trial: ok.trial,
+            waketimeWorkday: ok.waketimeWorkday, waketimeFreeDay: ok.waketimeFreeDay,
+            nightDate: nightDate, nightIdealHours: nightIdealHours)
     }
 }
 
@@ -571,7 +582,9 @@ enum DashboardStatsBackend {
     // viennent du modèle ; tout le reste (lever/coucher/paliers) de la fenêtre
     // de l'endpoint.
 
-    static func sleepRecommendation(db: LocalDb, query: [String: String]) throws -> Data {
+    static func sleepRecommendation(
+        db: LocalDb, query: [String: String], cache: SleepModelCache = SleepModelCache()
+    ) throws -> Data {
         let window = DashboardStatsTime.rangeDays(query["days"])
         let since = DashboardStatsTime.sinceDateAnchored(days: window, anchor: nil)
         let windowRows = try db.sleepRecommendationWindowNights(since: since, limit: window)
@@ -581,7 +594,7 @@ enum DashboardStatsBackend {
         }
 
         let nowS = Date().timeIntervalSince1970
-        let fit = try sleepOptimumFit(db: db, nowS: nowS)
+        let bundle = try cache.bundle(db: db, nowS: nowS)
 
         let recoNights = windowRows.map { row in
             SleepRecommendationLocal.RecoNight(
@@ -590,28 +603,90 @@ enum DashboardStatsBackend {
                 offsetS: LocalDb.localOffsetSeconds(forDate: row.date))
         }
         let todayKey = FitWellnessExtractor.isoDate(nowS)
-        let result = SleepRecommendationLocal.computeSleepRecommendation(nights: recoNights, fit: fit, todayKey: todayKey)
+        let result = SleepRecommendationLocal.computeSleepRecommendation(
+            nights: recoNights, fit: bundle.fit, todayKey: todayKey)
 
         switch result {
         case .insufficient(let n):
             return try JSONEncoder().encode(StatsSleepRecommendationDTO.insufficient(nights: n))
         case .ok(let ok):
-            return try JSONEncoder().encode(StatsSleepRecommendationDTO.ok(ok))
+            // Durée idéale de LA nuit demandée (`date`, jour de RÉVEIL) — optionnel.
+            var nightDate: String?
+            var nightIdeal: Double?
+            if let date = query["date"], isDateKey(date) {
+                nightDate = date
+                nightIdeal = try nightIdealHours(db: db, bundle: bundle, date: date, nowS: nowS)
+            }
+            return try JSONEncoder().encode(
+                StatsSleepRecommendationDTO.ok(ok, nightDate: nightDate, nightIdealHours: nightIdeal))
         }
     }
 
-    /// Ajuste le modèle bayésien de durée idéale (spec §2-6) sur les 180
-    /// dernières nuits (`S ∈ [3, 12]` h), indépendamment de `days`. Charge les
-    /// échantillons `bb`/`stress`/activités sur UNE plage englobant toutes les
-    /// fenêtres par-nuit nécessaires (§3-4), puis délègue l'agrégation (PURE)
-    /// à `SleepRecommendationLocal.buildModelNights`.
-    private static func sleepOptimumFit(db: LocalDb, nowS: Double) throws -> SleepOptimumModel.Fit {
-        let modelRowsRaw = try db.sleepOptimumModelNights(limit: 180)
-        let modelRows = modelRowsRaw.filter { row in
-            let s = (row.deepS + row.lightS + row.remS) / 3600
-            return s >= 3 && s <= 12
+    /// `YYYY-MM-DD` valide (aller-retour par le formateur UTC : rejette
+    /// `2026-13-45`, `abc`, etc.).
+    static func isDateKey(_ s: String) -> Bool {
+        s.count == 10 && FitWellnessExtractor.isoDate(DashboardStatsTime.dayStartUnixUTC(s)) == s
+    }
+
+    /// Durée idéale contextuelle de la nuit de réveil `date`. Nuit mesurée du
+    /// modèle → ses covariables brutes ; sinon (à venir / pas encore
+    /// synchronisée) → covariables calculées avec un endormissement de
+    /// référence (`SleepOptimumContext.onsetReference`), les petites fenêtres
+    /// d'échantillons (≤ 24 h avant l'endormissement) étant relues dans la base
+    /// À CHAQUE appel — elles évoluent à chaque synchro, contrairement aux deux
+    /// ajustements du bundle, mis en cache.
+    private static func nightIdealHours(db: LocalDb, bundle: SleepModelBundle, date: String, nowS: Double) throws -> Double {
+        guard let model = bundle.context else { return bundle.fit.idealHours }
+        let covariates: SleepOptimumContext.Covariates
+        if let night = bundle.nightInputs.first(where: { $0.date == date }) {
+            covariates = SleepOptimumContext.Covariates(night: night)
+        } else {
+            let eve = FitWellnessExtractor.isoDate(DashboardStatsTime.dayStartUnixUTC(date) - 86400)
+            let onsetRef = SleepOptimumContext.onsetReference(
+                date: date, nowS: nowS, habitualOnsetMin: bundle.habitualOnsetMin,
+                offsetS: LocalDb.localOffsetSeconds(forDate: eve))
+            let bb = try db.statsRawSamplesBetween(metric: "bb", from: onsetRef - 3600, to: onsetRef + 1)
+            let stress = try db.statsRawSamplesBetween(
+                metric: "stress", from: onsetRef - 14 * 3600, to: onsetRef - 1800 + 1)
+            let activityRows = try db.statsActivitiesSince(DashboardStatsTime.isoDateTime(onsetRef - 24 * 3600))
+            let activities: [SleepRecommendationLocal.ActivityWindow] = activityRows.compactMap { row in
+                guard let d = DashboardStatsTime.activityDate(row.startTime) else { return nil }
+                return SleepRecommendationLocal.ActivityWindow(
+                    startTs: d.timeIntervalSince1970, durationMin: (row.durationS ?? 0) / 60)
+            }
+            covariates = SleepOptimumContext.upcomingNightCovariates(
+                date: date, onsetRef: onsetRef,
+                bbSamples: bb.map { SleepRecommendationLocal.Sample(ts: $0.ts, value: $0.value) },
+                stressSamples: stress.map { SleepRecommendationLocal.Sample(ts: $0.ts, value: $0.value) },
+                activities: activities, sleepByDate: bundle.sleepByDate)
         }
-        guard !modelRows.isEmpty else { return SleepOptimumModel.fit(X: [], y: []) }
+        return SleepOptimumContext.nightIdealHours(model: model, covariates: covariates)
+    }
+
+    /// Les deux ajustements (global p = 21, contextuel p = 25) + les données
+    /// nécessaires au calcul PAR DATE (nuits agrégées, S par date,
+    /// endormissement habituel) — ce que `SleepModelCache` conserve.
+    struct SleepModelBundle {
+        let fit: SleepOptimumModel.Fit
+        /// `nil` sans nuit retenue (rien à ajuster).
+        let context: SleepOptimumContext.Model?
+        let nightInputs: [SleepOptimumNightInput]
+        let sleepByDate: [String: Double]
+        let habitualOnsetMin: Double?
+    }
+
+    /// Ajuste le modèle bayésien de durée idéale (spec §2-6) sur les 180
+    /// dernières nuits (`S ∈ [3, 12]` h), indépendamment de `days`, puis le
+    /// modèle contextuel par-dessus. Charge les échantillons `bb`/`stress`/
+    /// activités sur UNE plage englobant toutes les fenêtres par-nuit
+    /// nécessaires (§3-4), puis délègue l'agrégation (PURE) à
+    /// `SleepRecommendationLocal.buildModelNights`.
+    static func buildSleepModelBundle(db: LocalDb, modelRows: [LocalDb.SleepOptimumNightRow], nowS: Double) throws -> SleepModelBundle {
+        guard !modelRows.isEmpty else {
+            return SleepModelBundle(
+                fit: SleepOptimumModel.fit(X: [], y: []), context: nil, nightInputs: [],
+                sleepByDate: [:], habitualOnsetMin: nil)
+        }
 
         let modelNights: [SleepRecommendationLocal.ModelRawNight] = modelRows.map { row in
             SleepRecommendationLocal.ModelRawNight(
@@ -649,7 +724,13 @@ enum DashboardStatsBackend {
             nights: modelNights, bbSamples: bbSamples, stressSamples: stressSamples,
             activities: activities, wakeStresses: wakeStresses)
         let built = SleepOptimumFeatures.build(nights: nightInputs)
-        return SleepOptimumModel.fit(X: built.X, y: built.y)
+        let fit = SleepOptimumModel.fit(X: built.X, y: built.y)
+        let context = SleepOptimumContext.fit(built: built, globalFit: fit)
+        var sByDate: [String: Double] = [:]
+        for n in modelNights { sByDate[n.date] = n.S }
+        return SleepModelBundle(
+            fit: fit, context: context, nightInputs: nightInputs, sleepByDate: sByDate,
+            habitualOnsetMin: SleepOptimumContext.habitualOnsetMin(nights: modelNights))
     }
 
     // MARK: tab-health
@@ -912,5 +993,54 @@ enum DashboardStatsBackend {
             entriesPerDay: logged.isEmpty ? 0 : ((Double(totalEntries) / Double(logged.count)) * 10).rounded() / 10,
             series: series, macros: macros, topFoods: topFoods, totalEntries: totalEntries)
         return try JSONEncoder().encode(dto)
+    }
+}
+
+// MARK: - Cache mémoire des ajustements `sleep-recommendation`
+
+/// Garde en mémoire, PAR backend (donc par base : pas de collision entre deux
+/// bases de test), le résultat des deux ajustements bayésiens et les données du
+/// calcul par date — le recalcul complet relit jusqu'à 180 nuits
+/// d'échantillons, trop lourd à refaire à chaque changement de date de l'écran
+/// Sommeil. Clé : nombre de nuits retenues + date et fin de la dernière nuit +
+/// jour courant (local) ; elle change dès qu'une nuit s'ajoute / est resynchronisée
+/// ou que le jour tourne (`wakeStress` dépend de « maintenant »). Une nuit
+/// ancienne modifiée sans changer ces quatre valeurs n'invalide PAS le cache
+/// (accepté : l'idéal bouge à peine et le jour suivant le renouvelle).
+final class SleepModelCache {
+    struct Key: Equatable {
+        let nights: Int
+        let lastDate: String?
+        let lastEndTs: Double?
+        let day: String
+    }
+
+    private let lock = NSLock()
+    private var key: Key?
+    private var cached: DashboardStatsBackend.SleepModelBundle?
+    /// Nombre de recalculs complets effectués (diagnostic / tests).
+    private(set) var computeCount = 0
+
+    func bundle(db: LocalDb, nowS: Double) throws -> DashboardStatsBackend.SleepModelBundle {
+        let rows = try db.sleepOptimumModelNights(limit: 180).filter { row in
+            let s = (row.deepS + row.lightS + row.remS) / 3600
+            return s >= 3 && s <= 12
+        }
+        let latest = rows.max { $0.date < $1.date }
+        let newKey = Key(
+            nights: rows.count, lastDate: latest?.date, lastEndTs: latest?.endTs, day: Self.localDayKey(nowS))
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached, key == newKey { return cached }
+        let fresh = try DashboardStatsBackend.buildSleepModelBundle(db: db, modelRows: rows, nowS: nowS)
+        cached = fresh
+        key = newKey
+        computeCount += 1
+        return fresh
+    }
+
+    static func localDayKey(_ nowS: Double) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: Date(timeIntervalSince1970: nowS))
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 }
