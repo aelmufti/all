@@ -219,6 +219,7 @@ private struct SettingsStoragePage: View {
     @Bindable var viewModel: SettingsViewModel
     let onRequestServerLogin: (StorageMode) -> Void
     @State private var storageMode = StorageModeStore.shared
+    @State private var usage: LocalStorageUsage?
 
     var body: some View {
         Form {
@@ -226,9 +227,43 @@ private struct SettingsStoragePage: View {
             if storageMode.mode != .phone {
                 SettingsPulseAddressSection(viewModel: viewModel)
             }
+            // Ce que l'app occupe sur l'iPhone — dans tous les modes : les `.fit`
+            // de la montre y transitent même quand Pulse est la référence.
+            Section("Sur cet iPhone") {
+                if let counts = usage?.counts {
+                    LabeledContent("Activités", value: "\(counts.activities)")
+                    LabeledContent("Nuits", value: "\(counts.nights)")
+                    LabeledContent("Jours", value: "\(counts.days)")
+                }
+                LabeledContent("Fichiers de la montre") {
+                    Text(usage.map { "\($0.watchFileCount) · \(LocalStorageUsage.formatted($0.watchFileBytes))" } ?? "…")
+                }
+                LabeledContent("Base de données") {
+                    Text(usage.map { LocalStorageUsage.formatted($0.databaseBytes) } ?? "…")
+                }
+                LabeledContent("Total") {
+                    Text(usage.map { LocalStorageUsage.formatted($0.totalBytes) } ?? "…")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.pulseTextPrimary)
+                }
+            }
+            // Ce que le serveur détient (inventaire de Pulse). Il ne donne que des
+            // nombres : la taille sur le disque du serveur n'est pas exposée.
+            if storageMode.mode != .phone, let inventory = viewModel.inventory {
+                Section("Sur Pulse") {
+                    LabeledContent("Activités", value: "\(inventory.activities)")
+                    LabeledContent("Nuits", value: "\(inventory.nights)")
+                    LabeledContent("Jours", value: "\(inventory.days)")
+                    LabeledContent("Fichiers de la montre", value: "\(inventory.onDisk)")
+                }
+            }
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
+        // Parcours du disque hors main actor ; remesuré à chaque ouverture de la page.
+        .task {
+            usage = await Task.detached(priority: .utility) { LocalStorageUsage.measure() }.value
+        }
     }
 }
 
@@ -807,12 +842,6 @@ private struct SettingsStatusSection: View {
                     }
                 }
                 LabeledContent("Fraîcheur des données", value: Self.freshnessLabel(status.freshness))
-            }
-            if let inventory = viewModel.inventory {
-                LabeledContent("Fichiers sur disque", value: "\(inventory.onDisk)")
-                LabeledContent("Activités importées", value: "\(inventory.activities)")
-                LabeledContent("Nuits", value: "\(inventory.nights)")
-                LabeledContent("Jours", value: "\(inventory.days)")
             }
         }
     }

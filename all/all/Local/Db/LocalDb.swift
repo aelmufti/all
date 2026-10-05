@@ -232,6 +232,24 @@ final class LocalDb {
         return found
     }
 
+    /// Ce que la base contient, pour Paramètres › Stockage — même lecture que
+    /// l'inventaire de Pulse (`api/sync/inventory` : activités, nuits, jours).
+    struct ContentCounts: Equatable {
+        var activities = 0
+        var nights = 0
+        var days = 0
+    }
+
+    func contentCounts() throws -> ContentCounts {
+        func count(_ table: String) throws -> Int {
+            var n = 0
+            try db.run("SELECT COUNT(*) FROM \(table)") { r in n = Int(r.double(0) ?? 0) }
+            return n
+        }
+        return ContentCounts(
+            activities: try count("activities"), nights: try count("wellness_sleep"), days: try count("wellness_days"))
+    }
+
     /// Vrai si la base porte ce fichier : hash dans `imported_files`
     /// (wellness/sommeil, inséré dans la MÊME transaction que les données) ou dans
     /// `activities.file_hash`. C'est la preuve qu'un fichier journalisé
