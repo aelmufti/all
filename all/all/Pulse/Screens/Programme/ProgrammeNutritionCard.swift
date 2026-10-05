@@ -30,14 +30,11 @@ struct ProgrammeNutritionCard: View {
                     .font(.system(size: 13, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
-            Text("\(domain.label) · \(programmeBadge(domain)) · pilote \(domain.drives.lowercased())")
+            Text("\(domain.label) · \(programmeBadge(domain))")
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
 
             weekStrip
-            Text("Sept derniers jours · part des cibles tenues, pointillés quand rien n’est saisi.")
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(Color.pulseTextSecondary)
 
             VStack(alignment: .leading, spacing: PulseSpacing.md) {
                 ForEach(detail.today.rules) { rule in

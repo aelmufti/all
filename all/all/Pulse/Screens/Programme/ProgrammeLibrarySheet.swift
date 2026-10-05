@@ -34,12 +34,6 @@ struct ProgrammeLibrarySheet: View {
                     pickingSection(choice)
                 } else {
                     Section {
-                        // Web `.u11 { font-family:mono; font-size:11px }`.
-                        Text(domain.hint)
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                    Section {
                         ForEach(domain.choices) { choice in
                             ProgrammeChoiceRow(
                                 choice: choice,

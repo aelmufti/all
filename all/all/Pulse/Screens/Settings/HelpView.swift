@@ -129,6 +129,22 @@ private enum HelpContent {
                 title: "Fourchettes de macros",
                 body: "Sur une jauge, la zone translucide est la fourchette visée (cadre de programme ou cibles manuelles) et le repère fin marque la cible."),
         ]),
+        HelpSection(title: "Programme", topics: [
+            HelpTopic(
+                title: "Entraînement",
+                body: "Un programme d'entraînement pilote les séances et le calendrier. Les séances se cochent avec les activités importées de la montre."),
+            HelpTopic(
+                title: "Alimentation",
+                body: "Un programme d'alimentation pilote les cibles de la page Nutrition : les cibles du jour sont recadrées par ses règles. La frise montre les sept derniers jours — la part des cibles tenues, en pointillés quand rien n'est saisi."),
+            HelpTopic(
+                title: "Sommeil",
+                body: "Un programme de sommeil lit les nuits de la montre : celles déjà importées sont comparées à ses critères, il n'y a rien à saisir."),
+        ]),
+        HelpSection(title: "Profil", topics: [
+            HelpTopic(
+                title: "À quoi il sert",
+                body: "Année de naissance, taille et sexe servent au métabolisme de base, à l'âge physiologique et à l'objectif calorique dynamique. Le poids se saisit jour par jour sur la page Nutrition."),
+        ]),
         HelpSection(title: "Réveil & coucher", topics: [
             HelpTopic(
                 title: "Réveil dans l'app",

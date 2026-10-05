@@ -104,9 +104,22 @@ struct SettingsView: View {
             Form {
                 // — Données —
                 SettingsStorageSection(onRequestServerLogin: { pendingServerMode = $0 })
+                // L'adresse de Pulse suit immédiatement le choix « Pulse » /
+                // « Les deux » : c'est le réglage dont ce choix dépend, pas un
+                // détail de bas de page.
+                if storageMode.mode != .phone {
+                    SettingsPulseAddressSection(viewModel: viewModel)
+                }
+
+                // — Compte — (le profil y vit, sur sa propre page ; l'utilisateur
+                // et la déconnexion n'existent qu'avec un serveur)
+                SettingsAccountSection(
+                    viewModel: viewModel,
+                    username: storageMode.mode == .phone ? nil : auth.username,
+                    showsServerAccount: storageMode.mode != .phone
+                )
 
                 // — Personnel —
-                SettingsProfileSection(viewModel: viewModel)
                 SettingsWakeSection()
                 SettingsAppearanceSection()
                 SettingsHelpSection(onOpen: { showHelp = true })
@@ -128,9 +141,6 @@ struct SettingsView: View {
                         onWatch: { showWatch = true }
                     )
                     SettingsStatusSection(viewModel: viewModel)
-
-                    // — Compte —
-                    SettingsApplicationSection(viewModel: viewModel, username: auth.username)
                 }
             }
         }
@@ -806,25 +816,33 @@ private struct SettingsStatusSection: View {
     var body: some View {
         Section("État de la synchro") {
             if let status = viewModel.status {
-                LabeledContent("État") {
-                    Text(Self.stateLabel(status.state))
-                        .foregroundStyle(Self.stateColor(status.state))
-                }
-                if let lastSuccess = status.lastSuccess {
-                    LabeledContent("Dernier succès", value: lastSuccess)
+                // État / dernier succès / progression / message décrivent la
+                // collecte faite PAR LE SERVEUR (pont, ou à défaut l'ancienne
+                // chaîne par câble). Quand c'est l'iPhone qui collecte, le
+                // serveur renvoie l'état figé de l'ancienne chaîne — un « Erreur »
+                // permanent sans rapport avec la synchro réelle : on ne
+                // l'affiche pas. La fraîcheur, elle, vient des données reçues.
+                if viewModel.source?.source == SettingsSyncSourceKind.bridge.rawValue {
+                    LabeledContent("État") {
+                        Text(Self.stateLabel(status.state))
+                            .foregroundStyle(Self.stateColor(status.state))
+                    }
+                    if let lastSuccess = status.lastSuccess {
+                        LabeledContent("Dernier succès", value: lastSuccess)
+                    }
+                    if let progress = status.progress, let watchFiles = progress.watchFiles {
+                        LabeledContent(
+                            "Fichiers sur la montre",
+                            value: "\(progress.remainingOnWatch ?? watchFiles) / \(watchFiles)"
+                        )
+                    }
+                    if let message = status.message {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(Color.pulseTextSecondary)
+                    }
                 }
                 LabeledContent("Fraîcheur des données", value: Self.freshnessLabel(status.freshness))
-                if let progress = status.progress, let watchFiles = progress.watchFiles {
-                    LabeledContent(
-                        "Fichiers sur la montre",
-                        value: "\(progress.remainingOnWatch ?? watchFiles) / \(watchFiles)"
-                    )
-                }
-                if let message = status.message {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
             }
             if let inventory = viewModel.inventory {
                 LabeledContent("Fichiers sur disque", value: "\(inventory.onDisk)")
@@ -865,6 +883,19 @@ private struct SettingsStatusSection: View {
 }
 
 // MARK: - Profil
+
+/// Page « Profil », ouverte depuis la section Compte.
+private struct SettingsProfilePage: View {
+    @Bindable var viewModel: SettingsViewModel
+
+    var body: some View {
+        Form {
+            SettingsProfileSection(viewModel: viewModel)
+        }
+        .navigationTitle("Profil")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
 
 private struct SettingsProfileSection: View {
     @Bindable var viewModel: SettingsViewModel
@@ -915,10 +946,6 @@ private struct SettingsProfileSection: View {
                     .font(.footnote)
                     .foregroundStyle(Color.pulseDanger)
             }
-        } header: {
-            Text("Profil")
-        } footer: {
-            Text("Sert au métabolisme de base, à l'âge physiologique et à l'objectif calorique dynamique. Le poids se saisit jour par jour sur la page Santé.")
         }
     }
 }
@@ -934,6 +961,8 @@ private struct SettingsNavRow: View {
     let icon: String
     let title: String
     let subtitle: String
+    /// Faux dans un `NavigationLink`, qui dessine déjà son chevron.
+    var showsChevron = true
 
     var body: some View {
         HStack(spacing: PulseSpacing.md) {
@@ -949,28 +978,55 @@ private struct SettingsNavRow: View {
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             Spacer()
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color.pulseTextSecondary)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
         }
         .contentShape(Rectangle())
     }
 }
 
-// MARK: - Application
+// MARK: - Compte
 
-private struct SettingsApplicationSection: View {
+private struct SettingsAccountSection: View {
     @Bindable var viewModel: SettingsViewModel
     let username: String?
+    /// Faux en mode Téléphone : pas de compte serveur, donc ni utilisateur ni
+    /// déconnexion — il ne reste que le profil.
+    let showsServerAccount: Bool
 
     var body: some View {
         Section("Compte") {
-            LabeledContent("Utilisateur", value: username ?? "—")
-            Text("Serveur personnel · rien ne sort d'ici")
-                .font(.caption)
-                .foregroundStyle(Color.pulseTextSecondary)
+            if showsServerAccount {
+                LabeledContent("Utilisateur", value: username ?? "—")
+            }
+            NavigationLink {
+                SettingsProfilePage(viewModel: viewModel)
+            } label: {
+                SettingsNavRow(
+                    icon: "person.crop.circle",
+                    title: "Profil",
+                    subtitle: "Année de naissance, taille, sexe",
+                    showsChevron: false
+                )
+            }
+            if showsServerAccount {
+                Button("Déconnexion", role: .destructive) {
+                    Task { await AuthStore.shared.logout() }
+                }
+            }
         }
+    }
+}
 
+// MARK: - Adresse de Pulse
+
+private struct SettingsPulseAddressSection: View {
+    @Bindable var viewModel: SettingsViewModel
+
+    var body: some View {
         Section {
             TextField("https://pulse.<tailnet>.ts.net", text: $viewModel.baseURLText)
                 .keyboardType(.URL)
@@ -993,12 +1049,6 @@ private struct SettingsApplicationSection: View {
             }
         } header: {
             Text("Adresse de Pulse")
-        }
-
-        Section {
-            Button("Déconnexion", role: .destructive) {
-                Task { await AuthStore.shared.logout() }
-            }
         }
     }
 }
