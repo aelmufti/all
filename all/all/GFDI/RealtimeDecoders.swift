@@ -97,8 +97,12 @@ struct RealtimeHeartRate: Equatable {
     }
 
     /// Cf. `if (hr > 0)` côté pont : `heartRate == 0` signifie « pas de valeur »,
-    /// pas « 0 bpm ».
-    var isValid: Bool { heartRate > 0 }
+    /// pas « 0 bpm ». `0xFF` aussi : c'est ce que la montre envoie quand le
+    /// capteur n'a pas de signal (montre retirée ou mal plaquée) — affiché tel
+    /// quel, il plantait un pic à 255 bpm dans la courbe.
+    var isValid: Bool { heartRate > 0 && heartRate != Self.noSignal }
+
+    static let noSignal: UInt8 = 0xFF
 }
 
 /// Pas en direct (service ML `REALTIME_STEPS` = 7). Port de

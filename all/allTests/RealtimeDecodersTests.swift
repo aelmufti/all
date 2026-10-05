@@ -60,6 +60,13 @@ struct RealtimeDecodersTests {
         #expect(sample?.isValid == true)
     }
 
+    /// Montre sans signal capteur : elle envoie 0xFF, pas une mesure.
+    @Test func heartRateNoSignalSentinelIsNotValid() throws {
+        let sample = RealtimeHeartRate.decode(Data([0x03, 0xFF, 0x28]))
+        #expect(sample?.heartRate == 255)
+        #expect(sample?.isValid == false)
+    }
+
     @Test func heartRateZeroIsNotValid() throws {
         let sample = RealtimeHeartRate.decode(Data([0x00, 0x00, 0x00]))
         #expect(sample?.heartRate == 0)
