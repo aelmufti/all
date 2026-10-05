@@ -38,6 +38,7 @@ final class LocalDb {
         try FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUnlessOpen])
+        excludeFromBackup(dir)
         try self.init(path: dir.appendingPathComponent("pulse-embarque.sqlite").path)
     }
 
@@ -45,7 +46,42 @@ final class LocalDb {
     init(path: String) throws {
         db = try SQLiteDatabase(path: path)
         try db.execute(Self.schema)
+        try Self.migrate(db, migrations: Self.migrations)
         try seedFoodsIfNeeded()
+    }
+
+    // MARK: - Migrations de schéma
+    //
+    // `schema` (ci-dessous) est la base, version 0 : `CREATE TABLE IF NOT EXISTS`
+    // ne sait pas faire évoluer une table déjà créée. Tout changement ultérieur
+    // (colonne, table, index) s'AJOUTE à la fin de `migrations` — jamais de
+    // modification ni de suppression d'une entrée existante. La version de la base
+    // (`PRAGMA user_version`) est le nombre de migrations déjà appliquées.
+
+    static let migrations: [String] = []
+
+    /// Applique les migrations manquantes, dans l'ordre, chacune dans sa
+    /// transaction avec l'avancement de version. La version est relue DANS la
+    /// transaction : deux connexions qui ouvrent la base en même temps
+    /// n'appliquent pas deux fois la même migration. Internal pour les tests.
+    static func migrate(_ db: SQLiteDatabase, migrations: [String]) throws {
+        while true {
+            var applied = false
+            try db.transaction {
+                let version = try schemaVersion(db)
+                guard version < migrations.count else { return }
+                try db.execute(migrations[version])
+                try db.execute("PRAGMA user_version = \(version + 1)")
+                applied = true
+            }
+            if !applied { return }
+        }
+    }
+
+    static func schemaVersion(_ db: SQLiteDatabase) throws -> Int {
+        var version = 0
+        try db.run("PRAGMA user_version") { r in version = Int(r.double(0) ?? 0) }
+        return version
     }
 
     private static let schema = """

@@ -22,6 +22,17 @@
 import Foundation
 import os
 
+/// Sort un dossier (et son contenu) des sauvegardes iCloud/Finder de l'appareil :
+/// les `.fit` et la base locale sont des données de santé, gardées sur l'iPhone
+/// seulement (décision 2026-10-05). Reposé à chaque ouverture : l'attribut peut
+/// sauter quand le dossier est recréé.
+func excludeFromBackup(_ directory: URL) {
+    var url = directory
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? url.setResourceValues(values)
+}
+
 /// Spool local des `.fit` récupérés, conservés **jusqu'au 2xx de Pulse** (garantie
 /// de livraison, CADRAGE §5). Journal à trois états (`acquired`/`delivered`/`archived`)
 /// calqué sur `AcquiredFiles` du pont ; protection au repos `completeUnlessOpen`
@@ -60,7 +71,9 @@ final class SpoolStore {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true)
-        try self.init(root: base.appendingPathComponent("spool", isDirectory: true))
+        let root = base.appendingPathComponent("spool", isDirectory: true)
+        try self.init(root: root)
+        excludeFromBackup(root)
     }
 
     /// Init interne testable : pointe vers une racine arbitraire (répertoire

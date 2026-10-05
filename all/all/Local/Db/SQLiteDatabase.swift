@@ -52,13 +52,14 @@ final class SQLiteDatabase {
     }
 
     private let handle: OpaquePointer
+    private static let busyTimeoutMs: Int32 = 5000
 
     init(path: String) throws {
         var db: OpaquePointer?
-        // FULLMUTEX : sérialise l'accès — `LocalIngestor` (tâche de fond) et
-        // `RealLocalPulseBackend` (appelé depuis les écrans) peuvent taper la
-        // même base depuis des files différentes ; un seul `SQLiteDatabase`
-        // partagé suffit à ce stade (L1), SQLite fait le reste.
+        // FULLMUTEX : sérialise l'accès à CETTE connexion depuis plusieurs files.
+        // Il y a par ailleurs plusieurs connexions vers le même fichier
+        // (`LocalIngestor` ouvre la sienne, `RealLocalPulseBackend` aussi) :
+        // c'est `busy_timeout` ci-dessous qui les fait patienter l'une l'autre.
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         let rc = sqlite3_open_v2(path, &db, flags, nil)
         guard rc == SQLITE_OK, let db else {
@@ -67,6 +68,9 @@ final class SQLiteDatabase {
             throw SQLiteError.open(message)
         }
         handle = db
+        // Sans délai, une écriture pendant la transaction d'une autre connexion
+        // (saisie pendant une ingestion) échouait aussitôt en « database is locked ».
+        sqlite3_busy_timeout(handle, Self.busyTimeoutMs)
         sqlite3_exec(handle, "PRAGMA journal_mode = WAL;", nil, nil, nil)
     }
 
