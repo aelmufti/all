@@ -197,11 +197,12 @@ final class BLEManager: NSObject, ObservableObject {
     /// (`RoutingSpoolUploader.upload` court-circuite avant `PulseSpoolUploader`).
     /// `spoolStore` (déclarée juste au-dessus) lui est passée UNIQUEMENT pour
     /// qu'elle marque `pushedToPulse` sur un vrai 2xx (cf.
-    /// `RoutingSpoolUploader.upload`) — elle ne lui sert à rien d'autre.
+    /// `RoutingSpoolUploader.upload`) — elle ne lui sert à rien d'autre. Elle
+    /// alimente aussi `PulseUploadHealth` (jeton refusé, mauvaise source).
     /// `lazy var` (plutôt que `let`) : un initialiseur de propriété stockée ne
     /// peut pas lire une propriété sœur (`spoolStore`) avant que `self` existe
     /// — `lazy` diffère l'évaluation au premier accès, après la fin de l'init.
-    private lazy var pulseUploader: SpoolUploading = RoutingSpoolUploader(pulseUploader: PulseSpoolUploader(), spoolStore: spoolStore)
+    private lazy var pulseUploader: SpoolUploading = RoutingSpoolUploader(pulseUploader: PulseSpoolUploader(), spoolStore: spoolStore, health: PulseUploadHealth.observeFromAnyThread)
 
     /// Pousseur de FC live vers Pulse (incrément Live-1b, `Sync/LiveHeartRatePush.swift`)
     /// — même raison d'être partagée que `pulseUploader` : une seule `URLSession`
@@ -495,6 +496,9 @@ final class BLEManager: NSObject, ObservableObject {
         discoveredCharacteristicsOrder = []
         pendingCharacteristicDiscoveries = 0
         garminCommunicator = nil
+        // Session abandonnée : ses envois Pulse encore en file sont jetés (relancés
+        // par la suivante), ceux en vol n'agiront plus que sur le journal.
+        garminSession?.close()
         garminSession = nil
         realtimeSession = nil
         // Le lien précédent est abandonné : un ancien bpm n'a plus de raison

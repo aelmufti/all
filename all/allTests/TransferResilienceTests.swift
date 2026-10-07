@@ -869,3 +869,378 @@ struct GarminSessionIngestLockTests {
         #expect(hooks.ingestRequests == beforeDownload + 2, "une demande à l'acquisition, une à la fin de la traversée")
     }
 }
+
+// MARK: - 6) Rejet définitif de Pulse (`.quarantine`) : quarantaine + archivage montre
+
+/// Uploader factice qui GARDE les complétions : le test décide quand l'issue
+/// arrive (donc peut intercaler une relecture du fichier avant elle). Jamais de
+/// réseau.
+private final class HeldUploader: SpoolUploading {
+    private(set) var calls: [String] = []
+    private var completions: [(PulseUploadOutcome) -> Void] = []
+
+    func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void) {
+        calls.append(watchFilename)
+        completions.append(completion)
+    }
+
+    /// Rend l'issue à tous les envois en attente.
+    func complete(_ outcome: PulseUploadOutcome) {
+        let pending = completions
+        completions = []
+        pending.forEach { $0(outcome) }
+    }
+}
+
+/// `handleUploadOutcome` ramène l'issue sur le main (`DispatchQueue.main.async`) :
+/// les tests sont `@MainActor` et cèdent la main jusqu'à ce que `condition` tienne.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async {
+    for _ in 0..<100 where !condition() {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+}
+
+@MainActor
+struct GarminSessionPulseRejectionTests {
+    private func makeRejectionSession(
+        requiresIngest: Bool = false
+    ) throws -> (session: GarminSession, fake: FakeGfdiCommunicator, store: SpoolStore, uploader: HeldUploader, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-connect-pulse-rejection-\(UUID().uuidString)", isDirectory: true)
+        let store = try SpoolStore(root: root)
+        let fake = FakeGfdiCommunicator()
+        let uploader = HeldUploader()
+        let session = GarminSession(
+            communicator: fake, spoolStore: store, uploader: uploader,
+            requiresLocalIngest: { requiresIngest }, requestLocalIngest: {})
+        return (session, fake, store, uploader, root)
+    }
+
+    @discardableResult
+    private func holdAcquired(_ entry: GarminDirectoryEntry, in store: SpoolStore) throws -> WatchFileID {
+        let (id, path) = SpoolStore.identity(for: entry)
+        try store.recordAcquired(id, relativePath: path, data: Data("rejeté".utf8), listedSize: entry.sizeBytes)
+        return id
+    }
+
+    /// Mode Pulse : le rejet fait passer l'entrée `delivered` (quarantaine, pas
+    /// `pushedToPulse`), l'archivage montre part, la montre l'accuse → `archived`.
+    /// La synchro suivante ne renvoie plus rien à Pulse.
+    @Test func aRejectionQuarantinesTheEntryArchivesItOnTheWatchAndIsNeverResent() async throws {
+        let (session, fake, store, uploader, root) = try makeRejectionSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdAcquired(file, in: store)
+
+        deliverManifest(session, fake, [file])
+        #expect(uploader.calls.count == 1, "l'entrée `acquired` part vers Pulse")
+        uploader.complete(.quarantine)
+        await waitUntil { store.entries[id]?.state == .delivered }
+
+        let rejected = try #require(store.entries[id])
+        #expect(rejected.state == .delivered)
+        #expect(rejected.pulseRejectedAt != nil)
+        #expect(rejected.pushedToPulse == false, "Pulse n'a pas le fichier")
+        #expect(archivedIndexes(fake) == [21], "mode Pulse : archivage direct")
+        #expect(session.deliveredFileIndexes.isEmpty, "rien de livré côté Pulse")
+
+        fake.deliver(messageType: Wire.response, payload: setFileFlagStatusPayload())
+        #expect(store.entries[id]?.state == .archived)
+
+        // Synchro suivante : plus d'envoi (l'entrée n'est plus `acquired`).
+        deliverManifest(session, fake, [file])
+        #expect(uploader.calls.count == 1, "jamais renvoyée à chaque synchro")
+    }
+
+    /// Un second lancement (nouvelle instance de session sur le même journal) ne
+    /// reprend pas non plus l'entrée rejetée.
+    @Test func aRejectedEntryIsNotResentByANewSessionOnTheSameJournal() async throws {
+        let (session, fake, store, uploader, root) = try makeRejectionSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdAcquired(file, in: store)
+        deliverManifest(session, fake, [file])
+        uploader.complete(.quarantine)
+        await waitUntil { store.entries[id]?.pulseRejectedAt != nil }
+
+        let freshStore = try SpoolStore(root: root)
+        let freshFake = FakeGfdiCommunicator()
+        let freshUploader = HeldUploader()
+        let fresh = GarminSession(communicator: freshFake, spoolStore: freshStore, uploader: freshUploader, requestLocalIngest: {})
+        deliverManifest(fresh, freshFake, [file])
+
+        #expect(freshUploader.calls.isEmpty)
+    }
+
+    /// Modes Téléphone/Les deux : comportement existant inchangé — l'archivage
+    /// attend la preuve d'ingestion locale, même pour une entrée rejetée.
+    @Test func inPhoneOrBothModeTheRejectedEntryStillWaitsForTheIngestProof() async throws {
+        let (session, fake, store, uploader, root) = try makeRejectionSession(requiresIngest: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdAcquired(file, in: store)
+
+        deliverManifest(session, fake, [file])
+        uploader.complete(.quarantine)
+        await waitUntil { store.entries[id]?.state == .delivered }
+        #expect(store.entries[id]?.pulseRejectedAt != nil)
+        #expect(archivedIndexes(fake).isEmpty, "pas d'archivage sans preuve d'ingestion")
+
+        store.markIngest(id, outcome: SpoolIngestOutcome(status: .ingested, hash: "h", at: Date()))
+        session.archivePendingDeliveries()
+        #expect(archivedIndexes(fake) == [21])
+    }
+
+    /// Un rejet qui concerne l'ANCIEN contenu (fichier relu pendant l'envoi) ne
+    /// frappe pas le nouveau, qui sera envoyé à son tour.
+    @Test func aStaleRejectionDoesNotQuarantineReacquiredContent() async throws {
+        let (session, fake, store, uploader, root) = try makeRejectionSession()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = fileEntry(fileIndex: 21)
+        let id = try holdAcquired(file, in: store)
+        deliverManifest(session, fake, [file])
+        #expect(uploader.calls.count == 1)
+
+        // Relecture du fichier avant l'issue : nouveau jeton d'acquisition.
+        let (_, path) = SpoolStore.identity(for: file)
+        try store.recordAcquired(id, relativePath: path, data: Data("nouveau".utf8), listedSize: file.sizeBytes)
+        uploader.complete(.quarantine)
+        // Laisse le main traiter l'issue périmée.
+        for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(20)) }
+
+        let entry = try #require(store.entries[id])
+        #expect(entry.state == .acquired)
+        #expect(entry.pulseRejectedAt == nil)
+        #expect(archivedIndexes(fake).isEmpty)
+    }
+}
+
+// MARK: - 7) Envois Pulse bornés, sans double envoi, fin de session (défaut 6)
+
+/// Uploader factice à complétions INDIVIDUELLES : le test décide quel envoi
+/// aboutit et quand. Jamais de réseau.
+private final class GatedUploader: SpoolUploading {
+    private(set) var calls: [String] = []
+    private var completions: [(PulseUploadOutcome) -> Void] = []
+
+    func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void) {
+        calls.append(watchFilename)
+        completions.append(completion)
+    }
+
+    /// Rend l'issue de l'envoi n° `call` (ordre de départ, 0-based).
+    func complete(_ call: Int, _ outcome: PulseUploadOutcome) {
+        completions[call](outcome)
+    }
+}
+
+private final class RefreshCounter {
+    var posts = 0
+}
+
+@MainActor
+struct GarminSessionUploadQueueTests {
+    private func makeQueuedSession(
+        files: [GarminDirectoryEntry], maxConcurrent: Int = 2, mode: StorageMode = .pulse
+    ) throws -> (session: GarminSession, fake: FakeGfdiCommunicator, store: SpoolStore, uploader: GatedUploader, refresh: RefreshCounter, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-connect-upload-queue-\(UUID().uuidString)", isDirectory: true)
+        let store = try SpoolStore(root: root)
+        for file in files {
+            let (id, path) = SpoolStore.identity(for: file)
+            try store.recordAcquired(id, relativePath: path, data: Data("à envoyer".utf8), listedSize: file.sizeBytes)
+        }
+        let fake = FakeGfdiCommunicator()
+        let uploader = GatedUploader()
+        let refresh = RefreshCounter()
+        let session = GarminSession(
+            communicator: fake, spoolStore: store, uploader: uploader,
+            requiresLocalIngest: { false }, requestLocalIngest: {},
+            maxConcurrentUploads: maxConcurrent, storageMode: { mode },
+            postDataRefresh: { refresh.posts += 1 })
+        return (session, fake, store, uploader, refresh, root)
+    }
+
+    private func names(_ files: [GarminDirectoryEntry]) -> [String] {
+        files.map { SpoolStore.identity(for: $0).id.name }
+    }
+
+    private func settle() async {
+        for _ in 0..<5 { try? await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    @Test func atMostTheLimitStartsAndTheRestWaitThenLeaveInOrder() async throws {
+        let files = (21...25).map { fileEntry(fileIndex: $0) }
+        let (session, fake, _, uploader, _, root) = try makeQueuedSession(files: files, maxConcurrent: 2)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls == names(Array(files[0...1])), "deux au plus au départ, plus ancien d'abord")
+
+        uploader.complete(0, .keepRetry)
+        await waitUntil { uploader.calls.count == 3 }
+        #expect(uploader.calls == names(Array(files[0...2])), "un créneau libéré = le suivant, dans l'ordre")
+
+        uploader.complete(1, .keepRetry)
+        uploader.complete(2, .keepRetry)
+        await waitUntil { uploader.calls.count == 5 }
+        #expect(uploader.calls == names(files))
+    }
+
+    @Test func aSecondManifestDoesNotRelaunchWhatIsQueuedOrInFlight() async throws {
+        let files = (21...25).map { fileEntry(fileIndex: $0) }
+        let (session, fake, _, uploader, _, root) = try makeQueuedSession(files: files, maxConcurrent: 2)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls.count == 2)
+        deliverManifest(session, fake, files)
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls.count == 2, "ni les 2 en vol ni les 3 en file ne sont relancés")
+
+        uploader.complete(0, .keepRetry)
+        uploader.complete(1, .keepRetry)
+        await waitUntil { uploader.calls.count == 4 }
+        uploader.complete(2, .keepRetry)
+        uploader.complete(3, .keepRetry)
+        await waitUntil { uploader.calls.count == 5 }
+        await settle()
+        #expect(uploader.calls.count == 5)
+        #expect(Set(uploader.calls).count == 5, "chaque fichier est parti une seule fois")
+    }
+
+    @Test func anOutcomeThatKeepsTheFileLetsALaterManifestRetryIt() async throws {
+        let files = [fileEntry(fileIndex: 21)]
+        let (session, fake, _, uploader, _, root) = try makeQueuedSession(files: files)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        uploader.complete(0, .keepRetry)
+        await waitUntil { true }
+        await settle()
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls.count == 2, "gardé = réessayé à la synchro suivante, comme avant")
+    }
+
+    @Test func aReReadFileInFlightIsSentAgainAndTheStaleOutcomeIsIgnored() async throws {
+        let file = fileEntry(fileIndex: 21)
+        let (session, fake, store, uploader, _, root) = try makeQueuedSession(files: [file])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id, path) = SpoolStore.identity(for: file)
+
+        deliverManifest(session, fake, [file])
+        #expect(uploader.calls.count == 1)
+
+        try store.recordAcquired(id, relativePath: path, data: Data("nouveau".utf8), listedSize: file.sizeBytes)
+        deliverManifest(session, fake, [file])
+        #expect(uploader.calls.count == 2, "autre contenu = autre envoi, même avec l'ancien en vol")
+
+        uploader.complete(0, .delivered) // issue de l'ANCIEN contenu
+        await settle()
+        #expect(store.entries[id]?.state == .acquired, "l'accusé périmé ne livre pas le nouveau contenu")
+
+        uploader.complete(1, .delivered)
+        await waitUntil { store.entries[id]?.state == .delivered }
+        #expect(store.entries[id]?.state == .delivered)
+    }
+
+    @Test func aQueuedEntryReReadBeforeItsTurnIsNotSentWithItsStaleContent() async throws {
+        let files = [fileEntry(fileIndex: 21), fileEntry(fileIndex: 22)]
+        let (session, fake, store, uploader, _, root) = try makeQueuedSession(files: files, maxConcurrent: 1)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id22, path22) = SpoolStore.identity(for: files[1])
+
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls == names([files[0]]))
+
+        // 22 attend en file ; il est relu avant son tour.
+        try store.recordAcquired(id22, relativePath: path22, data: Data("relu".utf8), listedSize: files[1].sizeBytes)
+        uploader.complete(0, .delivered) // 21 livré : ne repart pas au manifeste suivant
+        await settle()
+        #expect(uploader.calls.count == 1, "l'ancien contenu de 22 ne part pas")
+
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls == names(files), "le nouveau contenu de 22 part au manifeste suivant")
+    }
+
+    @Test func oneRefreshOnlyOnceEverythingIsSettledIncludingQueuedUploads() async throws {
+        let files = (21...23).map { fileEntry(fileIndex: $0) }
+        let (session, fake, _, uploader, refresh, root) = try makeQueuedSession(files: files, maxConcurrent: 2)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        uploader.complete(0, .delivered)
+        uploader.complete(1, .delivered)
+        await waitUntil { uploader.calls.count == 3 }
+        await settle()
+        #expect(refresh.posts == 0, "un envoi encore en vol/en file : pas retombé")
+
+        uploader.complete(2, .delivered)
+        await waitUntil { refresh.posts == 1 }
+        await settle()
+        #expect(refresh.posts == 1, "un seul rafraîchissement, pas un par fichier")
+    }
+
+    @Test func noRefreshInPhoneMode() async throws {
+        let files = [fileEntry(fileIndex: 21)]
+        let (session, fake, store, uploader, refresh, root) = try makeQueuedSession(files: files, mode: .phone)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id, _) = SpoolStore.identity(for: files[0])
+
+        deliverManifest(session, fake, files)
+        uploader.complete(0, .delivered)
+        await waitUntil { store.entries[id]?.state == .delivered }
+        await settle()
+        #expect(refresh.posts == 0, "la fraîcheur vient de l'ingestion locale en mode Téléphone")
+    }
+
+    // MARK: Fin de session
+
+    @Test func closingDropsQueuedUploadsRecordsInFlightOutcomesButTouchesNoLink() async throws {
+        let files = (21...23).map { fileEntry(fileIndex: $0) }
+        let (session, fake, store, uploader, refresh, root) = try makeQueuedSession(files: files, maxConcurrent: 1)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (id21, _) = SpoolStore.identity(for: files[0])
+
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls.count == 1)
+        let framesBeforeClose = fake.sentFrames.count
+
+        session.close()
+        session.close() // idempotent
+        uploader.complete(0, .delivered) // l'envoi en vol aboutit APRÈS la fermeture
+        await waitUntil { store.entries[id21]?.state == .delivered }
+        await settle()
+
+        #expect(store.entries[id21]?.state == .delivered, "un 2xx est un fait : journalisé même session fermée")
+        #expect(uploader.calls.count == 1, "plus rien ne part d'une session fermée")
+        #expect(fake.sentFrames.count == framesBeforeClose, "aucune trame (archivage) sur un lien mort")
+        #expect(session.deliveredFileIndexes.isEmpty, "pas d'état publié sur une session fermée")
+        #expect(refresh.posts == 1, "rien ne reste en vol : le rafraîchissement n'attend pas une traversée morte")
+        #expect(store.entries.values.filter { $0.state == .acquired }.count == 2, "les envois jetés restent à faire")
+
+        deliverManifest(session, fake, files)
+        #expect(uploader.calls.count == 1, "un manifeste tardif ne relance rien")
+    }
+
+    @Test func theNextSessionOnTheSameJournalPicksUpWhatTheClosedOneDropped() async throws {
+        let files = (21...23).map { fileEntry(fileIndex: $0) }
+        let (session, fake, store, uploader, _, root) = try makeQueuedSession(files: files, maxConcurrent: 1)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        session.close()
+        uploader.complete(0, .keepRetry)
+        await settle()
+
+        let freshFake = FakeGfdiCommunicator()
+        let freshUploader = GatedUploader()
+        let fresh = GarminSession(
+            communicator: freshFake, spoolStore: store, uploader: freshUploader,
+            requiresLocalIngest: { false }, requestLocalIngest: {}, maxConcurrentUploads: 3)
+        deliverManifest(fresh, freshFake, files)
+
+        #expect(freshUploader.calls == names(files), "rien n'est resté bloqué : tout repart à la session suivante")
+    }
+}

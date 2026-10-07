@@ -96,8 +96,16 @@ enum PulseUploader {
     /// Seule E/S : une lecture locale du `.fit` déjà sur le disque du
     /// téléphone — jamais un accès réseau.
     static func sha256Hex(ofFileAt url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        // Par blocs de 256 Kio : un gros .fit d'activité n'est jamais chargé en
+        // entier en mémoire (avant : `Data(contentsOf:)`, un pic égal à la taille
+        // du fichier à chaque envoi). Même résultat octet pour octet.
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// Mapping réponse → action, contrat §6 — PUR, une classe de code HTTP à la
@@ -189,6 +197,12 @@ final class URLSessionPulseUploadTransport: PulseUploadTransport {
 
 /// Couture entre le Spool et `PulseUploader` — c'est ce que `GarminSession`
 /// appelle, pas `PulseUploader` directement (cf. `PulseSpoolUploader` ci-dessous).
+///
+/// Contrat de fil : `upload` ne doit pas bloquer l'appelant (peut être le main) —
+/// le travail lourd (hachage) se fait en fond — et `completion` peut arriver sur
+/// N'IMPORTE QUEL fil, y compris synchrone avant le retour de `upload` (livraison
+/// locale du mode Téléphone, factices de test) : l'appelant ramène lui-même
+/// l'issue sur son fil.
 protocol SpoolUploading {
     func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void)
 }
@@ -201,26 +215,56 @@ protocol SpoolUploading {
 /// mise en cache à la construction manquerait ce cas (token renseigné en cours
 /// de session).
 final class PulseSpoolUploader: SpoolUploading {
-    private let transport: PulseUploadTransport
+    /// File de fond DÉDIÉE à la préparation d'un envoi (lecture de la config, SHA-256
+    /// du fichier ENTIER, construction de la requête). Sérielle : un seul hachage à
+    /// la fois (lecture disque + CPU), ce qui borne la charge même si l'appelant
+    /// empile des envois ; la borne de concurrence réseau, elle, est celle de
+    /// `UploadDispatchQueue`. `utility` : travail de fond visible de l'utilisateur,
+    /// jamais en concurrence avec le fil principal ni les callbacks BLE. Partagée
+    /// par toutes les instances (une seule file de hachage dans le process).
+    static let prepQueue = DispatchQueue(label: "CleanYourRoom.all.pulse-upload-prep", qos: .utility)
 
-    init(transport: PulseUploadTransport = URLSessionPulseUploadTransport()) {
+    private let transport: PulseUploadTransport
+    private let prepQueue: DispatchQueue
+    /// Config relue à CHAQUE envoi (cf. commentaire de classe) ; injectable pour
+    /// qu'un test n'effleure ni `UserDefaults` ni le Trousseau.
+    private let configuration: () -> (baseURL: URL, token: String)?
+
+    init(
+        transport: PulseUploadTransport = URLSessionPulseUploadTransport(),
+        prepQueue: DispatchQueue = PulseSpoolUploader.prepQueue,
+        configuration: @escaping () -> (baseURL: URL, token: String)? = {
+            guard let baseURL = PulseConfig.baseURL, let token = PulseConfig.ingestToken, !token.isEmpty else { return nil }
+            return (baseURL, token)
+        }
+    ) {
         self.transport = transport
+        self.prepQueue = prepQueue
+        self.configuration = configuration
     }
 
+    /// Rend la main IMMÉDIATEMENT : la préparation (hachage compris) tourne sur
+    /// `prepQueue`, jamais dans le fil de l'appelant — `GarminSession` appelle
+    /// depuis le main, là où tournent aussi les callbacks BLE, et le hachage d'un
+    /// gros fichier d'activité bloquait l'interface et le lien. `completion` est
+    /// appelée sur un fil de fond (file de préparation ou callback `URLSession`) :
+    /// l'appelant ramène lui-même sur son fil (cf. `GarminSession.pumpUploads`).
     func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void) {
-        guard let baseURL = PulseConfig.baseURL, let token = PulseConfig.ingestToken, !token.isEmpty else {
-            completion(.keepConfigError)
-            return
-        }
-        PulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename, baseURL: baseURL, token: token, transport: transport) { result in
-            switch result {
-            case .success(let outcome):
-                completion(outcome)
-            case .failure:
-                // Ex. lecture du `.fit` impossible (`sha256Hex` a levé) : garder
-                // en spool, retenter à la prochaine sync plutôt que de perdre le
-                // fichier — même logique prudente que `.keepRetry` côté mapping HTTP.
-                completion(.keepRetry)
+        prepQueue.async { [transport, configuration] in
+            guard let config = configuration() else {
+                completion(.keepConfigError)
+                return
+            }
+            PulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename, baseURL: config.baseURL, token: config.token, transport: transport) { result in
+                switch result {
+                case .success(let outcome):
+                    completion(outcome)
+                case .failure:
+                    // Ex. lecture du `.fit` impossible (`sha256Hex` a levé) : garder
+                    // en spool, retenter à la prochaine sync plutôt que de perdre le
+                    // fichier — même logique prudente que `.keepRetry` côté mapping HTTP.
+                    completion(.keepRetry)
+                }
             }
         }
     }
@@ -255,11 +299,21 @@ final class RoutingSpoolUploader: SpoolUploading {
     /// `pushedToPulse` (cf. `upload` ci-dessous) ; cette classe ne lit/écrit
     /// jamais `state`, qui reste entièrement gouverné par `GarminSession`.
     private let spoolStore: SpoolStore?
+    /// Reçoit l'issue de chaque envoi RÉEL vers Pulse (jamais la livraison locale
+    /// du mode Téléphone) pour `PulseUploadHealth`. `nil` par défaut : les tests
+    /// n'effleurent pas le singleton global ; `BLEManager` passe
+    /// `PulseUploadHealth.observeFromAnyThread`.
+    private let health: ((PulseUploadOutcome) -> Void)?
 
-    init(pulseUploader: SpoolUploading, spoolStore: SpoolStore? = nil, mode: @escaping () -> StorageMode = { StorageModeStore.current }) {
+    init(
+        pulseUploader: SpoolUploading, spoolStore: SpoolStore? = nil,
+        mode: @escaping () -> StorageMode = { StorageModeStore.current },
+        health: ((PulseUploadOutcome) -> Void)? = nil
+    ) {
         self.pulseUploader = pulseUploader
         self.spoolStore = spoolStore
         self.mode = mode
+        self.health = health
     }
 
     func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void) {
@@ -278,7 +332,8 @@ final class RoutingSpoolUploader: SpoolUploading {
             // listée changée) pendant l'upload ne doit pas être déclaré poussé
             // sur l'accusé de son ANCIEN contenu.
             let token = spoolStore?.acquiredAt(forFileAt: fileURL)
-            pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename) { [spoolStore] outcome in
+            pulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename) { [spoolStore, health] outcome in
+                health?(outcome)
                 if outcome == .delivered {
                     spoolStore?.markPushedToPulse(forFileAt: fileURL, expectedAcquiredAt: token)
                 }

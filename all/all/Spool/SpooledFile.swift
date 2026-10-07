@@ -27,7 +27,10 @@ struct WatchFileID: Hashable, Codable {
 enum SpoolState: String, Codable {
     /// Octets sur le disque du téléphone (après download BLE réussi).
     case acquired
-    /// 2xx reçu de Pulse (après upload background).
+    /// 2xx reçu de Pulse (après upload background) — ou, plus largement, « le
+    /// collecteur n'a plus rien à livrer pour ce fichier » : livraison locale du
+    /// mode Téléphone, ou rejet définitif par Pulse (`SpoolEntry.pulseRejectedAt`,
+    /// `pushedToPulse` restant alors `false`). Ouvre l'archivage montre.
     case delivered
     /// Flag ARCHIVE posé sur la montre ET **accusé par elle** (SET_FILE_FLAG
     /// avec statut appliqué, cf. `GarminSession.handleSetFileFlagStatus`) —
@@ -94,12 +97,21 @@ struct SpoolEntry: Codable {
     /// toujours : c'est elle qui empêche `pendingAcquisition` de redemander à la
     /// montre un fichier qu'on a déjà eu.
     var purgedAt: Date?
+    /// Pulse a REJETÉ ce fichier (400/413/415/422, `PulseUploadOutcome.quarantine`) :
+    /// le rejouer ne changerait rien. L'entrée passe alors `delivered` sans que
+    /// `pushedToPulse` ne bouge (cf. `SpoolStore.markPulseRejected`), et on garde
+    /// l'octet dans le spool : jamais purgé (`SpoolPurger`), jamais repoussé par le
+    /// rattrapage (`PulseBacklogPusher`) tant que l'utilisateur ne demande pas
+    /// « Renvoyer » (`SpoolStore.clearPulseRejections`). `nil` = pas rejeté ; repart
+    /// à `nil` quand le fichier est relu (`recordAcquired` crée une entrée neuve).
+    var pulseRejectedAt: Date?
 
     init(
         id: WatchFileID, state: SpoolState, acquiredAt: Date,
         deliveredAt: Date? = nil, archivedAt: Date? = nil,
         relativePath: String, pushedToPulse: Bool = false,
-        listedSize: Int? = nil, ingest: SpoolIngestOutcome? = nil, purgedAt: Date? = nil
+        listedSize: Int? = nil, ingest: SpoolIngestOutcome? = nil, purgedAt: Date? = nil,
+        pulseRejectedAt: Date? = nil
     ) {
         self.id = id
         self.state = state
@@ -111,10 +123,11 @@ struct SpoolEntry: Codable {
         self.listedSize = listedSize
         self.ingest = ingest
         self.purgedAt = purgedAt
+        self.pulseRejectedAt = pulseRejectedAt
     }
 
     /// Décodage manuel pour la seule rétrocompatibilité de `pushedToPulse`,
-    /// `listedSize`, `ingest` et `purgedAt` : un journal écrit avant ces champs
+    /// `listedSize`, `ingest`, `purgedAt` et `pulseRejectedAt` : un journal écrit avant ces champs
     /// n'a pas ces clés — `decodeIfPresent` les défaute à `false`/`nil` plutôt que de faire échouer tout le décodage du
     /// journal (`JSONDecoder().decode([SpoolEntry].self, ...)` dans
     /// `SpoolStore.loadJournal`, qui perdrait alors le journal ENTIER, pas
@@ -132,5 +145,6 @@ struct SpoolEntry: Codable {
         listedSize = try container.decodeIfPresent(Int.self, forKey: .listedSize)
         ingest = try container.decodeIfPresent(SpoolIngestOutcome.self, forKey: .ingest)
         purgedAt = try container.decodeIfPresent(Date.self, forKey: .purgedAt)
+        pulseRejectedAt = try container.decodeIfPresent(Date.self, forKey: .pulseRejectedAt)
     }
 }

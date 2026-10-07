@@ -65,6 +65,12 @@ struct HomeView: View {
     /// Paramètres (roue crantée) — hors barre d'onglets, regroupe le
     /// secondaire iPhone (Apparence, Synchro, Profil, Statut, Montre, Compte).
     @State private var showSystemMenu = false
+    /// Écran Montre en feuille depuis la ligne d'alerte d'envoi (`uploadIssueRow`).
+    @State private var showWatch = false
+    /// Santé de l'envoi vers Pulse et mode Stockage : la ligne d'alerte n'existe
+    /// qu'en mode Pulse/Les deux, tant qu'un problème est connu.
+    @State private var health = PulseUploadHealth.shared
+    @State private var storageMode = StorageModeStore.shared
 
     var body: some View {
         NavigationStack {
@@ -77,7 +83,9 @@ struct HomeView: View {
                 .sheet(isPresented: $showSystemMenu) {
                     SettingsView()
                 }
+                .sheet(isPresented: $showWatch) { WatchSectionView() }
         }
+        .refreshesPulseRejectedCount(health)
         .task { await viewModel.reload() }
         .task {
             // FC en direct : rafraîchissement périodique tant que l'écran est
@@ -120,6 +128,29 @@ struct HomeView: View {
         .padding(.bottom, PulseSpacing.md)
     }
 
+    /// Une ligne discrète, visible seulement tant qu'un problème d'envoi vers
+    /// Pulse existe (jeton refusé, mauvaise source, fichiers rejetés) ; ouvre
+    /// l'écran Montre. Jamais en mode Téléphone : rien ne part vers Pulse.
+    @ViewBuilder
+    private var uploadIssueRow: some View {
+        if storageMode.mode != .phone, let issue = health.issue {
+            Button { showWatch = true } label: {
+                HStack(spacing: PulseSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(issue.label)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(Color.pulseTextSecondary)
+                }
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(Color.pulseDanger)
+                .padding(.horizontal, PulseSpacing.lg)
+                .padding(.bottom, PulseSpacing.md)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
@@ -133,6 +164,7 @@ struct HomeView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     homeHeader
+                    uploadIssueRow
                     NowSection(viewModel: viewModel)
                     WeekTrainingSection(viewModel: viewModel)
                     if let session = viewModel.session {

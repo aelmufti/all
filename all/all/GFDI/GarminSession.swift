@@ -219,12 +219,22 @@ final class GarminSession: ObservableObject {
     /// État de la traversée `syncNewFiles()` — cf. `GarminSyncState`.
     @Published private(set) var syncState: GarminSyncState = .idle
 
-    /// Nombre d'uploads Pulse en vol (dispatched mais sans issue encore reçue) —
-    /// sert à ne poster QU'UN rafraîchissement d'écrans quand la synchro est
-    /// entièrement retombée (plus aucun upload en vol ET traversée terminée),
-    /// au lieu d'un refresh par fichier livré. Manipulé uniquement sur le main
-    /// (dispatch/completion d'upload), cf. `maybePostDataRefreshIfSettled`.
-    private var outstandingUploads = 0
+    /// Envois Pulse de cette session : en file (borne `maxConcurrent`) et en vol
+    /// (sans issue encore reçue) — cf. `UploadDispatchQueue`. Sert aussi à ne
+    /// poster QU'UN rafraîchissement d'écrans quand la synchro est entièrement
+    /// retombée (plus aucun envoi en file NI en vol, traversée terminée), au lieu
+    /// d'un refresh par fichier livré — cf. `maybePostDataRefreshIfSettled`.
+    /// Manipulée uniquement sur le main (mise en file / complétion).
+    private var uploadQueue: UploadDispatchQueue
+    /// Vrai une fois la session abandonnée par `close()` (lien remplacé) : plus
+    /// aucun envoi n'est lancé, et les issues encore attendues ne touchent plus
+    /// que le journal (cf. `handleUploadOutcome`).
+    private var isClosed = false
+    /// Mode Stockage et rafraîchissement d'écrans, injectables : un test ne doit
+    /// ni lire le réglage global (`UserDefaults`) ni poster la notification
+    /// d'app. Défauts = comportement de production.
+    private let storageMode: () -> StorageMode
+    private let postDataRefresh: () -> Void
     /// Vrai si au moins un fichier a été livré à Pulse (2xx) depuis le dernier
     /// rafraîchissement posté — évite de rafraîchir quand rien n'a changé.
     private var deliveredSinceLastRefresh = false
@@ -339,8 +349,14 @@ final class GarminSession: ObservableObject {
         calendarSource: CalendarEventSource? = nil, archiveTimeout: TimeInterval = 20,
         requiresLocalIngest: @escaping () -> Bool = { false },
         ingestProofVerifier: ((SpoolEntry) -> Bool)? = nil,
-        requestLocalIngest: @escaping () -> Void = { LocalIngestor.ingestIfNeeded() }
+        requestLocalIngest: @escaping () -> Void = { LocalIngestor.ingestIfNeeded() },
+        maxConcurrentUploads: Int = UploadDispatchQueue.defaultMaxConcurrent,
+        storageMode: @escaping () -> StorageMode = { StorageModeStore.current },
+        postDataRefresh: @escaping () -> Void = { DataRefreshNotifier.postDataDidChangeDebounced() }
     ) {
+        self.storageMode = storageMode
+        self.postDataRefresh = postDataRefresh
+        self.uploadQueue = UploadDispatchQueue(maxConcurrent: maxConcurrentUploads)
         self.communicator = communicator
         self.archiveTimeout = archiveTimeout
         self.spoolStore = spoolStore
@@ -956,25 +972,62 @@ final class GarminSession: ObservableObject {
 
     // MARK: - Upload Pulse (après acquisition dans le Spool)
 
-    /// Pousse un .fit du Spool vers Pulse. Complétion ramenée sur le main (les
-    /// callbacks URLSession arrivent sur une file de fond ; tout l'état publié et
-    /// le Spool se manipulent sur le main, comme les callbacks BLE).
+    /// Met un .fit du Spool en file d'envoi vers Pulse, puis lance ce que la borne
+    /// permet (`pumpUploads`). Le même contenu (identité + `acquiredAt`) déjà en
+    /// file ou en vol n'est jamais remis : un nouveau manifeste, qui repasse sur
+    /// toutes les entrées `acquired`, ne double donc aucun envoi ; un fichier relu
+    /// (nouvel `acquiredAt`) repart. Sans effet une fois la session fermée.
     private func uploadSpoolEntry(_ entry: SpoolEntry) {
-        guard let uploader, let spoolStore else { return }
-        let fileURL = spoolStore.fileURL(for: entry)
-        let filename = entry.id.name
-        outstandingUploads += 1
-        // Jeton d'acquisition capturé AVANT l'envoi : si le fichier est relu
-        // (taille listée changée) pendant que cet upload est en vol, son issue
-        // concerne l'ANCIEN contenu et ne doit pas faire avancer le nouveau.
-        let acquiredAt = entry.acquiredAt
-        uploader.upload(fileURL: fileURL, watchFilename: filename) { [weak self] outcome in
-            DispatchQueue.main.async { self?.handleUploadOutcome(outcome, for: entry.id, acquiredAt: acquiredAt) }
+        guard uploader != nil, spoolStore != nil, !isClosed else { return }
+        guard uploadQueue.enqueue(entry) else {
+            log.debug("Envoi Pulse déjà en file ou en vol pour ce contenu (index=\(entry.id.index, privacy: .public)) — pas relancé")
+            return
+        }
+        pumpUploads()
+    }
+
+    /// Lance les envois en file tant qu'un créneau est libre. Rappelée à chaque
+    /// mise en file et à chaque issue reçue : c'est ce qui fait partir les
+    /// suivants à mesure que les précédents se terminent.
+    ///
+    /// Au départ, le contenu est revérifié contre le journal : une entrée relue
+    /// depuis (autre `acquiredAt`) ou déjà sortie de `acquired` n'est plus ce
+    /// qu'on avait mis en file — on ne l'envoie pas (son contenu courant a sa
+    /// propre place en file, ou elle est déjà traitée).
+    ///
+    /// Complétion ramenée sur le main (les callbacks de l'uploader arrivent sur une
+    /// file de fond ; tout l'état publié et le Spool se manipulent sur le main,
+    /// comme les callbacks BLE). `self` y est tenu FORT à dessein : une issue
+    /// attendue après le remplacement de la session doit quand même atteindre le
+    /// journal (un 2xx de Pulse est un fait, à enregistrer — sinon le fichier
+    /// repart au prochain lien) ; `isClosed` empêche tout autre effet. La
+    /// rétention dure au plus le délai de la requête.
+    private func pumpUploads() {
+        guard let uploader, let spoolStore, !isClosed else { return }
+        while let key = uploadQueue.next() {
+            guard let entry = spoolStore.entries[key.id], entry.acquiredAt == key.acquiredAt, entry.state == .acquired else {
+                log.info("Envoi Pulse abandonné avant départ (index=\(key.id.index, privacy: .public)) : contenu relu ou déjà traité depuis la mise en file")
+                uploadQueue.finish(key)
+                continue
+            }
+            let fileURL = spoolStore.fileURL(for: entry)
+            let filename = key.id.name
+            // Jeton d'acquisition = `key.acquiredAt`, capturé AVANT l'envoi : si le
+            // fichier est relu (taille listée changée) pendant que cet envoi est
+            // en vol, son issue concerne l'ANCIEN contenu et ne doit pas faire
+            // avancer le nouveau.
+            uploader.upload(fileURL: fileURL, watchFilename: filename) { outcome in
+                DispatchQueue.main.async { self.handleUploadOutcome(outcome, for: key) }
+            }
         }
     }
 
-    private func handleUploadOutcome(_ outcome: PulseUploadOutcome, for id: WatchFileID, acquiredAt: Date) {
-        outstandingUploads = max(0, outstandingUploads - 1)
+    private func handleUploadOutcome(_ outcome: PulseUploadOutcome, for key: UploadDispatchQueue.Key) {
+        let id = key.id, acquiredAt = key.acquiredAt
+        uploadQueue.finish(key)
+        // Session fermée (lien remplacé) : l'issue est un fait à enregistrer dans
+        // le journal, mais plus aucun effet sur le lien mort (archivage montre),
+        // l'état publié ni la file (rien ne repart d'ici).
         switch outcome {
         case .delivered:
             guard spoolStore?.entries[id]?.acquiredAt == acquiredAt else {
@@ -982,9 +1035,11 @@ final class GarminSession: ObservableObject {
                 break
             }
             spoolStore?.markDelivered(id, expectedAcquiredAt: acquiredAt)
-            deliveredFileIndexes.insert(id.index)
-            archivePendingDeliveries()
             deliveredSinceLastRefresh = true
+            if !isClosed {
+                deliveredFileIndexes.insert(id.index)
+                archivePendingDeliveries()
+            }
         case .keepConfigError:
             log.error("Upload Pulse: token/URL absent ou invalide — fichier gardé, pas de retry auto (renseigner les réglages)")
         case .keepRetryLater:
@@ -992,8 +1047,42 @@ final class GarminSession: ObservableObject {
         case .keepRetry:
             log.warning("Upload Pulse: indisponible / erreur réseau — gardé, réessai prochaine sync")
         case .quarantine:
-            log.error("Upload Pulse: fichier rejeté (400/413/415/422) — gardé en spool, à investiguer")
+            // Rejouer n'aide jamais : sans cela l'entrée resterait `acquired`,
+            // renvoyée à chaque synchro et jamais archivée (l'index de la montre
+            // finirait par saturer). Même garde de jeton que `.delivered`. Pas de
+            // `deliveredSinceLastRefresh` : rien de neuf côté Pulse.
+            guard spoolStore?.entries[id]?.acquiredAt == acquiredAt else {
+                log.info("Upload Pulse rejeté pour un contenu depuis relu (index=\(id.index, privacy: .public)) — résultat périmé ignoré, le nouveau contenu sera envoyé")
+                break
+            }
+            spoolStore?.markPulseRejected(id, expectedAcquiredAt: acquiredAt)
+            log.error("Upload Pulse: fichier rejeté (400/413/415/422) — gardé en spool (`delivered`, quarantaine), archivage montre ouvert")
+            if !isClosed { archivePendingDeliveries() }
         }
+        // Créneau libéré : fait partir le suivant AVANT de juger si tout est
+        // retombé (un envoi qui vient de partir n'est pas « retombé »).
+        pumpUploads()
+        maybePostDataRefreshIfSettled()
+    }
+
+    /// Fin de session : le lien est remplacé par un nouveau (`BLEManager`). Jette
+    /// les envois encore EN FILE (rien n'est parti : les entrées restent
+    /// `acquired`, la session suivante les relance) et interdit tout nouveau
+    /// départ. Les envois EN VOL ne sont pas interrompus — le réseau n'a pas
+    /// besoin du lien BLE ; leur issue est enregistrée dans le journal mais
+    /// n'agit plus sur la montre. Un simple `didDisconnect` n'appelle PAS ceci :
+    /// la session survit jusqu'à la reconnexion et sa file continue de se vider
+    /// (réseau seul), seul l'archivage montre échoue faute de lien (retenté à la
+    /// session suivante). Idempotent.
+    func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        let dropped = uploadQueue.cancelQueued()
+        if !dropped.isEmpty {
+            log.info("Session fermée : \(dropped.count, privacy: .public) envoi(s) Pulse en file abandonné(s), relancés à la session suivante")
+        }
+        // Rien ne repartira d'ici : si des 2xx déjà enregistrés attendent leur
+        // rafraîchissement d'écrans et qu'il ne reste rien en vol, le poster.
         maybePostDataRefreshIfSettled()
     }
 
@@ -1009,11 +1098,13 @@ final class GarminSession: ObservableObject {
     /// chemins postent ; `DataRefreshNotifier` (coalescé) fusionne s'ils sont
     /// proches dans le temps.
     private func maybePostDataRefreshIfSettled() {
-        guard StorageModeStore.current != .phone else { return }
-        guard outstandingUploads == 0, downloadQueue.isEmpty, currentDownload == nil else { return }
+        guard storageMode() != .phone else { return }
+        guard uploadQueue.isIdle else { return }
+        // Session fermée : la traversée ne reprendra jamais, ne pas l'attendre.
+        guard isClosed || (downloadQueue.isEmpty && currentDownload == nil) else { return }
         guard deliveredSinceLastRefresh else { return }
         deliveredSinceLastRefresh = false
-        DataRefreshNotifier.postDataDidChangeDebounced()
+        postDataRefresh()
     }
 
     /// Repousse tout ce qui est déjà `acquired` mais pas encore `delivered` :
@@ -1021,7 +1112,7 @@ final class GarminSession: ObservableObject {
     /// dormant, ou échecs d'upload passés. Idempotent (markDelivered l'est).
     private func uploadPendingAcquisitions() {
         guard let spoolStore else { return }
-        for entry in spoolStore.entries.values where entry.state == .acquired {
+        for entry in UploadDispatchQueue.pending(from: Array(spoolStore.entries.values)) {
             uploadSpoolEntry(entry)
         }
     }

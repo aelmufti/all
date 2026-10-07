@@ -55,11 +55,14 @@ enum SpoolPurger {
     ///    d'au moins `minimumAge` ;
     /// 5. poussée vers Pulse, OU Pulse n'est pas configuré (`pulseConfigured ==
     ///    false`) — sinon le rattrapage (`PulseBacklogPusher`) aurait encore
-    ///    besoin des octets.
+    ///    besoin des octets ;
+    /// 6. pas rejetée par Pulse (`pulseRejectedAt`) : le `.fit` est la seule copie
+    ///    qu'on puisse « Renvoyer » (la montre l'a archivé, Pulse ne l'a pas).
     static func selectPurgeable(from entries: [SpoolEntry], now: Date, pulseConfigured: Bool) -> [SpoolEntry] {
         entries
             .filter { entry in
                 guard entry.purgedAt == nil else { return false }
+                guard entry.pulseRejectedAt == nil else { return false }
                 guard purgeableFileTypes.contains(entry.id.fileType) else { return false }
                 guard entry.state == .archived, let archivedAt = entry.archivedAt,
                       now.timeIntervalSince(archivedAt) >= minimumAge else { return false }

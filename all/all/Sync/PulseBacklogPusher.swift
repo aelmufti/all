@@ -27,6 +27,10 @@
 //  passer par le routeur ajouterait une indirection sans bénéfice (il n'y a
 //  plus de branche `.phone` à filtrer ici).
 //
+//  Un rejet définitif de Pulse (`.quarantine`) met l'entrée en quarantaine
+//  (`SpoolEntry.pulseRejectedAt`) : le rattrapage ne la retente plus, sauf sur
+//  « Renvoyer » (`resendRejected()`).
+//
 //  ÉMISSION RÉSEAU : réutilise `PulseSpoolUploader` (même couture
 //  `SpoolUploading`/`PulseUploadTransport` que le flux GFDI normal), donc
 //  couverte par la même autorisation utilisateur datée 2026-09-22 — ce n'est
@@ -39,13 +43,14 @@ import os
 enum PulseBacklogPusher {
     private static let log = Logger(subsystem: "CleanYourRoom.all", category: "pulse-backlog")
 
-    /// Sélection PURE (aucune E/S) — entrées à pousser : jamais poussées ET
-    /// dont le fichier existe encore sur disque (une entrée dont le fichier a
-    /// disparu ne peut de toute façon pas être relue ; on ne la retente pas
-    /// indéfiniment). Extraite pour être testable sans `SpoolStore` réel ni
+    /// Sélection PURE (aucune E/S) — entrées à pousser : jamais poussées, NON
+    /// rejetées par Pulse (`pulseRejectedAt` : les rejouer ne change rien, elles
+    /// ne repartent que sur « Renvoyer », cf. `resendRejected()`) ET dont le
+    /// fichier existe encore sur disque (une entrée dont le fichier a disparu ne
+    /// peut de toute façon pas être relue ; on ne la retente pas indéfiniment). Extraite pour être testable sans `SpoolStore` réel ni
     /// disque, cf. `allTests/PulseBacklogPusherTests.swift`.
     static func backlog(from entries: [SpoolEntry], fileExists: (SpoolEntry) -> Bool) -> [SpoolEntry] {
-        entries.filter { !$0.pushedToPulse && fileExists($0) }
+        entries.filter { !$0.pushedToPulse && $0.pulseRejectedAt == nil && fileExists($0) }
     }
 
     /// Garde PURE (aucune E/S) — décide si `pushIfNeeded()` doit seulement
@@ -92,8 +97,27 @@ enum PulseBacklogPusher {
             }
             log.info("pushIfNeeded: \(due.count, privacy: .public) fichier(s) en attente de rattrapage Pulse")
             for entry in due {
-                await push(entry, spool: spool, uploader: uploader)
+                await push(entry, spool: spool, uploader: uploader, health: PulseUploadHealth.observeFromAnyThread)
             }
+        }
+    }
+
+    /// « Renvoyer » (écran Montre) : efface les rejets du journal puis relance le
+    /// rattrapage, qui reprend ces fichiers (`pushedToPulse == false`) ; un
+    /// nouveau rejet les remet en quarantaine. Ouvre sa propre `SpoolStore`
+    /// (journal fusionné sur disque : la session BLE verra l'effacement à sa
+    /// prochaine transition ou relecture). Fire-and-forget, comme `pushIfNeeded()`.
+    static func resendRejected() {
+        Task.detached(priority: .utility) {
+            guard let spool = try? SpoolStore() else {
+                log.error("resendRejected: SpoolStore indisponible")
+                return
+            }
+            let cleared = spool.clearPulseRejections()
+            log.info("resendRejected: \(cleared, privacy: .public) fichier(s) remis en file")
+            let remaining = spool.pulseRejectedCount()
+            await MainActor.run { PulseUploadHealth.shared.setRejectedCount(remaining) }
+            pushIfNeeded()
         }
     }
 
@@ -104,11 +128,17 @@ enum PulseBacklogPusher {
     /// ce rattrapage n'a de toute façon aucun lien BLE actif à disposition.
     /// `uploader` est injectable (protocole `SpoolUploading`) : les tests y
     /// passent un factice qui ne touche jamais le réseau, jamais
-    /// `PulseSpoolUploader` réel (règle immuable du dépôt).
-    static func push(_ entry: SpoolEntry, spool: SpoolStore, uploader: SpoolUploading) async {
+    /// `PulseSpoolUploader` réel (règle immuable du dépôt). `health` reçoit chaque
+    /// issue réelle de Pulse (cf. `PulseUploadHealth`) ; `nil` en test, pour ne
+    /// jamais toucher le singleton global.
+    static func push(
+        _ entry: SpoolEntry, spool: SpoolStore, uploader: SpoolUploading,
+        health: ((PulseUploadOutcome) -> Void)? = nil
+    ) async {
         let fileURL = spool.fileURL(for: entry)
         await withCheckedContinuation { continuation in
             uploader.upload(fileURL: fileURL, watchFilename: entry.id.name) { outcome in
+                health?(outcome)
                 switch outcome {
                 case .delivered:
                     // Jeton de l'acquisition poussée : si le fichier a été relu
@@ -116,7 +146,14 @@ enum PulseBacklogPusher {
                     // PAS été poussé et ne doit pas être marqué.
                     spool.markPushedToPulse(entry.id, expectedAcquiredAt: entry.acquiredAt)
                     log.info("Rattrapage Pulse : fichier poussé (\(entry.relativePath, privacy: .public))")
-                case .keepConfigError, .keepRetryLater, .keepRetry, .quarantine:
+                case .quarantine:
+                    // Rejet définitif : en quarantaine dans le journal (sans quoi
+                    // chaque lancement le renverrait en vain). N'ajoute pas de
+                    // transition d'état à une entrée déjà `delivered`/`archived` —
+                    // seul `pulseRejectedAt` change ; `pushedToPulse` reste `false`.
+                    spool.markPulseRejected(entry.id, expectedAcquiredAt: entry.acquiredAt)
+                    log.error("Rattrapage Pulse : \(entry.relativePath, privacy: .public) rejeté, mis en quarantaine")
+                case .keepConfigError, .keepRetryLater, .keepRetry:
                     // Laisse `pushedToPulse=false` : retenté au prochain
                     // `pushIfNeeded()` (lancement suivant, ou nouveau
                     // basculement de mode). Jamais fatal — un fichier qui ne

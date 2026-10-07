@@ -33,6 +33,13 @@ func excludeFromBackup(_ directory: URL) {
     try? url.setResourceValues(values)
 }
 
+extension Notification.Name {
+    /// Posté (sur le main) quand des fichiers sont rejetés par Pulse ou que
+    /// « Renvoyer » efface les rejets — les écrans qui en affichent le nombre le
+    /// relisent (cf. `PulseUploadHealth.refreshRejectedCount`).
+    static let spoolPulseRejectionsDidChange = Notification.Name("spoolPulseRejectionsDidChange")
+}
+
 /// Spool local des `.fit` récupérés, conservés **jusqu'au 2xx de Pulse** (garantie
 /// de livraison, CADRAGE §5). Journal à trois états (`acquired`/`delivered`/`archived`)
 /// calqué sur `AcquiredFiles` du pont ; protection au repos `completeUnlessOpen`
@@ -204,6 +211,15 @@ final class SpoolStore {
         return entries.values.filter { $0.ingest?.status == .failed }.count
     }
 
+    /// Nombre d'entrées rejetées par Pulse (`pulseRejectedAt != nil`) — ce que
+    /// l'écran Montre et l'accueil signalent. Relit d'abord le journal sur disque :
+    /// le rejet est posé par une AUTRE instance (session BLE, rattrapage), le cache
+    /// de celle-ci serait périmé.
+    func pulseRejectedCount() -> Int {
+        refreshFromDisk()
+        return entries.values.filter { $0.pulseRejectedAt != nil }.count
+    }
+
     // MARK: - Nommage canonique (porte `GarminUtils.buildExportPath` côté pont,
     // AGPL-3.0 — service/devices/garmin/GarminUtils.java)
 
@@ -346,6 +362,67 @@ final class SpoolStore {
             log.info("Fichier livré à Pulse : \(entry.relativePath, privacy: .public)")
             return (true, ())
         }
+    }
+
+    /// Après un **rejet définitif** de Pulse (400/413/415/422,
+    /// `PulseUploadOutcome.quarantine`) : le rejouer ne changerait rien. Pose
+    /// `pulseRejectedAt` ET fait passer `acquired` → `delivered` (avec
+    /// `deliveredAt`) — sans JAMAIS toucher `pushedToPulse`, qui reste `false`
+    /// (Pulse n'a pas le fichier). Sémantique : `delivered` veut alors dire « le
+    /// collecteur n'a plus rien à livrer pour ce fichier » (comme la livraison
+    /// locale du mode Téléphone), ce qui ouvre l'archivage montre par le chemin
+    /// existant (`ArchivePlanner`, preuve d'ingestion comprise en Téléphone/Les
+    /// deux) ; la copie reste dans le spool. Sortie du renvoi automatique :
+    /// `GarminSession.uploadPendingAcquisitions` ne reprend que `acquired`, et
+    /// `PulseBacklogPusher.backlog` écarte les entrées rejetées.
+    ///
+    /// Sur une entrée déjà `delivered`/`archived` (rattrapage d'un fichier collecté
+    /// en mode Téléphone), seul `pulseRejectedAt` change. Idempotente : un second
+    /// rejet ne réécrit rien. Même garde de jeton d'acquisition que les autres
+    /// `mark*` (un rejet du contenu ANCIEN ne frappe pas le contenu relu).
+    func markPulseRejected(_ id: WatchFileID, expectedAcquiredAt: Date? = nil) {
+        mutateJournal { journal in
+            guard let entry = journal[id] else {
+                log.warning("markPulseRejected ignoré : entrée inconnue (\(id.name, privacy: .public))")
+                return (false, ())
+            }
+            return (applyPulseRejected(entry, in: &journal, expectedAcquiredAt: expectedAcquiredAt), ())
+        }
+        notifyPulseRejectionsChanged()
+    }
+
+    /// Variante par URL de fichier — pour `RoutingSpoolUploader`, qui ne connaît que
+    /// `fileURL` (cf. `markPushedToPulse(forFileAt:)`).
+    func markPulseRejected(forFileAt url: URL, expectedAcquiredAt: Date? = nil) {
+        mutateJournal { journal in
+            guard let entry = journal.values.first(where: { fileURL(for: $0) == url }) else {
+                log.warning("markPulseRejected(forFileAt:) ignoré : aucune entrée pour \(url.lastPathComponent, privacy: .public)")
+                return (false, ())
+            }
+            return (applyPulseRejected(entry, in: &journal, expectedAcquiredAt: expectedAcquiredAt), ())
+        }
+        notifyPulseRejectionsChanged()
+    }
+
+    /// « Renvoyer » : efface `pulseRejectedAt` sur toutes les entrées et rend leur
+    /// nombre. Ne touche ni `state` ni `pushedToPulse` (resté `false`) : le
+    /// rattrapage (`PulseBacklogPusher`) reprend alors ces fichiers, et un nouveau
+    /// rejet les remet en quarantaine.
+    @discardableResult
+    func clearPulseRejections() -> Int {
+        let cleared = mutateJournal { journal -> (changed: Bool, result: Int) in
+            var count = 0
+            for (id, entry) in journal where entry.pulseRejectedAt != nil {
+                journal[id]?.pulseRejectedAt = nil
+                count += 1
+            }
+            return (count > 0, count)
+        }
+        if cleared > 0 {
+            log.info("Rejets Pulse effacés : \(cleared, privacy: .public) fichier(s) à renvoyer")
+            notifyPulseRejectionsChanged()
+        }
+        return cleared
     }
 
     /// Après réception de l'accusé **appliqué** de la montre pour un
@@ -508,6 +585,32 @@ final class SpoolStore {
         journal[entry.id] = updated
         log.info("Fichier effectivement poussé vers Pulse : \(entry.relativePath, privacy: .public)")
         return true
+    }
+
+    /// Corps commun des deux `markPulseRejected`, sur l'entrée du journal frais.
+    /// Rend vrai si le journal a changé.
+    private func applyPulseRejected(_ entry: SpoolEntry, in journal: inout [WatchFileID: SpoolEntry], expectedAcquiredAt: Date?) -> Bool {
+        guard matchesAcquisition(entry, expectedAcquiredAt, caller: "markPulseRejected") else { return false }
+        guard entry.pulseRejectedAt == nil else { return false }
+        var updated = entry
+        let now = Date()
+        updated.pulseRejectedAt = now
+        if updated.state == .acquired {
+            updated.state = .delivered
+            updated.deliveredAt = now
+        }
+        journal[entry.id] = updated
+        log.error("Fichier rejeté par Pulse (gardé dans le spool, archivage montre ouvert) : \(entry.relativePath, privacy: .public)")
+        return true
+    }
+
+    /// Prévient les écrans que le nombre de rejets a pu changer (ils relisent le
+    /// journal). Posté sur le main : les `mark*` arrivent aussi du fil de rappel
+    /// d'URLSession, et les abonnés SwiftUI mettent à jour du `@State`.
+    private func notifyPulseRejectionsChanged() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .spoolPulseRejectionsDidChange, object: nil)
+        }
     }
 
     /// URL disque d'une entrée du spool — pour que `PulseUploader` lise le

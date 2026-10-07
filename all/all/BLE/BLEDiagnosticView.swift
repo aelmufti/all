@@ -23,6 +23,9 @@ struct BLEDiagnosticView: View {
     /// la vue se re-rende si le mode change pendant qu'elle est affichée —
     /// même idiome que `SettingsStorageSection`/`SettingsView`.
     @State private var storageMode = StorageModeStore.shared
+    /// Santé de l'envoi vers Pulse (jeton refusé, mauvaise source, fichiers
+    /// rejetés) — cf. `Sync/PulseUploadHealth.swift`.
+    @State private var health = PulseUploadHealth.shared
     /// Par défaut, la liste de scan masque les périphériques sans nom (bruit
     /// BLE ambiant) — ce bouton, replié et désactivé par défaut, les
     /// redémasque pour un usage avancé. Cf. `visibleDevices(_:showAll:)`.
@@ -40,6 +43,18 @@ struct BLEDiagnosticView: View {
                     LabeledContent("Identifiant", value: ble.peripheralIdentifier ?? "—")
                     LabeledContent("Notifications (fenêtre courante)", value: "\(ble.notificationCount)")
                 }
+                // Une ligne d'alerte tant qu'un problème d'envoi est connu ; « Renvoyer »
+                // seulement s'il y a des fichiers en quarantaine. Rien en mode
+                // Téléphone (rien ne part vers Pulse).
+                if storageMode.mode != .phone, let issue = health.issue {
+                    Section {
+                        Label(issue.label, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.pulseDanger)
+                        if health.rejectedCount > 0 {
+                            Button("Renvoyer") { PulseBacklogPusher.resendRejected() }
+                        }
+                    }
+                }
                 if storageMode.mode != .phone {
                     Section("Sync Pulse") {
                         LabeledContent("URL Pulse", value: PulseConfig.baseURL?.absoluteString ?? "— (à définir dans l'onglet Pulse)")
@@ -49,6 +64,7 @@ struct BLEDiagnosticView: View {
                         Button("Enregistrer le token") {
                             let trimmed = ingestToken.trimmingCharacters(in: .whitespacesAndNewlines)
                             PulseConfig.ingestToken = trimmed.isEmpty ? nil : trimmed
+                            health.clearConfigProblem()
                         }
                         Text("Le token doit correspondre à un INGEST_TOKENS du serveur Pulse, et la source de synchro doit être réglée sur « phone » côté Pulse.")
                             .font(.footnote)
@@ -154,6 +170,7 @@ struct BLEDiagnosticView: View {
                 }
             }
             .navigationTitle("Diagnostic BLE")
+            .refreshesPulseRejectedCount(health)
         }
     }
 
