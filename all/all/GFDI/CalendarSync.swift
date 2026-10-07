@@ -39,18 +39,41 @@ struct CalendarEventInput {
     var isAllDay: Bool
 }
 
-/// Source d'événements interrogée par la session GFDI. Abstraite pour injecter un
+/// Source d'événements du calendrier du téléphone. Abstraite pour injecter un
 /// double en test ; l'implémentation réelle est `EventKitCalendarSource`.
+///
+/// Deux notions distinctes, volontairement découplées :
+/// - **Accès** (`isAuthorized`, `requestAccess`, `events(from:to:)`) : l'app
+///   a-t-elle le droit de lire le calendrier ? Indépendant de la montre — c'est ce
+///   qu'utilisera l'organisateur de vie, qu'on envoie ou non les événements à la
+///   montre.
+/// - **Synchro montre** (`syncToWatchEnabled`, `isReadyForWatch`) : faut-il
+///   répondre à la montre avec les événements ? Consommée par la session GFDI.
 protocol CalendarEventSource: AnyObject {
-    /// `true` si l'utilisateur a accordé l'accès *et* activé la synchro
-    /// (`PulseConfig.calendarSyncEnabled`). Quand `false`, la session répond une
-    /// liste vide (statut OK), exactement comme Gadgetbridge quand
-    /// `PREF_SYNC_CALENDAR` est désactivé.
-    var isReady: Bool { get }
+    /// `true` si l'utilisateur a accordé l'accès complet au calendrier. Ne dépend
+    /// pas du réglage de synchro montre.
+    var isAuthorized: Bool { get }
 
-    /// Événements chevauchant `[from, to]`. Appel **synchrone** (l'autorisation
-    /// est demandée en amont, hors du chemin GFDI).
+    /// Demande l'accès (invite système si nécessaire) ; `granted` indique
+    /// l'autorisation obtenue. Sans réseau, sans écriture de données.
+    func requestAccess(_ completion: @escaping (Bool) -> Void)
+
+    /// Réglage « envoyer les événements à la montre »
+    /// (`PulseConfig.calendarSyncEnabled`). Sans effet sur l'accès.
+    var syncToWatchEnabled: Bool { get }
+
+    /// Événements chevauchant `[from, to]`, **sans condition sur la synchro
+    /// montre** : liste vide si l'accès n'est pas accordé. Appel **synchrone**
+    /// (l'autorisation est demandée en amont, hors du chemin GFDI).
     func events(from: Date, to: Date) -> [CalendarEventInput]
+}
+
+extension CalendarEventSource {
+    /// `true` si la montre doit recevoir les événements : accès accordé *et*
+    /// synchro montre activée. Quand `false`, la session répond une liste vide
+    /// (statut OK), exactement comme Gadgetbridge quand `PREF_SYNC_CALENDAR` est
+    /// désactivé.
+    var isReadyForWatch: Bool { isAuthorized && syncToWatchEnabled }
 }
 
 /// Construit la réponse protobuf calendrier. Fonction pure (aucune dépendance
@@ -151,7 +174,7 @@ enum CalendarResponder {
 }
 
 /// Source réelle adossée à EventKit. L'autorisation (`NSCalendarsFullAccessUsage
-/// Description`) est demandée via `requestAccess()` hors du chemin GFDI ; la
+/// Description`) est demandée via `requestAccess(_:)` hors du chemin GFDI ; la
 /// requête d'événements (`events(from:to:)`) est ensuite synchrone.
 final class EventKitCalendarSource: CalendarEventSource {
     /// Instance partagée entre la session GFDI (`BLEManager`) et l'UI du toggle
@@ -162,13 +185,16 @@ final class EventKitCalendarSource: CalendarEventSource {
     private let store = EKEventStore()
     private let log = Logger(subsystem: "CleanYourRoom.all", category: "calendar")
 
-    var isReady: Bool {
-        PulseConfig.calendarSyncEnabled
-            && EKEventStore.authorizationStatus(for: .event) == .fullAccess
+    var isAuthorized: Bool {
+        EKEventStore.authorizationStatus(for: .event) == .fullAccess
     }
 
-    /// À appeler quand l'utilisateur active la synchro (toggle) : déclenche
-    /// l'invite système si nécessaire. Sans réseau, sans écriture de données.
+    var syncToWatchEnabled: Bool {
+        PulseConfig.calendarSyncEnabled
+    }
+
+    /// Déclenche l'invite système si nécessaire (aujourd'hui depuis le toggle de
+    /// synchro montre ; l'organisateur de vie pourra l'appeler sans la montre).
     func requestAccess(_ completion: @escaping (Bool) -> Void) {
         store.requestFullAccessToEvents { [weak self] granted, error in
             if let error { self?.log.error("EventKit accès refusé/erreur : \(error.localizedDescription, privacy: .public)") }
@@ -177,7 +203,7 @@ final class EventKitCalendarSource: CalendarEventSource {
     }
 
     func events(from: Date, to: Date) -> [CalendarEventInput] {
-        guard isReady else { return [] }
+        guard isAuthorized else { return [] }
         let predicate = store.predicateForEvents(withStart: from, end: to, calendars: nil)
         return store.events(matching: predicate).map { ek in
             CalendarEventInput(

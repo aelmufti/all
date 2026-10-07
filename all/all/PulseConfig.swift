@@ -33,7 +33,9 @@ enum PulseConfig {
     /// Synchronisation du calendrier du téléphone vers la montre (cf.
     /// `CalendarSync.swift`). Désactivée par défaut, comme `PREF_SYNC_CALENDAR`
     /// côté pont : tant qu'elle est off, la montre reçoit une liste vide. Simple
-    /// préférence (pas un secret) → `UserDefaults`, comme `baseURL`.
+    /// préférence (pas un secret) → `UserDefaults`, comme `baseURL`. Ne conditionne
+    /// que l'envoi à la montre, pas l'accès de l'app au calendrier (cf.
+    /// `CalendarEventSource.isAuthorized`).
     static var calendarSyncEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: calendarSyncKey) }
         set { UserDefaults.standard.set(newValue, forKey: calendarSyncKey) }

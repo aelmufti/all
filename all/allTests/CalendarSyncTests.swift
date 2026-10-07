@@ -5,7 +5,9 @@
 //  Couvre la brique pure de la synchro calendrier (CalendarSync.swift) :
 //  filtrage par fenêtre, all-day opt-in, plafond maxEvents*2, troncatures, et
 //  aller-retour d'encodage/décodage protobuf via les types générés (GCal*).
-//  Pas de test EventKit ici : l'accès calendrier ne se simule pas hors device.
+//  Pas de test EventKit ici : l'accès calendrier ne se simule pas hors device ;
+//  le découplage accès / synchro montre se teste via un double de
+//  `CalendarEventSource` et une vraie `GarminSession` sur communicator factice.
 //
 
 import Testing
@@ -178,5 +180,127 @@ struct CalendarSyncTests {
         #expect(decoded.calendarService.hasCalendarRequest)
         #expect(decoded.calendarService.calendarRequest.begin == 1_000)
         #expect(decoded.calendarService.calendarRequest.end == 2_000)
+    }
+}
+
+// MARK: - Accès calendrier vs synchro montre
+
+/// Double de `CalendarEventSource` : jamais d'EventKit ni de lecture du vrai
+/// calendrier (règle immuable CLAUDE.md) — accès et réglage de synchro sont
+/// deux interrupteurs indépendants, comme dans l'implémentation réelle.
+private final class StubCalendarSource: CalendarEventSource {
+    var isAuthorized: Bool
+    var syncToWatchEnabled: Bool
+    private let stored: [CalendarEventInput]
+
+    init(authorized: Bool, syncToWatch: Bool, events: [CalendarEventInput]) {
+        self.isAuthorized = authorized
+        self.syncToWatchEnabled = syncToWatch
+        self.stored = events
+    }
+
+    func requestAccess(_ completion: @escaping (Bool) -> Void) { completion(isAuthorized) }
+
+    func events(from: Date, to: Date) -> [CalendarEventInput] {
+        isAuthorized ? stored : []
+    }
+}
+
+/// Communicator GFDI FACTICE (jamais de vrai BLE) : capte les trames émises et
+/// permet d'injecter une trame entrante. Copie locale, comme dans les autres
+/// fichiers de test (les types voisins sont `private`).
+private final class CalendarFakeCommunicator: GfdiCommunicating {
+    var onGfdiFrame: ((GfdiFrame) -> Void)?
+    var onGfdiChannelReady: (() -> Void)?
+    private(set) var sentFrames: [Data] = []
+
+    func start() {}
+
+    func sendGfdiMessage(_ frame: Data, taskName: String) {
+        sentFrames.append(frame)
+    }
+
+    func deliver(messageType: UInt16, payload: Data) {
+        onGfdiFrame?(GfdiFrame(messageType: messageType, payload: payload))
+    }
+}
+
+struct CalendarAccessVsWatchSyncTests {
+    private let sample = CalendarEventInput(
+        title: "Réunion", location: nil, notes: nil, organizer: nil,
+        start: Date(timeIntervalSince1970: 1_700_000_000),
+        end: Date(timeIntervalSince1970: 1_700_003_600),
+        isAllDay: false
+    )
+
+    /// Envoie une vraie demande calendrier de la montre (PROTOBUF_REQUEST 5043,
+    /// service 1) à une `GarminSession` et décode la réponse PROTOBUF_RESPONSE
+    /// (5044) émise.
+    private func watchResponse(for source: CalendarEventSource) throws -> GCalCalendarService.CalendarServiceResponse {
+        let fake = CalendarFakeCommunicator()
+        let session = GarminSession(communicator: fake, spoolStore: nil, calendarSource: source)
+        withExtendedLifetime(session) {
+            var request = GCalCalendarService.CalendarServiceRequest()
+            request.begin = 0
+            request.end = .max
+            request.maxEvents = 100
+            request.maxTitleLength = 100
+            var service = GCalCalendarService()
+            service.calendarRequest = request
+            var smart = GCalSmart()
+            smart.calendarService = service
+            let message = (try? smart.serializedData()) ?? Data()
+
+            var writer = GarminByteWriter()
+            writer.writeUInt16LE(7) // requestId
+            writer.writeUInt32LE(0) // dataOffset
+            writer.writeUInt32LE(UInt32(message.count)) // totalProtobufLength
+            writer.writeUInt32LE(UInt32(message.count)) // protobufDataLength
+            writer.writeBytes(message)
+            fake.deliver(messageType: 5043, payload: writer.data)
+        }
+
+        // Parmi les trames émises (accusé 5000, puis réponse 5044), retient la
+        // réponse protobuf : son payload = requestId(2) + 3 × UInt32 + protobuf.
+        let frames = try fake.sentFrames.map { try GfdiFrame.parse($0) }
+        let reply = try #require(frames.first { $0.messageType == 5044 })
+        let smart = try GCalSmart(serializedBytes: Data(reply.payload.dropFirst(14)))
+        return smart.calendarService.calendarResponse
+    }
+
+    @Test func accesAccordeSynchroMontreDesactiveeLaSourceResteLisibleMaisLaMontreRecoitVide() throws {
+        let source = StubCalendarSource(authorized: true, syncToWatch: false, events: [sample])
+
+        // Côté app (organisateur) : lecture possible sans la synchro montre.
+        #expect(source.isAuthorized)
+        #expect(source.events(from: .distantPast, to: .distantFuture).count == 1)
+        // Côté montre : pas prête → réponse vide, statut OK.
+        #expect(!source.isReadyForWatch)
+        let resp = try watchResponse(for: source)
+        #expect(resp.status == .ok)
+        #expect(resp.calendarEvent.isEmpty)
+    }
+
+    @Test func accesAccordeSynchroMontreActiveeLesEvenementsSontEnvoyes() throws {
+        let source = StubCalendarSource(authorized: true, syncToWatch: true, events: [sample])
+
+        #expect(source.isReadyForWatch)
+        let resp = try watchResponse(for: source)
+        #expect(resp.status == .ok)
+        #expect(resp.calendarEvent.map(\.title) == ["Réunion"])
+        #expect(resp.calendarEvent.first?.startDate == 1_700_000_000)
+    }
+
+    @Test func accesRefuseRienNiPourLAppNiPourLaMontre() throws {
+        for syncToWatch in [false, true] {
+            let source = StubCalendarSource(authorized: false, syncToWatch: syncToWatch, events: [sample])
+
+            #expect(!source.isAuthorized)
+            #expect(source.events(from: .distantPast, to: .distantFuture).isEmpty)
+            #expect(!source.isReadyForWatch)
+            let resp = try watchResponse(for: source)
+            #expect(resp.status == .ok)
+            #expect(resp.calendarEvent.isEmpty)
+        }
     }
 }

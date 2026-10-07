@@ -1320,11 +1320,11 @@ final class GarminSession: ObservableObject {
             log.info("CalendarService : demande reçue mais aucune source injectée → réponse vide")
             return CalendarResponder.emptyOK
         }
-        guard calendarSource.isReady else {
+        guard calendarSource.isReadyForWatch else {
             // Distingue les deux causes non sensibles pour le debug.
             log.info("""
                 CalendarService : demande reçue mais source non prête \
-                (toggle=\(PulseConfig.calendarSyncEnabled, privacy: .public)) → réponse vide
+                (accès=\(calendarSource.isAuthorized, privacy: .public), toggle=\(calendarSource.syncToWatchEnabled, privacy: .public)) → réponse vide
                 """)
             return CalendarResponder.emptyOK
         }
