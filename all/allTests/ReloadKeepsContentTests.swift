@@ -62,6 +62,19 @@ private func scriptedClient(_ backend: ScriptedBackend) -> PulseAPIClient {
     PulseAPIClient(baseURLProvider: { nil }, localBackend: backend, modeProvider: { .phone })
 }
 
+/// Mode de stockage pilotable depuis le test (relu à chaque chargement par les
+/// view models, jamais capturé) — évite de muter `StorageModeStore.shared`
+/// (`UserDefaults.standard`, partagé par tout le process de test).
+final class ModeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: StorageMode
+    init(_ mode: StorageMode) { current = mode }
+    var mode: StorageMode {
+        get { lock.withLock { current } }
+        set { lock.withLock { current = newValue } }
+    }
+}
+
 @MainActor
 private func waitUntil(_ condition: @MainActor () -> Bool) async {
     for _ in 0..<500 {
@@ -418,7 +431,8 @@ struct HomeReloadTests {
         let backend = ScriptedBackend()
         backend.set("api/wellness/day/\(HomeViewModel.todayKey())", dayJSON)
         backend.set("api/activities", #"{"total":0,"items":[]}"#)
-        return (HomeViewModel(client: scriptedClient(backend)), backend)
+        // Mode fixe : ces tests ne dépendent pas du réglage global de l'appareil.
+        return (HomeViewModel(client: scriptedClient(backend), modeProvider: { .phone }), backend)
     }
 
     private func isLoaded(_ vm: HomeViewModel) -> Bool {
@@ -452,9 +466,41 @@ struct HomeReloadTests {
 
     @Test func firstLoadFailureIsAFullScreenError() async {
         let backend = ScriptedBackend()
-        let vm = HomeViewModel(client: scriptedClient(backend))
+        let vm = HomeViewModel(client: scriptedClient(backend), modeProvider: { .phone })
         await vm.load()
         if case .failed = vm.state {} else { Issue.record("échec plein écran attendu") }
+    }
+
+    /// Source changée puis échec : l'ancienne source ne reste pas à l'écran comme
+    /// si c'était la nouvelle (plein écran d'erreur, contenu vidé) — et le réessai
+    /// voit toujours le changement tant qu'aucun chargement n'a abouti.
+    @Test func failedReloadAfterASourceChangeDoesNotKeepTheOldSource() async {
+        let box = ModeBox(.pulse)
+        let backend = ScriptedBackend()
+        backend.set("api/wellness/day/\(HomeViewModel.todayKey())", dayJSON)
+        backend.set("api/activities", #"{"total":0,"items":[]}"#)
+        let vm = HomeViewModel(client: scriptedClient(backend), modeProvider: { box.mode })
+        await vm.load()
+        #expect(isLoaded(vm) && vm.day != nil)
+
+        box.mode = .phone
+        backend.fail("api/activities")
+        await vm.reload()
+        if case .failed = vm.state {} else { Issue.record("échec plein écran attendu après changement de source") }
+        #expect(vm.day == nil)
+
+        // Un second échec : `loadedMode` n'a pas été avancé, la source est toujours « changée ».
+        await vm.reload()
+        if case .failed = vm.state {} else { Issue.record("le réessai doit toujours voir le changement de source") }
+
+        backend.set("api/activities", #"{"total":0,"items":[]}"#)
+        await vm.reload()
+        #expect(isLoaded(vm) && vm.day != nil)
+
+        // Source désormais alignée : un échec garde le contenu comme avant.
+        backend.fail("api/activities")
+        await vm.reload()
+        #expect(isLoaded(vm) && vm.day != nil)
     }
 
     @Test func triggersAreMerged() async {
@@ -652,6 +698,56 @@ struct NutritionReloadTests {
         #expect(vm.day?.date == "2026-10-03")
     }
 
+    /// Changer de jour pendant une suppression : l'opération aboutit, mais sa
+    /// relecture (jour d'avant) ne remplace pas l'affichage du jour courant.
+    @Test func deleteFinishingAfterADateChangeDoesNotShowTheOldDay() async {
+        let (vm, backend) = make()
+        await vm.load()
+        script(backend, date: "2026-10-04")
+        backend.set("api/nutrition/log/1", "{}")
+
+        backend.hold("api/nutrition/day/2026-10-05")
+        let operation = Task { await vm.deleteEntry(1) }
+        await waitUntil { backend.count("api/nutrition/day/2026-10-05") == 2 }
+        vm.shiftDay(by: -1)
+        await waitUntil { vm.day?.date == "2026-10-04" }
+        backend.release("api/nutrition/day/2026-10-05")
+        await operation.value
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(backend.count("api/nutrition/log/1") == 1)  // l'écriture a bien eu lieu
+        #expect(vm.date == "2026-10-04")
+        #expect(vm.day?.date == "2026-10-04")
+        #expect(vm.actionError == nil)
+        #expect(!vm.isMutating)
+    }
+
+    /// Même cas pour l'ajout rapide : la relecture du jour d'avant ne remplace
+    /// pas le jour affiché.
+    @Test func quickAddFinishingAfterADateChangeDoesNotShowTheOldDay() async {
+        let (vm, backend) = make()
+        await vm.load()
+        script(backend, date: "2026-10-04")
+        backend.set("api/nutrition/log", #"{"id":7}"#)
+
+        backend.hold("api/nutrition/day/2026-10-05")
+        let food = NutritionFrequentFood(
+            foodId: nil, name: "Pomme", uses: 3, grams: 150, units: nil, unitLabel: nil,
+            unitGrams: nil, lastTs: nil, kcal: 80, protein: 0.4, carbs: 20, fiber: 3, fat: 0.3)
+        let operation = Task { await vm.quickAdd(food) }
+        await waitUntil { backend.count("api/nutrition/day/2026-10-05") == 2 }
+        vm.shiftDay(by: -1)
+        await waitUntil { vm.day?.date == "2026-10-04" }
+        backend.release("api/nutrition/day/2026-10-05")
+        await operation.value
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(backend.count("api/nutrition/log") == 1)
+        #expect(vm.date == "2026-10-04")
+        #expect(vm.day?.date == "2026-10-04")
+        #expect(vm.actionError == nil)
+    }
+
     @Test func triggersAreMerged() async {
         let (vm, backend) = make()
         await vm.load()
@@ -664,5 +760,74 @@ struct NutritionReloadTests {
         backend.release("api/nutrition/frequent")
         await a.value; await b.value; await c.value
         #expect(backend.count("api/nutrition/frequent") == 2)
+    }
+}
+
+// MARK: - Stats
+
+@MainActor
+struct DashboardSourceChangeTests {
+    private let sleepDebtJSON = """
+        {"nights":0,"targetHours":7,"debtHours":0,"avgHours":0,"deficitNights":0,"avgInBedHours":0,
+         "avgAwakeMin":0,"detail":[]}
+        """
+
+    private func script(_ backend: ScriptedBackend) {
+        backend.set("api/stats/tab-training", """
+            {"days":30,"count":0,"totalS":0,"perWeek":0,"avgHr":null,"activeKcal":0,"deltaPct":null,
+             "weeks":[],"shares":[],"streak":{"best":0,"current":0},"zones":[],
+             "records":{"longestSession":null,"longestDistance":null,"bestPace":null,"heaviestWeek":null,"maxHr":null}}
+            """)
+        backend.set("api/stats/tab-health", """
+            {"days":30,"restingHr":54,"respiration":null,"spo2Night":null,"stress":null,"weightKg":null,
+             "sleepHours":null,"restingSeries":[],"restingDelta":null,"respirationSeries":[],
+             "respirationBand":null,"spo2Buckets":[],"spo2Nights":0,"weightSeries":[],"weightDelta":null,
+             "correlations":[]}
+            """)
+        backend.set("api/stats/tab-nutrition", """
+            {"days":30,"kcalPerDay":null,"expenditurePerDay":null,"balance":null,"proteinPerDay":null,
+             "daysLogged":0,"completeDays":0,"entriesPerDay":0,"series":[],"macros":[],
+             "topFoods":[],"totalEntries":0}
+            """)
+        backend.set("api/stats/sleep-debt", sleepDebtJSON)
+        backend.set("api/stats/sleep-insights", """
+            {"stressImpact":{"nights":0,"r":null,"significant":false,"buckets":[]},
+             "fragmentation":{"nights":0,"avgArousals":0,"avgAwakeMin":0,"avgLongestMin":0,"series":[]},
+             "composition":{"nights":0,"deep":0,"light":0,"rem":0,"wasoPct":0,
+               "ref":{"deep":{"lo":13,"hi":23},"light":{"lo":45,"hi":62},"rem":{"lo":20,"hi":25}}},
+             "spo2Arousal":null}
+            """)
+        backend.set("api/stats/sleep-regularity", #"{"nights":1,"score":null}"#)
+        backend.set("api/wellness/days", "[]")
+    }
+
+    /// Source changée puis échec : plus aucune donnée de l'ancienne source (plein
+    /// écran d'erreur côté vue, via `hasAnyData`), et le réessai voit toujours le
+    /// changement ; une fois la source alignée, un échec garde le contenu.
+    @Test func failedLoadAfterASourceChangeDoesNotKeepTheOldSource() async {
+        let box = ModeBox(.pulse)
+        let backend = ScriptedBackend()
+        script(backend)
+        let vm = DashboardViewModel(client: scriptedClient(backend), modeProvider: { box.mode })
+        await vm.load()
+        #expect(vm.state == .loaded && vm.hasAnyData)
+
+        box.mode = .phone
+        backend.fail("api/stats/sleep-debt")
+        await vm.reload()
+        if case .failed = vm.state {} else { Issue.record("échec attendu") }
+        #expect(!vm.hasAnyData)  // ni l'ancienne source à l'écran…
+
+        await vm.reload()  // …ni oubli du changement au réessai
+        #expect(!vm.hasAnyData)
+
+        backend.set("api/stats/sleep-debt", sleepDebtJSON)
+        await vm.reload()
+        #expect(vm.state == .loaded && vm.hasAnyData)
+
+        backend.fail("api/stats/sleep-debt")
+        await vm.reload()
+        #expect(vm.hasAnyData)
+        if case .failed = vm.state {} else { Issue.record("échec attendu") }
     }
 }

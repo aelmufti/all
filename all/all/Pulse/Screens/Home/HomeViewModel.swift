@@ -150,10 +150,14 @@ final class HomeViewModel {
     /// Fusionne les rechargements (retour au premier plan, synchro, minuit,
     /// changement de source) — cf. `ReloadGate`.
     private let gate = ReloadGate()
-    /// Source de données du dernier chargement : si elle change, les données
-    /// secondaires d'avant ne doivent pas survivre à un échec (elles viennent
-    /// d'un autre backend).
+    /// Source de données du contenu RÉELLEMENT affiché : posée seulement après
+    /// un chargement réussi. Si elle diffère du mode courant, ce qui est à l'écran
+    /// vient d'un autre backend — il ne doit survivre à un échec ni en secondaire
+    /// ni en principal.
     private var loadedMode: StorageMode?
+    /// Mode de stockage courant — injectable pour les tests (jamais capturé :
+    /// relu à chaque chargement, cf. `StorageModeStore.current`).
+    private let modeProvider: @Sendable () -> StorageMode
 
     /// Abonnement à `BLEManager.$liveHeartRate` (mode Téléphone) — cf.
     /// `subscribeToPhoneLiveHeartRate`. Annulé automatiquement à la
@@ -161,8 +165,12 @@ final class HomeViewModel {
     /// `HomeView`, `@State private var viewModel = HomeViewModel()`).
     private var liveHeartRateSubscription: AnyCancellable?
 
-    init(client: PulseAPIClient = .shared) {
+    init(
+        client: PulseAPIClient = .shared,
+        modeProvider: @escaping @Sendable () -> StorageMode = { StorageModeStore.current }
+    ) {
         self.client = client
+        self.modeProvider = modeProvider
         subscribeToPhoneLiveHeartRate()
     }
 
@@ -180,9 +188,8 @@ final class HomeViewModel {
     /// de chargement seulement tant qu'il n'y a rien) ; un échec ne le vide pas.
     func load() async {
         if case .loaded = state {} else { state = .loading }
-        let mode = StorageModeStore.current
+        let mode = modeProvider()
         let sourceChanged = loadedMode != nil && loadedMode != mode
-        loadedMode = mode
         do {
             let today = Self.todayKey()
             async let dayTask: HomeDayDetail = client.get("api/wellness/day/\(today)")
@@ -202,6 +209,9 @@ final class HomeViewModel {
             // `.fit` qui le couvre — les panneaux se remplissent alors.
             self.day = day
             state = .loaded
+            // Le contenu affiché vient maintenant de `mode` (et pas avant : un
+            // échec ne doit pas faire oublier que l'écran montre l'ancienne source).
+            loadedMode = mode
 
             // Best-effort : ne bloquent pas l'affichage principal (le live est
             // déjà rapatrié ci-dessus).
@@ -211,8 +221,24 @@ final class HomeViewModel {
             async let nutritionTask = loadNutrition(date: today, sourceChanged: sourceChanged)
             _ = await (programmeTask, intensityTask, sleepDebtTask, nutritionTask)
         } catch {
-            // Déjà rempli : on garde le contenu (aucun bandeau d'erreur sur cet
-            // écran) ; sinon plein écran d'erreur.
+            // Source changée : le contenu affiché vient d'un autre backend, on ne
+            // le présente pas comme celui de la nouvelle source — plein écran
+            // d'erreur et on vide le contenu (`loadedMode` reste l'ancienne source
+            // : le réessai voit toujours le changement).
+            if sourceChanged {
+                day = nil
+                activities = []
+                programme = []
+                intensity = nil
+                sleepDebt = nil
+                dayTarget = nil
+                intake = nil
+                intakeTarget = nil
+                state = .failed(error.localizedDescription)
+                return
+            }
+            // Même source, déjà rempli : on garde le contenu (aucun bandeau
+            // d'erreur sur cet écran) ; sinon plein écran d'erreur.
             if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
     }

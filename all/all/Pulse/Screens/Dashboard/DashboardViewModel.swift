@@ -46,11 +46,20 @@ final class DashboardViewModel {
     /// Numéro du dernier `load()` lancé : la réponse d'un chargement dépassé (autre
     /// période demandée entre-temps) ne remplace pas une plus récente.
     private var loadGeneration = 0
-    /// Source de données du dernier chargement (cf. `reco` non bloquante).
+    /// Source de données du contenu RÉELLEMENT affiché : posée seulement après un
+    /// chargement réussi et toujours d'actualité (cf. `reco` non bloquante, et
+    /// l'échec d'un chargement après changement de source).
     private var loadedMode: StorageMode?
+    /// Mode de stockage courant — injectable pour les tests (relu à chaque
+    /// chargement, jamais capturé).
+    private let modeProvider: @Sendable () -> StorageMode
 
-    init(client: PulseAPIClient = .shared) {
+    init(
+        client: PulseAPIClient = .shared,
+        modeProvider: @escaping @Sendable () -> StorageMode = { StorageModeStore.current }
+    ) {
         self.client = client
+        self.modeProvider = modeProvider
     }
 
     /// Vrai tant qu'aucune donnée n'a jamais été reçue — sert à distinguer,
@@ -107,9 +116,8 @@ final class DashboardViewModel {
     func load() async {
         loadGeneration += 1
         let generation = loadGeneration
-        let mode = StorageModeStore.current
+        let mode = modeProvider()
         let sourceChanged = loadedMode != nil && loadedMode != mode
-        loadedMode = mode
         state = .loading
         let days = String(period.days)
         let daysQuery = ["days": days]
@@ -148,9 +156,24 @@ final class DashboardViewModel {
             // (sauf changement de source, où elle viendrait de l'autre backend).
             if reco != nil || sourceChanged { sleepRecommendation = reco }
             wellnessDays = wd
+            loadedMode = mode
             state = .loaded
         } catch {
             guard generation == loadGeneration else { return }
+            // Source changée : on ne laisse pas l'ancienne source à l'écran comme si
+            // c'était la nouvelle — plus aucune donnée, donc plein écran d'erreur
+            // (`hasAnyData`). `loadedMode` reste l'ancienne source (le réessai voit
+            // toujours le changement).
+            if sourceChanged {
+                training = nil
+                health = nil
+                nutrition = nil
+                sleepDebt = nil
+                sleepInsights = nil
+                sleepRegularity = nil
+                sleepRecommendation = nil
+                wellnessDays = []
+            }
             state = .failed(error.localizedDescription)
         }
     }

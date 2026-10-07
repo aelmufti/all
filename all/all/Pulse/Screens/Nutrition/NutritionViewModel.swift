@@ -208,8 +208,24 @@ final class NutritionViewModel {
         }
     }
 
-    private func fetchDay() async throws -> NutritionDay {
+    private func fetchDay(for date: String) async throws -> NutritionDay {
         try await client.get("api/nutrition/day/\(date)")
+    }
+
+    private func fetchDay() async throws -> NutritionDay {
+        try await fetchDay(for: date)
+    }
+
+    /// Relit la journée d'une écriture et ne l'affiche que si l'écran est
+    /// toujours sur cette date : changer de jour pendant l'opération (l'écriture
+    /// aboutit quand même) ne doit jamais remplacer l'affichage du nouveau jour
+    /// par celui de l'ancien — même garde que `load()`, sur la date plutôt que
+    /// sur le numéro de chargement (`shiftDay` change `date` tout de suite, le
+    /// `load()` suivant n'incrémente `loadGeneration` qu'ensuite).
+    private func refreshDayAfterWrite(of opDate: String) async throws {
+        let refreshed = try await fetchDay(for: opDate)
+        guard date == opDate else { return }
+        day = refreshed
     }
 
     private func fetchTargets() async throws -> NutritionTargetInfo {
@@ -238,9 +254,10 @@ final class NutritionViewModel {
         isMutating = true
         actionError = nil
         defer { isMutating = false }
+        let opDate = date
         do {
             try await client.delete("api/nutrition/log/\(id)")
-            day = try await fetchDay()
+            try await refreshDayAfterWrite(of: opDate)
         } catch {
             actionError = Self.message(for: error)
         }
@@ -255,7 +272,8 @@ final class NutritionViewModel {
         actionError = nil
         defer { isMutating = false }
 
-        var body = NutritionLogRequest(date: date, name: food.name)
+        let opDate = date
+        var body = NutritionLogRequest(date: opDate, name: food.name)
         body.foodId = food.foodId
         body.kcal = food.kcal
         body.protein = food.protein
@@ -273,7 +291,7 @@ final class NutritionViewModel {
 
         do {
             let _: NutritionLogResponse = try await client.post("api/nutrition/log", body: body)
-            day = try await fetchDay()
+            try await refreshDayAfterWrite(of: opDate)
             frequent = try await fetchFrequent()
         } catch {
             actionError = Self.message(for: error)
@@ -660,6 +678,7 @@ final class NutritionViewModel {
         isMutating = true
         defer { isMutating = false }
 
+        let opDate = date
         let unitLabelForRequest = pUnitGrams != nil ? Self.unitName(pUnitLabel) : nil
         do {
             // En édition d'une entrée du journal, on ne (re)crée pas d'aliment
@@ -677,13 +696,13 @@ final class NutritionViewModel {
                 }
             }
 
-            var logBody = NutritionLogRequest(date: date, name: pName)
+            var logBody = NutritionLogRequest(date: opDate, name: pName)
             logBody.kcal = pKcal
             logBody.protein = pProtein
             logBody.carbs = pCarbs
             logBody.fiber = pFiber
             logBody.fat = pFat
-            logBody.ts = pendingTimestamp()
+            logBody.ts = pendingTimestamp(on: opDate)
             if unitMode, let unitGrams = pUnitGrams {
                 logBody.units = amount
                 logBody.unitLabel = unitLabelForRequest
@@ -701,24 +720,25 @@ final class NutritionViewModel {
             clearSearch()
             addSheetOpen = false
             sheetView = .menu
-            day = try await fetchDay()
+            try await refreshDayAfterWrite(of: opDate)
             frequent = try await fetchFrequent()
         } catch {
             actionError = Self.message(for: error)
         }
     }
 
-    /// `${date}T${pTime}:00` interprété en heure locale, comme
+    /// `${day}T${pTime}:00` interprété en heure locale, comme
     /// `Date.parse` côté Angular (une chaîne datetime sans fuseau explicite
     /// est résolue dans le fuseau courant). Repli sur l'instant présent si
-    /// l'heure n'a pas été saisie.
-    private func pendingTimestamp() -> Int {
+    /// l'heure n'a pas été saisie. `day` = jour de l'opération (l'écran peut
+    /// avoir changé de date pendant l'enregistrement de l'aliment).
+    private func pendingTimestamp(on day: String) -> Int {
         guard !pTime.isEmpty else { return Int(Date().timeIntervalSince1970) }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .current
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        guard let parsed = formatter.date(from: "\(date) \(pTime)") else {
+        guard let parsed = formatter.date(from: "\(day) \(pTime)") else {
             return Int(Date().timeIntervalSince1970)
         }
         return Int(parsed.timeIntervalSince1970)
