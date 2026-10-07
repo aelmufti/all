@@ -10,7 +10,8 @@
 import Foundation
 
 struct LocalStorageUsage: Equatable {
-    /// `.fit` présents dans le spool (les fichiers purgés n'y sont plus).
+    /// `.fit` présents dans le spool (les fichiers purgés n'y sont plus) ET `.fit`
+    /// d'activité rapatriés de Pulse (comptés avec les activités).
     var watchFileCount = 0
     var watchFileBytes: Int64 = 0
     /// Taille des `.fit` par dossier de premier niveau du spool, c'est-à-dire par
@@ -33,12 +34,13 @@ struct LocalStorageUsage: Equatable {
         else { return LocalStorageUsage() }
         var usage = measure(
             spoolRoot: base.appendingPathComponent("spool", isDirectory: true),
-            databaseRoot: base.appendingPathComponent("local-pulse", isDirectory: true))
+            databaseRoot: base.appendingPathComponent("local-pulse", isDirectory: true),
+            pulledFilesRoot: base.appendingPathComponent("pulse-files", isDirectory: true))
         usage.counts = try? LocalDb().contentCounts()
         return usage
     }
 
-    static func measure(spoolRoot: URL, databaseRoot: URL) -> LocalStorageUsage {
+    static func measure(spoolRoot: URL, databaseRoot: URL, pulledFilesRoot: URL? = nil) -> LocalStorageUsage {
         let filesDir = spoolRoot.appendingPathComponent("files", isDirectory: true)
         var usage = LocalStorageUsage(databaseBytes: contents(of: databaseRoot).bytes)
         let typeFolders = (try? FileManager.default.contentsOfDirectory(
@@ -49,6 +51,15 @@ struct LocalStorageUsage: Equatable {
             usage.watchFileCount += measured.count
             usage.watchFileBytes += measured.bytes
             usage.watchFileBytesByType[folder.lastPathComponent] = measured.bytes
+        }
+        // Activités rapatriées : seulement `activities/` (jamais `incoming/`, transitoire).
+        if let pulledFilesRoot {
+            let kept = contents(of: PulseFilesStore(root: pulledFilesRoot).activitiesDir)
+            if kept.count > 0 {
+                usage.watchFileCount += kept.count
+                usage.watchFileBytes += kept.bytes
+                usage.watchFileBytesByType["ACTIVITY", default: 0] += kept.bytes
+            }
         }
         return usage
     }

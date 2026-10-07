@@ -64,9 +64,65 @@ final class SerialPassGate: @unchecked Sendable {
         return true
     }
 
+    /// Exécute `work` SEUL : attend qu'aucune passe ne tourne, puis tient la garde
+    /// jusqu'à la fin de `work` — toute `request` reçue entre-temps est écartée, pas
+    /// différée (la garde ne connaît pas la passe à rejouer) : l'appelant relance la
+    /// sienne ensuite s'il en a besoin. Sert aux travaux qui ne doivent pas courir en
+    /// même temps qu'une ingestion (purge des données de l'iPhone).
+    func runExclusively<T>(_ work: () async throws -> T) async rethrows -> T {
+        while !tryAcquire() {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        defer { release() }
+        return try await work()
+    }
+
+    /// Comme `runExclusively`, pour un travail BREF qui s'intercale entre deux passes (un
+    /// fichier rapatrié de Pulse, `PulseFilesPullEngine`) : rend en plus `true` si une
+    /// `request` est arrivée pendant ce temps — écartée par la garde, donc due. L'appelant
+    /// la relance (`LocalIngestor.runBetween`), sans quoi une passe demandée à cet instant
+    /// précis (fin de téléchargement montre) serait perdue.
+    func runInterleaved<T>(_ work: () async throws -> T) async rethrows -> (value: T, dropped: Bool) {
+        while !tryAcquire() {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let value: T
+        do {
+            value = try await work()
+        } catch {
+            _ = releaseReportingRequest()
+            throw error
+        }
+        return (value, releaseReportingRequest())
+    }
+
+    private func releaseReportingRequest() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let had = rerun
+        rerun = false
+        running = false
+        return had
+    }
+
+    private func tryAcquire() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !running else { return false }
+        running = true
+        return true
+    }
+
+    private func release() {
+        lock.lock()
+        rerun = false
+        running = false
+        lock.unlock()
+    }
+
     /// Attend le retour au repos (tests). Interroge plutôt que d'ajouter un
     /// mécanisme de notification que la production n'utiliserait pas.
-    func waitUntilIdle(timeout: TimeInterval = 10) async -> Bool {
+    func waitUntilIdle(timeout: TimeInterval = 30) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !isIdle {
             if Date() > deadline { return false }

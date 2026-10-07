@@ -96,9 +96,25 @@ enum PulseBacklogPusher {
                 return
             }
             log.info("pushIfNeeded: \(due.count, privacy: .public) fichier(s) en attente de rattrapage Pulse")
-            for entry in due {
-                await push(entry, spool: spool, uploader: uploader, health: PulseUploadHealth.observeFromAnyThread)
-            }
+            await pushBacklog(due, spool: spool, uploader: uploader, health: PulseUploadHealth.observeFromAnyThread, reporter: MainSyncWorkReporter())
+        }
+    }
+
+    /// Pousse `due` un à un et déclare le reste à la bannière d'activité
+    /// (`SyncWork`) sous une source PROPRE à ce rattrapage (deux rattrapages
+    /// simultanés — lancement + changement de mode — s'additionnent sans se
+    /// piétiner). Le `defer` libère le compte quelle que soit la sortie : un
+    /// décompte coincé afficherait la bannière pour toujours.
+    static func pushBacklog(
+        _ due: [SpoolEntry], spool: SpoolStore, uploader: SpoolUploading,
+        health: ((PulseUploadOutcome) -> Void)? = nil, reporter: SyncWorkReporting
+    ) async {
+        let source = "backlog-\(UUID().uuidString)"
+        reporter.uploads(source: source, remaining: due.count)
+        defer { reporter.uploads(source: source, remaining: 0) }
+        for (index, entry) in due.enumerated() {
+            await push(entry, spool: spool, uploader: uploader, health: health)
+            reporter.uploads(source: source, remaining: due.count - index - 1)
         }
     }
 

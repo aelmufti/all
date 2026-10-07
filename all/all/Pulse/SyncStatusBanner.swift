@@ -8,7 +8,7 @@
 //  Purement informatif : `allowsHitTesting(false)` sur toute sa surface, pour
 //  qu'aucun tap ne soit intercepté même quand la bannière est visible.
 //
-//  N'observe QUE `BLEManager.shared` (pas `garminSession` séparément) : le
+//  Côté montre, n'observe QUE `BLEManager.shared` (pas `garminSession` séparément) : le
 //  pont `garminSessionChangeForwarder` ajouté dans `BLEManager` relaie déjà
 //  tout changement de la session GFDI imbriquée vers l'`objectWillChange` de
 //  `BLEManager` (cf. son commentaire) — sans lui, cette vue ne se
@@ -28,13 +28,23 @@
 //  translucide (`.ultraThinMaterial`) et transitoire (seulement pendant une
 //  synchro active) pour minimiser la gêne le cas échéant.
 //
+//  Montre aussi, une fois le lien montre calme, l'envoi vers Pulse, l'ingestion locale
+//  et l'échange des saisies (`SyncWork`, avec anti-clignotement) : même capsule, même
+//  emplacement, un seul libellé à la fois.
+//
 
 import SwiftUI
 
 struct SyncStatusBanner: View {
     @ObservedObject private var ble = BLEManager.shared
+    /// Travail du téléphone (envoi vers Pulse, ingestion locale, saisies) : même
+    /// bannière, état distinct (`Sync/SyncWork.swift`) — la synchro montre garde la
+    /// priorité (`SyncActivity.resolve`).
+    @State private var work = SyncWork.shared
 
-    private var activity: SyncActivity { ble.syncActivity }
+    private var activity: SyncActivity {
+        SyncActivity.resolve(watch: ble.syncActivity, work: work.displayed)
+    }
 
     var body: some View {
         Group {
@@ -76,20 +86,7 @@ struct SyncStatusBanner: View {
         .accessibilityLabel("Synchronisation en cours : \(label)")
     }
 
-    private var label: String {
-        switch activity {
-        case .idle:
-            return ""
-        case .connecting:
-            return "Connexion à la montre…"
-        case .listing:
-            return "Lecture de la montre…"
-        case .downloading(let done):
-            return done == 1
-                ? "Synchronisation… (1 fichier)"
-                : "Synchronisation… (\(done) fichiers)"
-        }
-    }
+    private var label: String { activity.label }
 }
 
 #Preview {

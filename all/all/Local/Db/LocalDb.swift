@@ -63,7 +63,9 @@ final class LocalDb {
     /// 1 : journal de synchro des saisies (`uid`, `saisie_changes`, triggers —
     /// contrat `custom-connect/docs/pulse-saisies-sync-contract.md` §3), cf.
     /// `LocalDb+Saisies.swift`.
-    static let migrations: [String] = [saisieSyncMigration]
+    /// 2 : fichiers rapatriés de Pulse à ne plus redemander (`pulse_pull_marks`), cf.
+    /// `LocalDb+PulsePull.swift`.
+    static let migrations: [String] = [saisieSyncMigration, pulsePullMigration]
 
     /// Applique les migrations manquantes, dans l'ordre, chacune dans sa
     /// transaction avec l'avancement de version. La version est relue DANS la
@@ -1106,17 +1108,32 @@ final class LocalDb {
         var count = 0
         try db.run("SELECT COUNT(*) FROM foods") { r in count = Int(r.double(0) ?? 0) }
         guard count == 0 else { return }
-        try db.transaction {
-            for f in Self.seedFoods {
-                try db.run(
-                    """
-                    INSERT INTO foods (name, kcal, protein, carbs, fiber, fat, unit_label, unit_grams)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [.text(f.name), .double(f.kcal), .double(f.protein), .double(f.carbs), .double(f.fiber), .double(f.fat),
-                     sqliteOptionalText(f.unitLabel), sqliteOptional(f.unitGrams)])
-            }
+        try db.transaction { try insertSeedFoods() }
+    }
+
+    /// Insère les aliments de départ, SANS transaction propre : l'appelant en tient
+    /// une (`seedFoodsIfNeeded`, `purgeAllData`).
+    func insertSeedFoods() throws {
+        for f in Self.seedFoods {
+            try db.run(
+                """
+                INSERT INTO foods (name, kcal, protein, carbs, fiber, fat, unit_label, unit_grams)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [.text(f.name), .double(f.kcal), .double(f.protein), .double(f.carbs), .double(f.fiber), .double(f.fat),
+                 sqliteOptionalText(f.unitLabel), sqliteOptional(f.unitGrams)])
         }
+    }
+
+    /// Les aliments de départ vus comme des empreintes de valeurs : un aliment du
+    /// journal qui y correspond n'a JAMAIS été saisi ni modifié par l'utilisateur
+    /// (`LocalPurgePlanner.blockingSaisieCount`).
+    static var seedFoodSignatures: Set<LocalPurgePlanner.FoodSignature> {
+        Set(seedFoods.map {
+            LocalPurgePlanner.FoodSignature(
+                name: $0.name, kcal: $0.kcal, protein: $0.protein, carbs: $0.carbs, fiber: $0.fiber, fat: $0.fat,
+                unitLabel: $0.unitLabel, unitGrams: $0.unitGrams)
+        })
     }
 
     // Port intégral de `SEED_FOODS` (`nutrition/seed-foods.ts`).

@@ -101,6 +101,10 @@ struct ContentView: View {
             // hors main. Même couture que le rattrapage ci-dessus.
             SaisieSyncService.shared.requestExchange()
 
+            // Rapatriement des `.fit` que Pulse détient et pas le téléphone
+            // (`Sync/PulseFilesPull.swift`) : « Les deux » seulement, basse priorité.
+            PulseFilesPullService.shared.requestPass()
+
             // Mode Téléphone : pas de session à vérifier, la coquille
             // s'affiche déjà (condition ci-dessus) — inutile d'appeler
             // `api/auth/me` (qui échouerait de toute façon sans `baseURL`).
@@ -120,9 +124,18 @@ struct ContentView: View {
         // rester simple, pas de logique de mode dupliquée dans cette vue.
         .onChange(of: storageMode.mode) { _, _ in
             PulseBacklogPusher.pushIfNeeded()
+            // La reprise automatique de l'échange des saisies ne survit pas à un changement
+            // de mode (le nouveau mode relance lui-même un échange, juste dessous) ; la
+            // bannière d'activité refiltre ce qu'elle montre selon le nouveau mode.
+            SaisieSyncService.shared.storageModeDidChange()
+            SyncWork.shared.refresh()
             // Passage en « Les deux » : première occasion d'envoyer le journal des
             // saisies tenu en Pulse/Téléphone (no-op dans les deux autres modes).
             SaisieSyncService.shared.requestExchange()
+            // Une passe de rapatriement en cours ne vaut plus pour le nouveau mode ;
+            // « Les deux » en relance une.
+            PulseFilesPullService.shared.storageModeDidChange()
+            PulseFilesPullService.shared.requestPass()
             // Passage en Téléphone/Les deux : remonter tout de suite le spool
             // en base locale (self-guard : no-op en `.pulse`), pour que les
             // écrans qui viennent de basculer sur la source locale
@@ -134,6 +147,11 @@ struct ContentView: View {
             // source différente (serveur vs backend local) — re-fetch (cf.
             // `WakeScheduleStore.load()`).
             Task { await WakeScheduleStore.shared.load() }
+        }
+        // Fin d'une passe d'ingestion = base libérée : devance la reprise de l'échange
+        // des saisies si elle attendait ça (échec « base occupée »).
+        .onReceive(NotificationCenter.default.publisher(for: .localIngestPassDidEnd)) { _ in
+            SaisieSyncService.shared.ingestPassDidEnd()
         }
         // Connexion réussie (depuis `LoginView` ou `PulseModeLoginSheet`) : le
         // cookie de session vient d'être posé, le planning serveur est

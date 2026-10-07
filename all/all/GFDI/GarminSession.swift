@@ -226,6 +226,12 @@ final class GarminSession: ObservableObject {
     /// d'un refresh par fichier livré — cf. `maybePostDataRefreshIfSettled`.
     /// Manipulée uniquement sur le main (mise en file / complétion).
     private var uploadQueue: UploadDispatchQueue
+    /// Déclare `uploadQueue.outstanding` à la bannière d'activité (`SyncWork`), sous une
+    /// source propre à CETTE session (une session remplacée garde ses envois en vol : les
+    /// deux comptes s'additionnent). Le compte est toujours DÉRIVÉ de la file, jamais
+    /// tenu à part : il ne peut pas diverger — cf. `publishUploadActivity`.
+    private let workReporter: SyncWorkReporting
+    private let uploadActivitySource = "session-\(UUID().uuidString)"
     /// Vrai une fois la session abandonnée par `close()` (lien remplacé) : plus
     /// aucun envoi n'est lancé, et les issues encore attendues ne touchent plus
     /// que le journal (cf. `handleUploadOutcome`).
@@ -352,8 +358,10 @@ final class GarminSession: ObservableObject {
         requestLocalIngest: @escaping () -> Void = { LocalIngestor.ingestIfNeeded() },
         maxConcurrentUploads: Int = UploadDispatchQueue.defaultMaxConcurrent,
         storageMode: @escaping () -> StorageMode = { StorageModeStore.current },
-        postDataRefresh: @escaping () -> Void = { DataRefreshNotifier.postDataDidChangeDebounced() }
+        postDataRefresh: @escaping () -> Void = { DataRefreshNotifier.postDataDidChangeDebounced() },
+        workReporter: SyncWorkReporting = MainSyncWorkReporter()
     ) {
+        self.workReporter = workReporter
         self.storageMode = storageMode
         self.postDataRefresh = postDataRefresh
         self.uploadQueue = UploadDispatchQueue(maxConcurrent: maxConcurrentUploads)
@@ -984,6 +992,18 @@ final class GarminSession: ObservableObject {
             return
         }
         pumpUploads()
+        publishUploadActivity()
+    }
+
+    /// Envois en file ou en vol, déclarés à la bannière. Appelée après chaque mutation de
+    /// `uploadQueue` (mise en file, issue reçue, fermeture de session).
+    private func publishUploadActivity() {
+        workReporter.uploads(source: uploadActivitySource, remaining: uploadQueue.outstanding)
+    }
+
+    deinit {
+        // Filet : une session libérée ne laisse jamais un compte derrière elle.
+        workReporter.uploads(source: uploadActivitySource, remaining: 0)
     }
 
     /// Lance les envois en file tant qu'un créneau est libre. Rappelée à chaque
@@ -1062,6 +1082,7 @@ final class GarminSession: ObservableObject {
         // Créneau libéré : fait partir le suivant AVANT de juger si tout est
         // retombé (un envoi qui vient de partir n'est pas « retombé »).
         pumpUploads()
+        publishUploadActivity()
         maybePostDataRefreshIfSettled()
     }
 
@@ -1081,6 +1102,8 @@ final class GarminSession: ObservableObject {
         if !dropped.isEmpty {
             log.info("Session fermée : \(dropped.count, privacy: .public) envoi(s) Pulse en file abandonné(s), relancés à la session suivante")
         }
+        // Ce qui attendait en file ne partira plus : ne reste que l'en-vol.
+        publishUploadActivity()
         // Rien ne repartira d'ici : si des 2xx déjà enregistrés attendent leur
         // rafraîchissement d'écrans et qu'il ne reste rien en vol, le poster.
         maybePostDataRefreshIfSettled()

@@ -41,6 +41,10 @@ struct SettingsView: View {
     /// : ancré sur une `Section`, le `.sheet` se refermait tout seul dès que le
     /// `Form` se re-diffait (le `@State` de la section était réinitialisé).
     @State private var pendingServerMode: StorageMode?
+    /// Changement de mode en attente de confirmation (`StorageModeChange.swift`) :
+    /// tenu ICI pour la même raison que `pendingServerMode` — l'alerte est ancrée à la
+    /// racine stable, pas à une `Section` du `Form` de la page Stockage.
+    @State private var modeChange = StorageModeChangeController()
 
     var body: some View {
         NavigationStack {
@@ -51,6 +55,14 @@ struct SettingsView: View {
         }
         // Bouton retour des sous-pages à la couleur de l'app, pas au bleu système.
         .tint(Color.pulseAccent)
+        // La bannière globale de synchro vit sur la coquille (`PulseShellView`),
+        // que cette feuille recouvre : sans ce rappel, rien ne montrait l'activité
+        // déclenchée d'ici même (changement de stockage, purge). En bas, pour ne
+        // pas masquer le titre ni le bouton retour de la barre de navigation.
+        .overlay(alignment: .bottom) {
+            SyncStatusBanner()
+                .padding(.bottom, PulseSpacing.md)
+        }
         .task {
             await viewModel.reload()
         }
@@ -68,6 +80,20 @@ struct SettingsView: View {
         // commentaire de `pendingServerMode`.
         .sheet(item: $pendingServerMode) { mode in
             PulseModeLoginSheet(targetMode: mode)
+        }
+        // Tout changement de mode passe par une confirmation ; la connexion à Pulse,
+        // si elle est nécessaire, vient APRÈS (`.needsLogin`).
+        .alert(
+            modeChange.pending?.changeConfirmationTitle ?? "",
+            isPresented: Binding(get: { modeChange.pending != nil }, set: { if !$0 { modeChange.cancel() } }),
+            presenting: modeChange.pending
+        ) { _ in
+            Button("Confirmer") {
+                if case .needsLogin(let mode) = modeChange.confirm() { pendingServerMode = mode }
+            }
+            Button("Annuler", role: .cancel) { modeChange.cancel() }
+        } message: { mode in
+            Text(mode.changeConfirmation)
         }
     }
 
@@ -110,7 +136,7 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
-                        SettingsStoragePage(viewModel: viewModel, onRequestServerLogin: { pendingServerMode = $0 })
+                        SettingsStoragePage(viewModel: viewModel, onRequestModeChange: { modeChange.request($0) })
                     } label: {
                         SettingsRow(icon: "externaldrive.fill", tint: .pulseSpo2, title: "Stockage", value: storageMode.mode.label)
                     }
@@ -283,9 +309,14 @@ private struct SettingsStorageGauge: View {
 /// Stockage : le choix, et juste dessous l'adresse de Pulse quand il en dépend.
 private struct SettingsStoragePage: View {
     @Bindable var viewModel: SettingsViewModel
-    let onRequestServerLogin: (StorageMode) -> Void
+    let onRequestModeChange: (StorageMode) -> Void
     @State private var storageMode = StorageModeStore.shared
     @State private var usage: LocalStorageUsage?
+    @State private var purge = LocalPurgeModel.live()
+    @State private var confirmPurge = false
+    /// `completions` change à chaque fin d'ingestion, d'échange ou d'envoi : les tailles
+    /// et totaux se remesurent alors (`.task(id:)` plus bas).
+    @State private var work = SyncWork.shared
 
     /// Postes du tube côté iPhone : les `.fit` par type, puis la base.
     private static func phoneSegments(_ usage: LocalStorageUsage) -> [SettingsStorageGauge.Segment] {
@@ -306,7 +337,7 @@ private struct SettingsStoragePage: View {
 
     var body: some View {
         Form {
-            SettingsStorageSection(onRequestServerLogin: onRequestServerLogin)
+            SettingsStorageSection(onRequestModeChange: onRequestModeChange)
             if storageMode.mode != .phone {
                 SettingsPulseAddressSection(viewModel: viewModel)
             }
@@ -341,13 +372,45 @@ private struct SettingsStoragePage: View {
                     LabeledContent("Fichiers de la montre", value: "\(inventory.onDisk)")
                 }
             }
+            // Détail de ce qui est effacé, gardé et bloquant : Aide › Données & synchro.
+            Section {
+                Button(role: .destructive) { confirmPurge = true } label: {
+                    HStack {
+                        Text("Purger les données de l'iPhone")
+                        if purge.isPurging { Spacer(); ProgressView() }
+                    }
+                }
+                .disabled(!purge.canPurge)
+            } footer: {
+                if let reason = purge.blockedReason {
+                    Text(reason)
+                } else if purge.failed {
+                    Text("Purge impossible.")
+                }
+            }
         }
         .navigationTitle("Stockage")
         .navigationBarTitleDisplayMode(.inline)
-        // Parcours du disque hors main actor ; remesuré à chaque ouverture de la page.
-        .task {
-            usage = await Task.detached(priority: .utility) { LocalStorageUsage.measure() }.value
+        // Parcours du disque hors main actor ; remesuré à l'ouverture de la page ET à
+        // chaque fin d'activité (`SyncWork.completions`) — `.task(id:)` annule la mesure
+        // précédente, des fins rapprochées n'en empilent pas.
+        .task(id: work.completions) {
+            await measureUsage()
+            await purge.refresh()
         }
+        .confirmationDialog("Purger les données de l'iPhone ?", isPresented: $confirmPurge, titleVisibility: .visible) {
+            Button("Purger", role: .destructive) {
+                Task {
+                    if await purge.purge() { await measureUsage() }
+                }
+            }
+        } message: {
+            Text("Efface la base de l'iPhone et les fichiers déjà reçus par Pulse.")
+        }
+    }
+
+    private func measureUsage() async {
+        usage = await Task.detached(priority: .utility) { LocalStorageUsage.measure() }.value
     }
 }
 
@@ -385,14 +448,13 @@ private struct SettingsSyncPage: View {
 
 private struct SettingsStorageSection: View {
     @State private var store = StorageModeStore.shared
-    /// Appelée quand l'utilisateur choisit un mode serveur (Pulse / Les deux)
-    /// sans session active : on n'applique PAS le mode tout de suite — le
-    /// parent (`SettingsView`) présente la connexion dans une feuille
-    /// **annulable** (`PulseModeLoginSheet`), ancrée à sa racine stable. Le
-    /// mode ne bascule qu'en cas de connexion réussie ; « Annuler » laisse le
-    /// mode inchangé (Téléphone). Sans ça, basculer le picker sur Pulse virait
-    /// `ContentView` sur un `LoginView` plein écran sans retour clair.
-    let onRequestServerLogin: (StorageMode) -> Void
+    /// Appelée à CHAQUE choix de mode dans le sélecteur : rien n'est appliqué ici. Le
+    /// parent (`SettingsView`) demande confirmation, puis applique le mode — ou, pour
+    /// Pulse / Les deux sans session active, présente la connexion dans une feuille
+    /// **annulable** (`PulseModeLoginSheet`) qui n'applique le mode qu'une fois
+    /// connecté. Sans cette feuille, basculer sur Pulse virait `ContentView` sur un
+    /// `LoginView` plein écran sans retour clair.
+    let onRequestModeChange: (StorageMode) -> Void
 
     var body: some View {
         Section {
@@ -406,23 +468,9 @@ private struct SettingsStorageSection: View {
     }
 
     private var modeBinding: Binding<StorageMode> {
-        Binding(
-            get: { store.mode },
-            set: { newMode in
-                // Basculer vers un mode qui exige le serveur (Pulse / Les deux)
-                // sans session active : passer par la feuille de connexion
-                // (gérée par le parent) plutôt que d'appliquer le mode (ce qui
-                // basculerait `ContentView` sur `LoginView` plein écran, sans
-                // sortie claire). Vers Téléphone, ou si déjà connecté :
-                // appliquer directement.
-                if (newMode == .pulse || newMode == .both),
-                   AuthStore.shared.username == nil {
-                    onRequestServerLogin(newMode)
-                } else {
-                    store.mode = newMode
-                }
-            }
-        )
+        // Le sélecteur ne change JAMAIS le mode lui-même : il demande, la racine
+        // confirme (`StorageModeChangeController`) puis applique ou ouvre la connexion.
+        Binding(get: { store.mode }, set: { onRequestModeChange($0) })
     }
 }
 

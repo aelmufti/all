@@ -137,6 +137,19 @@ final class WakeScheduleStore {
         WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
     }
 
+    /// Purge des données de l'iPhone : l'horaire de réveil est une saisie, et la base
+    /// qui le tenait vient d'être vidée. On vide donc aussi son cache (mémoire,
+    /// `UserDefaults`) et les rappels programmés — SANS rien pousser : sinon
+    /// `load()` prendrait ce cache pour « un planning que le backend n'a pas encore »
+    /// et le réécrirait (anti-écrasement), dans la base qu'on vient de vider, voire
+    /// vers Pulse. L'appelant fait ensuite `load()`, qui adopte ce que le backend
+    /// courant détient (rien en Téléphone ; l'horaire de Pulse en « Les deux »).
+    func clearForLocalPurge() {
+        minutesByWeekday.removeAll()
+        persist()
+        WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
+    }
+
     // MARK: - Synchro backend (`api/wake-schedule`)
 
     /// Best-effort, ne jette jamais — même esprit que `AuthStore.check()` :

@@ -28,6 +28,10 @@ extension Notification.Name {
     /// aussi l'archivage). `BLEManager` s'y abonne pour relancer l'archivage
     /// montre, verrouillé tant que la preuve manque (`GarminSession`).
     static let spoolIngestDidAdvance = Notification.Name("spoolIngestDidAdvance")
+    /// Notifié sur le main à la fin de CHAQUE passe d'ingestion, qu'elle ait traité
+    /// quelque chose ou non : la base vient d'être libérée. `ContentView` le relaie à la
+    /// reprise de l'échange des saisies (`SaisieSyncService.ingestPassDidEnd`).
+    static let localIngestPassDidEnd = Notification.Name("localIngestPassDidEnd")
 }
 
 enum LocalIngestKind: Equatable {
@@ -215,13 +219,23 @@ enum LocalIngestor {
     /// hash, ingestion, puis `markIngest` avec ce jeton — un fichier relu pendant
     /// la passe reste sans preuve (son nouveau contenu sera traité à la suivante).
     /// Une panne de base ou de lecture protégée ne marque rien.
-    static func ingestPending(from spool: SpoolStore, into db: LocalDb, now: @autoclosure () -> Date = Date()) -> PassReport {
+    ///
+    /// `progress` reçoit le nombre d'entrées RESTANT à traiter : le total au départ
+    /// (seulement s'il y en a), puis une valeur de moins après chaque entrée — un
+    /// décompte fiable pour la bannière d'activité (`SyncWork`).
+    static func ingestPending(
+        from spool: SpoolStore, into db: LocalDb, now: @autoclosure () -> Date = Date(),
+        progress: (Int) -> Void = { _ in }
+    ) -> PassReport {
         spool.refreshFromDisk()
         let pending = spool.entries.values
             .filter { $0.ingest == nil && $0.purgedAt == nil }
             .sorted { ($0.acquiredAt, $0.id.index) < ($1.acquiredAt, $1.id.index) }
         var report = PassReport()
-        for entry in pending {
+        if !pending.isEmpty { progress(pending.count) }
+        for (position, entry) in pending.enumerated() {
+            // `defer` : le décompte descend aussi sur les `continue` ci-dessous.
+            defer { progress(pending.count - position - 1) }
             let token = entry.acquiredAt
             let url = spool.fileURL(for: entry)
             let fileName = (entry.relativePath as NSString).lastPathComponent
@@ -278,6 +292,24 @@ enum LocalIngestor {
 
     private static let gate = SerialPassGate()
 
+    /// Exécute `work` quand aucune passe d'ingestion ne tourne, et en interdit une
+    /// autre tant qu'il court (cf. `SerialPassGate.runExclusively`). Les demandes
+    /// reçues pendant ce temps sont écartées : relancer `ingestIfNeeded()` après.
+    static func runExclusively<T>(_ work: () async throws -> T) async rethrows -> T {
+        try await gate.runExclusively(work)
+    }
+
+    /// Exécute un travail BREF entre deux passes d'ingestion (cf.
+    /// `SerialPassGate.runInterleaved`) et relance la passe qu'une `request` reçue
+    /// pendant ce temps aurait fait écarter. Sert à l'ingestion d'un fichier rapatrié
+    /// de Pulse : ses écritures restent sérialisées avec les passes et avec la purge,
+    /// sans jamais retenir la base longtemps.
+    static func runBetween<T>(_ work: () async throws -> T) async rethrows -> T {
+        let (value, dropped) = try await gate.runInterleaved(work)
+        if dropped { ingestIfNeeded() }
+        return value
+    }
+
     static func ingestIfNeeded() {
         guard StorageModeStore.current != .pulse else { return }
         gate.request { runPass() }
@@ -285,14 +317,35 @@ enum LocalIngestor {
 
     /// Corps d'une passe : ingestion incrémentale, rétro-remplissage Body Battery,
     /// purge si due, puis notifications. Synchrone, exécuté par `gate`.
-    private static func runPass() {
+    ///
+    /// Les paramètres sont les coutures des tests (défauts = production). `reporter` :
+    /// la passe se déclare à la bannière d'activité dès qu'elle commence réellement
+    /// (après la garde de mode) et se libère par `defer`, quelle que soit la sortie
+    /// (base indisponible, rien à notifier, fin normale). Une passe écartée par
+    /// `runExclusively` (purge) ne démarre jamais : elle ne déclare rien.
+    static func runPass(
+        mode: () -> StorageMode = { StorageModeStore.current },
+        stores: () -> (spool: SpoolStore, db: LocalDb)? = {
+            guard let spool = try? SpoolStore(), let db = try? LocalDb() else { return nil }
+            return (spool, db)
+        },
+        reporter: SyncWorkReporting = MainSyncWorkReporter(),
+        defaults: UserDefaults = .standard
+    ) {
         // Le mode a pu repasser à Pulse entre la demande et l'exécution.
-        guard StorageModeStore.current != .pulse else { return }
-        guard let spool = try? SpoolStore(), let db = try? LocalDb() else {
+        guard mode() != .pulse else { return }
+        reporter.ingestBegan()
+        defer {
+            reporter.ingestEnded()
+            // Fin de passe : réveille la reprise de l'échange des saisies, si elle
+            // attendait la fin de l'ingestion (base occupée) — cf. `SaisieSyncService`.
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .localIngestPassDidEnd, object: nil) }
+        }
+        guard let (spool, db) = stores() else {
             log.error("ingestIfNeeded: SpoolStore/LocalDb indisponible, ingestion sautée")
             return
         }
-        let report = ingestPending(from: spool, into: db)
+        let report = ingestPending(from: spool, into: db, progress: { reporter.ingestProgress(remaining: $0) })
         let failures = report.results.filter { if case .error = $0.kind { return true }; return false }.count
         let storageErrors = report.results.filter { if case .storageError = $0.kind { return true }; return false }.count
         if !report.results.isEmpty {
@@ -300,7 +353,7 @@ enum LocalIngestor {
         }
         let bbBackfilled = backfillBodyBatteryIfNeeded(spool: spool, db: db)
         // Fin de passe, donc jamais en parallèle d'une ingestion (même `gate`).
-        SpoolPurger.runIfDue(spool: spool, db: db, pulseConfigured: PulseConfig.baseURL != nil)
+        SpoolPurger.runIfDue(spool: spool, db: db, pulseConfigured: PulseConfig.baseURL != nil, defaults: defaults)
 
         // N'avertir les écrans QUE si quelque chose a réellement changé —
         // éviter un rechargement pour rien (la plupart des passes n'ont rien à

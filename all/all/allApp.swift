@@ -38,9 +38,17 @@ struct allApp: App {
                 BLEManager.shared.startRealtime()
                 // Retour au premier plan : échange des saisies avec Pulse (mode
                 // « Les deux » seulement, la méthode se garde elle-même).
+                SaisieSyncService.shared.setForeground(true)
                 SaisieSyncService.shared.requestExchange()
+                PulseFilesPullService.shared.setForeground(true)
+                PulseFilesPullService.shared.requestPass()
             case .background:
                 BLEManager.shared.stopRealtime()
+                // Plus de reprise automatique de l'échange des saisies hors premier plan.
+                SaisieSyncService.shared.setForeground(false)
+                // iOS suspend l'app : le rapatriement des fichiers de Pulse est coupé
+                // proprement, le prochain retour au premier plan le reprend.
+                PulseFilesPullService.shared.setForeground(false)
             case .inactive:
                 break // transitoire (centre de notif, app switcher) — ne pas couper
             @unknown default:

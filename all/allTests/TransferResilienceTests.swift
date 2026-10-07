@@ -1244,3 +1244,89 @@ struct GarminSessionUploadQueueTests {
         #expect(freshUploader.calls == names(files), "rien n'est resté bloqué : tout repart à la session suivante")
     }
 }
+
+// MARK: - 8) Bannière d'activité : le compte d'envois de la session retombe à zéro partout
+
+@MainActor
+struct GarminSessionUploadActivityTests {
+    private func makeSession(
+        files: [GarminDirectoryEntry], maxConcurrent: Int = 1
+    ) throws -> (session: GarminSession, fake: FakeGfdiCommunicator, uploader: GatedUploader, reporter: RecordingWorkReporter, root: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bridge-connect-upload-activity-\(UUID().uuidString)", isDirectory: true)
+        let store = try SpoolStore(root: root)
+        for file in files {
+            let (id, path) = SpoolStore.identity(for: file)
+            try store.recordAcquired(id, relativePath: path, data: Data("à envoyer".utf8), listedSize: file.sizeBytes)
+        }
+        let fake = FakeGfdiCommunicator()
+        let uploader = GatedUploader()
+        let reporter = RecordingWorkReporter()
+        let session = GarminSession(
+            communicator: fake, spoolStore: store, uploader: uploader,
+            requiresLocalIngest: { false }, requestLocalIngest: {},
+            maxConcurrentUploads: maxConcurrent, storageMode: { .pulse },
+            postDataRefresh: {}, workReporter: reporter)
+        return (session, fake, uploader, reporter, root)
+    }
+
+    @Test func theCountIsQueuedPlusInFlightAndDescendsToZero() async throws {
+        let files = (21...23).map { fileEntry(fileIndex: $0) }
+        let (session, fake, uploader, reporter, root) = try makeSession(files: files)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        #expect(reporter.uploadsTotal == 3, "1 en vol + 2 en file")
+
+        uploader.complete(0, .delivered)
+        await waitUntil { reporter.uploadsTotal == 2 }
+        #expect(reporter.uploadsTotal == 2)
+        uploader.complete(1, .keepRetry)
+        await waitUntil { reporter.uploadsTotal == 1 }
+        uploader.complete(2, .quarantine)
+        await waitUntil { reporter.isIdle }
+        #expect(reporter.isIdle)
+    }
+
+    @Test(arguments: [PulseUploadOutcome.delivered, .keepRetry, .keepRetryLater, .keepConfigError, .quarantine])
+    func everyOutcomeFreesItsSlot(outcome: PulseUploadOutcome) async throws {
+        let files = [fileEntry(fileIndex: 21)]
+        let (session, fake, uploader, reporter, root) = try makeSession(files: files)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        #expect(reporter.uploadsTotal == 1)
+        uploader.complete(0, outcome)
+        await waitUntil { reporter.isIdle }
+
+        #expect(reporter.isIdle)
+    }
+
+    @Test func closingTheSessionDropsTheQueuedCountAndTheInFlightOutcomeReleasesTheRest() async throws {
+        let files = (21...23).map { fileEntry(fileIndex: $0) }
+        let (session, fake, uploader, reporter, root) = try makeSession(files: files)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, files)
+        #expect(reporter.uploadsTotal == 3)
+
+        session.close()
+        #expect(reporter.uploadsTotal == 1, "ce qui attendait en file ne partira plus ; reste l'envoi en vol")
+        session.close() // idempotent
+        #expect(reporter.uploadsTotal == 1)
+
+        uploader.complete(0, .delivered) // l'envoi en vol aboutit APRÈS la fermeture
+        await waitUntil { reporter.isIdle }
+        #expect(reporter.isIdle, "une issue reçue session fermée libère quand même le compte")
+    }
+
+    @Test func aSessionWithNothingToSendDeclaresNothing() async throws {
+        let (session, fake, _, reporter, root) = try makeSession(files: [])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        deliverManifest(session, fake, [])
+        session.close()
+
+        #expect(reporter.isIdle)
+    }
+}

@@ -15,7 +15,9 @@
 //     parallèle ; une demande reçue pendant un échange en déclenche un autre à la
 //     fin — même logique que `Local/SerialPassGate.swift`, version `async`) ;
 //   - `SaisieSyncService` : garde de mode, santé (`PulseUploadHealth`), effets de
-//     bord après changements distants (poids du profil, réveil, rafraîchissement).
+//     bord après changements distants (poids du profil, réveil, rafraîchissement),
+//     activité déclarée à la bannière (`SyncWork`) et REPRISE automatique après échec
+//     (`SaisieRetryPolicy`, minuterie injectable).
 //
 //  Réseau : SEUL `URLSessionSaisieSyncTransport` parle à Pulse (`POST
 //  api/saisies/sync`, Bearer = jeton d'ingestion — même garde que `POST /api/ingest`).
@@ -161,6 +163,16 @@ final class SaisieSyncEngine: @unchecked Sendable {
         (try? db.hasPendingSaisieChanges()) ?? false
     }
 
+    /// Reste-t-il quelque chose à échanger : des changements locaux non accusés, OU un
+    /// premier échange jamais abouti (contrat §6). Une base illisible compte comme « oui »
+    /// (on ne sait pas, on retentera) — contrairement à `hasPendingChanges`, qui sert au
+    /// routage des lectures.
+    func needsExchange() -> Bool {
+        guard let state = try? db.saisieSyncState() else { return true }
+        if !state.initialDone { return true }
+        return (try? db.hasPendingSaisieChanges()) ?? true
+    }
+
     /// §5 : après un `weight` appliqué, le poids du profil se resynchronise.
     func resyncWeightProfile() {
         try? db.syncWeightProfile()
@@ -241,6 +253,27 @@ actor SaisieSyncCoordinator {
         }
     }
 
+    /// Exécute `work` quand aucun échange ne tourne, et en retient les nouveaux tant
+    /// qu'il court : une demande reçue entre-temps déclenche UN échange à la fin.
+    /// Sert aux travaux qui vident la base (purge des données de l'iPhone) : un échange
+    /// en vol appliquerait sa réponse (curseur compris) sur une base remise à zéro.
+    func runExclusively<T>(_ work: @Sendable () async throws -> T) async rethrows -> T {
+        // Pas de suspension entre le test et la prise : l'acteur ne laisse personne
+        // s'intercaler.
+        while running { try? await Task.sleep(nanoseconds: 10_000_000) }
+        running = true
+        defer { finishExclusive() }
+        return try await work()
+    }
+
+    private func finishExclusive() {
+        if rerun {
+            Task { await self.loop() }
+        } else {
+            running = false
+        }
+    }
+
     private func loop() async {
         repeat {
             rerun = false
@@ -316,26 +349,42 @@ final class SaisieSyncService: SaisieSyncing, @unchecked Sendable {
     private let health: @Sendable (SaisieSyncHealthEvent) -> Void
     private let afterRemoteChanges: @Sendable (SaisieSyncReport) async -> Void
     private let now: @Sendable () -> Date
+    private let reporter: SyncWorkReporting
+    private let retryTimer: WakeTimer
 
     private let lock = NSLock()
     private var cachedEngine: SaisieSyncEngine?
     private var engineResolved = false
     private var lastFailure: Date?
     private var coordinator: SaisieSyncCoordinator!
+    /// App au premier plan ? Vrai au lancement (le premier `.active` de la scène
+    /// n'est pas toujours notifié) ; `allApp` le met à jour aux passages en arrière-plan.
+    private var foreground = true
+    /// Tentatives consécutives sans aboutissement complet (`SaisieRetryPolicy`).
+    private var retryAttempt = 0
+    /// La reprise armée suit un échec de BASE (occupée) : la fin d'une passe d'ingestion
+    /// la devance (`ingestPassDidEnd`).
+    private var retryWaitsForIngest = false
 
     init(
         engineProvider: @escaping @Sendable () -> SaisieSyncEngine?,
         modeProvider: @escaping @Sendable () -> StorageMode = { StorageModeStore.current },
         health: @escaping @Sendable (SaisieSyncHealthEvent) -> Void,
         afterRemoteChanges: @escaping @Sendable (SaisieSyncReport) async -> Void,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        reporter: SyncWorkReporting = MainSyncWorkReporter(),
+        retryTimer: WakeTimer = TaskWakeTimer()
     ) {
         self.engineProvider = engineProvider
         self.modeProvider = modeProvider
         self.health = health
         self.afterRemoteChanges = afterRemoteChanges
         self.now = now
-        coordinator = SaisieSyncCoordinator { [unowned self] in await self.runPass() }
+        self.reporter = reporter
+        self.retryTimer = retryTimer
+        // `weak` : une passe encore en file quand le service disparaît (tests) s'éteint
+        // sans rien faire au lieu d'abattre le processus.
+        coordinator = SaisieSyncCoordinator { [weak self] in await self?.runPass() }
     }
 
     /// Opérations de la passe, exposées aux tests.
@@ -366,6 +415,12 @@ final class SaisieSyncService: SaisieSyncing, @unchecked Sendable {
         await coordinator.requestAndWait()
     }
 
+    /// Exécute `work` quand aucun échange ne tourne, sans en laisser démarrer pendant
+    /// ce temps (cf. `SaisieSyncCoordinator.runExclusively`). Quel que soit le mode.
+    func runExclusively<T>(_ work: @Sendable () async throws -> T) async rethrows -> T {
+        try await coordinator.runExclusively(work)
+    }
+
     func stillPendingAfterAttempt() async -> Bool {
         guard modeProvider() == .both, let engine, engine.hasPendingChanges() else { return false }
         lock.lock()
@@ -382,30 +437,131 @@ final class SaisieSyncService: SaisieSyncing, @unchecked Sendable {
     }
 
     private func runPass() async {
-        guard modeProvider() == .both, let engine else { return }
+        guard modeProvider() == .both, let engine else {
+            cancelRetry()
+            return
+        }
+        // Déclarée à la bannière pour toute la durée de la passe ; `defer` = libérée sur
+        // TOUTES les sorties (succès, erreur, configuration absente).
+        reporter.exchangeBegan()
+        defer { reporter.exchangeEnded() }
+        let outcome = await exchangeOnce(engine)
+        scheduleRetry(after: outcome, engine: engine)
+    }
+
+    private func exchangeOnce(_ engine: SaisieSyncEngine) async -> SaisieSyncPassOutcome {
         do {
             let report = try await engine.exchange()
             lock.lock()
             lastFailure = nil
             lock.unlock()
             health(.succeeded)
-            guard report.applied > 0 else { return }
+            guard report.applied > 0 else { return .succeeded }
             Self.log.info("échange : \(report.applied, privacy: .public) changement(s) distant(s) appliqué(s)")
             if report.weightChanged { engine.resyncWeightProfile() }
             await afterRemoteChanges(report)
+            return .succeeded
         } catch SaisieSyncError.notConfigured {
             // Pas d'adresse ou de jeton : rien à signaler ici (l'Accueil le sait déjà).
+            return .notConfigured
         } catch {
             markFailure()
             if case SaisieSyncError.unauthorized = error {
                 health(.unauthorized)
+                return .unauthorized
             } else if case SaisieSyncError.transport = error {
                 // Hors-ligne : normal, ne signale rien.
-            } else {
-                // 400/413/5xx, réponse illisible, erreur SQLite : rien n'a été appliqué
-                // ni mémorisé ; on retentera au prochain déclencheur.
+                return .networkOrServerFailure
+            } else if error is SaisieSyncError {
+                // 400/413/5xx, réponse illisible : rien n'a été appliqué ni mémorisé.
                 Self.log.error("échange de saisies échoué : \(String(describing: error), privacy: .public)")
+                return .networkOrServerFailure
+            } else {
+                // Tout le reste vient de la base locale (occupée au-delà du
+                // `busy_timeout`, erreur SQLite) : le moteur ne lève que des
+                // `SaisieSyncError` côté réseau.
+                Self.log.error("échange de saisies échoué (base) : \(String(describing: error), privacy: .public)")
+                return .storageFailure
             }
         }
+    }
+
+    // MARK: - Reprise automatique (cf. `SaisieRetryPolicy`)
+
+    /// Programme (ou annule) la prochaine tentative. `arm` REMPLACE la minuterie
+    /// précédente : jamais deux en parallèle. Appelée depuis la passe, donc sérialisée par
+    /// le coordinateur.
+    private func scheduleRetry(after outcome: SaisieSyncPassOutcome, engine: SaisieSyncEngine) {
+        lock.lock()
+        let isForeground = foreground
+        let attempt = retryAttempt
+        lock.unlock()
+        // Le test de « reste-t-il quelque chose » lit la base : seulement quand il peut
+        // changer la décision.
+        let stillNeeded = isForeground && outcome != .notConfigured && outcome != .unauthorized && engine.needsExchange()
+        let decision = SaisieRetryPolicy.decide(
+            outcome: outcome, foreground: isForeground, mode: modeProvider(), stillNeeded: stillNeeded, attempt: attempt)
+        switch decision {
+        case .stop:
+            cancelRetry()
+        case .retry(let delay, let nextAttempt):
+            lock.lock()
+            retryAttempt = nextAttempt
+            retryWaitsForIngest = outcome == .storageFailure
+            lock.unlock()
+            retryTimer.arm(after: delay) { [weak self] in self?.retryTimerFired() }
+        }
+    }
+
+    private func cancelRetry() {
+        lock.lock()
+        retryAttempt = 0
+        retryWaitsForIngest = false
+        lock.unlock()
+        retryTimer.cancel()
+    }
+
+    private func retryTimerFired() {
+        lock.lock()
+        let isForeground = foreground
+        retryWaitsForIngest = false
+        lock.unlock()
+        guard isForeground else { return }
+        requestExchange()
+    }
+
+    /// Passage au premier plan / en arrière-plan. L'arrière-plan annule la reprise (iOS
+    /// suspend l'app, et un réveil au retour relance de toute façon un échange).
+    func setForeground(_ value: Bool) {
+        lock.lock()
+        foreground = value
+        lock.unlock()
+        if !value { cancelRetry() }
+    }
+
+    /// Le mode Stockage vient de changer : la reprise en cours ne vaut plus (le
+    /// nouveau mode relance lui-même un échange, `requestExchange`).
+    func storageModeDidChange() {
+        cancelRetry()
+    }
+
+    /// Une passe d'ingestion vient de finir (la base est libérée). Si la reprise armée
+    /// attendait justement ça (échec de base), la devance au lieu d'attendre le
+    /// minuteur — un seul départ : la minuterie est annulée avant.
+    func ingestPassDidEnd() {
+        lock.lock()
+        let waiting = retryWaitsForIngest && foreground
+        if waiting { retryWaitsForIngest = false }
+        lock.unlock()
+        guard waiting else { return }
+        retryTimer.cancel()
+        requestExchange()
+    }
+
+    /// Tentatives consécutives sans aboutissement complet (tests).
+    var retryAttemptCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return retryAttempt
     }
 }

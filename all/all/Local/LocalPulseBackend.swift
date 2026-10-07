@@ -110,6 +110,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     /// le détail retombe alors systématiquement sur la branche « fichier
     /// absent » (résumé seul), jamais un crash.
     private let spool: SpoolStore?
+    /// `.fit` d'activité rapatriés de Pulse (`PulseFilesPullEngine`), nommés par hash :
+    /// consultés AVANT le spool (accès direct, sans hacher). `nil` : ignorés.
+    private let pulledFiles: PulseFilesStore?
     /// Couture d'injection réseau Open Food Facts — même principe que
     /// `PulseUploadTransport` (`Sync/PulseUploader.swift`) : substituée par un
     /// test double dans `allTests`, jamais `URLSessionOpenFoodFactsTransport`
@@ -122,14 +125,19 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     init() throws {
         db = try LocalDb()
         spool = try? SpoolStore()
+        pulledFiles = try? PulseFilesStore.standard()
         offTransport = URLSessionOpenFoodFactsTransport()
     }
 
     /// Init testable : base (et spool, optionnel, et transport OFF factice
     /// optionnel) déjà construits (fichiers temporaires en test).
-    init(db: LocalDb, spool: SpoolStore? = nil, offTransport: OpenFoodFactsTransport = URLSessionOpenFoodFactsTransport()) {
+    init(
+        db: LocalDb, spool: SpoolStore? = nil, pulledFiles: PulseFilesStore? = nil,
+        offTransport: OpenFoodFactsTransport = URLSessionOpenFoodFactsTransport()
+    ) {
         self.db = db
         self.spool = spool
+        self.pulledFiles = pulledFiles
         self.offTransport = offTransport
     }
 
@@ -552,6 +560,8 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     /// d'un usage personnel (dizaines à quelques centaines de fichiers), pas
     /// d'index dédié en L3.
     private func findSpoolFileURL(hash: String) -> URL? {
+        // Activité rapatriée de Pulse : nommée par son hash, aucun parcours.
+        if let url = pulledFiles?.activityURL(hash: hash) { return url }
         guard let spool else { return nil }
         // Entrée purgée = `.fit` supprimé (jamais une activité en pratique, cf.
         // `SpoolPurger`) : inutile de tenter de le hacher.

@@ -159,7 +159,13 @@ private enum HelpContent {
         HelpSection(title: "Données & synchro", topics: [
             HelpTopic(
                 title: "Où vivent les données",
-                body: "Téléphone : tout reste sur l'iPhone, rien n'est envoyé à Pulse. Pulse : chaque synchro part vers le serveur. Les deux : gardé sur l'iPhone ET envoyé à Pulse, avec repli automatique sur le téléphone si Pulse est injoignable."),
+                body: "Téléphone : tout reste sur l'iPhone, rien n'est envoyé à Pulse. Pulse : chaque synchro part vers le serveur. Les deux : gardé sur l'iPhone ET envoyé à Pulse, avec repli automatique sur le téléphone si Pulse est injoignable. L'iPhone récupère aussi les fichiers que Pulse détient et lui n'a pas (« Récupération depuis Pulse », app ouverte au premier plan ; interrompue puis reprise au retour dans l'app). Les activités y gardent leur fichier ; les mesures et le sommeil ne sont pas conservés."),
+            HelpTopic(
+                title: "Changer de stockage",
+                body: "Chaque changement demande confirmation. Les saisies faites en Téléphone ne partent vers Pulse qu'en « Les deux » : passer de Téléphone à Pulse les laisse sur l'iPhone, passer d'abord par « Les deux » les envoie."),
+            HelpTopic(
+                title: "Purger les données de l'iPhone",
+                body: "Efface la base de l'iPhone (mesures et saisies) et les fichiers de la montre déjà reçus par Pulse ; Pulse n'est jamais touché. Les fichiers que Pulse n'a pas reçus sont gardés, puis relus pour reconstruire la base (hors mode Pulse) ; en « Les deux », ce que Pulse détient est de nouveau récupéré. Bloquée tant que des saisies n'ont pas été reçues par Pulse — « Les deux » les envoie — ou que des fichiers de la montre n'existent plus que sur l'iPhone. Les aliments de départ sont recréés ; en « Les deux », le prochain échange récupère ce que Pulse détient."),
             HelpTopic(
                 title: "Source de collecte",
                 body: "« garmin-bridge » : le serveur parle à la montre en Bluetooth, sans téléphone. « iPhone (BLE) » : cette app récupère les fichiers et les envoie à Pulse. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons."),
