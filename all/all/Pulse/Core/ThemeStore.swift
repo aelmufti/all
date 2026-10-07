@@ -33,6 +33,7 @@ final class ThemeStore {
     var theme: Theme {
         didSet {
             UserDefaults.standard.set(theme.rawValue, forKey: Self.key)
+            applyToWindows()
         }
     }
 
@@ -47,6 +48,25 @@ final class ThemeStore {
         case .auto: theme = .light
         case .light: theme = .dark
         case .dark: theme = .auto
+        }
+    }
+
+    /// `.preferredColorScheme` posé à la racine ne rattrape pas une feuille
+    /// (`.sheet`) déjà présentée : elle garde le thème figé à sa présentation
+    /// — typiquement Paramètres, d'où l'on change justement le thème. On force
+    /// donc aussi le style au niveau des fenêtres, dont héritent toutes les
+    /// présentations en cours.
+    private func applyToWindows() {
+        let style: UIUserInterfaceStyle = switch theme {
+        case .auto: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                window.overrideUserInterfaceStyle = style
+            }
         }
     }
 
