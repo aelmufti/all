@@ -673,6 +673,14 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         let req = try JSONDecoder().decode(LocalNutritionFoodBodyDTO.self, from: body)
         guard let name = req.name, !name.isEmpty else { throw LocalNutritionValidationError(reason: "Missing name") }
         let unit = try resolveNutritionUnit(unitLabel: req.unitLabel, unitGrams: req.unitGrams)
+        // `foods.barcode` est UNIQUE : un produit déjà en bibliothèque (résultat de recherche
+        // en ligne repris une seconde fois, sans `id`) est mis à jour, pas inséré en double.
+        if let barcode = req.barcode, !barcode.isEmpty, let existing = try db.food(barcode: barcode),
+           let row = try db.updateFood(
+               id: existing.id, barcode: barcode, name: name, kcal: req.kcal, protein: req.protein, carbs: req.carbs,
+               fiber: req.fiber, fat: req.fat, unitLabel: unit.unitLabel, unitGrams: unit.unitGrams) {
+            return try JSONEncoder().encode(LocalNutritionFoodDTO(row))
+        }
         let row = try db.insertFood(
             barcode: req.barcode, name: name, kcal: req.kcal, protein: req.protein, carbs: req.carbs,
             fiber: req.fiber, fat: req.fat, unitLabel: unit.unitLabel, unitGrams: unit.unitGrams)

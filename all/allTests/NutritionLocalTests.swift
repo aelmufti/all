@@ -261,7 +261,24 @@ struct NutritionLocalTests {
         #expect(results.contains { $0.id == created.id })
     }
 
-    /// `PUT api/nutrition/foods/:id` — édite une fiche existante.
+    /// Un produit déjà en bibliothèque repris depuis la recherche en ligne (code-barres
+    /// connu, pas d'`id`) met à jour sa fiche au lieu d'échouer sur `barcode UNIQUE`.
+    @Test func createFoodWithAKnownBarcodeUpdatesTheExistingFood() async throws {
+        let backend = try makeBackend()
+        func create(_ name: String, kcal: Double) async throws -> NutritionFoodLite {
+            let body = NutritionFoodCreateRequest(
+                name: name, barcode: "3760000000017", kcal: kcal, protein: 10, carbs: 4, fiber: 0, fat: 0,
+                unitLabel: nil, unitGrams: nil)
+            let data = try await backend.handle(method: "POST", path: "api/nutrition/foods", query: [:], body: try PulseAPIClient.encoder.encode(body))
+            return try PulseAPIClient.decoder.decode(NutritionFoodLite.self, from: data)
+        }
+        let first = try await create("Skyr", kcal: 60)
+        let second = try await create("Skyr nature", kcal: 61)
+        #expect(second.id == first.id)
+        #expect(second.name == "Skyr nature")
+        #expect(second.kcal == 61)
+    }
+
     @Test func updateFoodChangesFields() async throws {
         let backend = try makeBackend()
         let createData = try await backend.handle(
