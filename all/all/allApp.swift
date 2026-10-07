@@ -36,6 +36,9 @@ struct allApp: App {
                 // la FC en direct passe désormais par `REALTIME_HR`, cf.
                 // `BLEManager.startRealtime`/`RealtimeSession.enableKnownMetrics`).
                 BLEManager.shared.startRealtime()
+                // Retour au premier plan : échange des saisies avec Pulse (mode
+                // « Les deux » seulement, la méthode se garde elle-même).
+                SaisieSyncService.shared.requestExchange()
             case .background:
                 BLEManager.shared.stopRealtime()
             case .inactive:

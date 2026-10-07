@@ -115,6 +115,28 @@ final class WakeScheduleStore {
         }
     }
 
+    /// Un échange de saisies (`Sync/SaisieSync.swift`) vient d'appliquer un horaire
+    /// de réveil venu de l'autre base : on l'adopte tel quel, y compris vide (un
+    /// effacement fait de l'autre côté est un changement délibéré). Sans cette voie,
+    /// `load()` prendrait un horaire vide pour « backend sans planning » et
+    /// repousserait ce cache par-dessus (anti-écrasement). Ne pousse RIEN vers le
+    /// backend : la valeur en vient.
+    func adoptSynced(json: String?) {
+        var map: [Int: Int] = [:]
+        if let json, let data = json.data(using: .utf8),
+           let parsed = try? JSONDecoder().decode([String: Int].self, from: data) {
+            for (rawWeekday, minutes) in parsed {
+                guard let weekday = Int(rawWeekday), weekday >= 1, weekday <= 7, minutes >= 0, minutes <= 1439 else { continue }
+                map[weekday] = minutes
+            }
+        }
+        if map != minutesByWeekday {
+            minutesByWeekday = map
+            persist()
+        }
+        WakeAlarmScheduler.shared.reschedule(minutesByWeekday)
+    }
+
     // MARK: - Synchro backend (`api/wake-schedule`)
 
     /// Best-effort, ne jette jamais — même esprit que `AuthStore.check()` :

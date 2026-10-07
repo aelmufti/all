@@ -96,6 +96,11 @@ struct ContentView: View {
             // mode). Se garde elle-même (mode, config Pulse) ; fire-and-forget.
             PulseBacklogPusher.pushIfNeeded()
 
+            // Échange des saisies avec Pulse (`Sync/SaisieSync.swift`) : seulement en
+            // mode « Les deux » (la méthode se garde elle-même) ; fire-and-forget,
+            // hors main. Même couture que le rattrapage ci-dessus.
+            SaisieSyncService.shared.requestExchange()
+
             // Mode Téléphone : pas de session à vérifier, la coquille
             // s'affiche déjà (condition ci-dessus) — inutile d'appeler
             // `api/auth/me` (qui échouerait de toute façon sans `baseURL`).
@@ -115,6 +120,9 @@ struct ContentView: View {
         // rester simple, pas de logique de mode dupliquée dans cette vue.
         .onChange(of: storageMode.mode) { _, _ in
             PulseBacklogPusher.pushIfNeeded()
+            // Passage en « Les deux » : première occasion d'envoyer le journal des
+            // saisies tenu en Pulse/Téléphone (no-op dans les deux autres modes).
+            SaisieSyncService.shared.requestExchange()
             // Passage en Téléphone/Les deux : remonter tout de suite le spool
             // en base locale (self-guard : no-op en `.pulse`), pour que les
             // écrans qui viennent de basculer sur la source locale

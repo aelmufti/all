@@ -28,6 +28,9 @@
 //     sur une erreur de transport (`PulseAPIError.transport` — DNS/TLS/offline/
 //     timeout, PAS un code HTTP même 5xx, PAS 401) — cf. `docs/stockage-local.md`,
 //     « erreur de transport seulement, pas 4xx/401 ».
+//    En `both`, les routes de SAISIES ont en plus un routage propre (échange avec
+//    Pulse, épinglage des écritures à `id`, lecture locale s'il reste des changements
+//    non envoyés) — cf. `routedBoth` et `Pulse/Core/SaisieRouting.swift`.
 //  Le backend local répond aux mêmes routes avec le même JSON (mêmes modèles
 //  `Decodable`) : les écrans ne changent jamais selon le mode.
 //
@@ -40,7 +43,7 @@ final class PulseAPIClient {
     /// `AuthStore`. L'initialiseur reste public pour permettre l'injection
     /// d'une session stubée dans les tests (`PulseSocleTests.swift`), sans
     /// jamais toucher au réseau réel.
-    static let shared = PulseAPIClient()
+    static let shared = PulseAPIClient(saisieSync: SaisieSyncService.shared)
 
     /// `JSONDecoder` partagé par tout le socle — un seul point de vérité pour
     /// la stratégie de décodage.
@@ -85,6 +88,13 @@ final class PulseAPIClient {
     private let baseURLProvider: () -> URL?
     private let localBackend: LocalPulseBackend
     private let modeProvider: () -> StorageMode
+    /// Échange des saisies avec Pulse (mode « Les deux » seulement, cf.
+    /// `routedBoth`). `nil` = aucun échange (défaut, donc jamais dans les tests qui
+    /// ne l'injectent pas) ; seul `.shared` reçoit le service réel.
+    private let saisieSync: SaisieSyncing?
+    /// Base d'où vient la dernière lecture de saisies réussie : les identifiants
+    /// numériques sont propres à chaque base (contrat §7).
+    private let saisieSource = SaisieSourceTracker()
 
     /// - Parameters:
     ///   - session: session HTTP à utiliser. Par défaut, une session dédiée
@@ -115,16 +125,20 @@ final class PulseAPIClient {
     ///   - modeProvider: même raison d'être que `baseURLProvider` — relu à
     ///     chaque appel, jamais capturé, injectable en test pour ne pas muter
     ///     le singleton global `StorageModeStore`.
+    ///   - saisieSync: échange des saisies (contrat `pulse-saisies-sync-contract.md`
+    ///     §7). `nil` par défaut : aucun échange, aucune lecture de base locale.
     init(
         session: URLSession = PulseAPIClient.makeDefaultSession(),
         baseURLProvider: @escaping () -> URL? = { PulseConfig.baseURL },
         localBackend: LocalPulseBackend = LocalPulseBackendFactory.make(),
-        modeProvider: @escaping () -> StorageMode = { StorageModeStore.current }
+        modeProvider: @escaping () -> StorageMode = { StorageModeStore.current },
+        saisieSync: SaisieSyncing? = nil
     ) {
         self.session = session
         self.baseURLProvider = baseURLProvider
         self.localBackend = localBackend
         self.modeProvider = modeProvider
+        self.saisieSync = saisieSync
     }
 
     private static func makeDefaultSession() -> URLSession {
@@ -193,22 +207,70 @@ final class PulseAPIClient {
         }
         switch modeProvider() {
         case .phone:
-            return (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+            let data = try await localBackend.handle(method: method, path: path, query: query, body: bodyData)
+            if SaisieRoute.isRead(method: method, path: path) { saisieSource.record(.local) }
+            return (data, nil)
         case .pulse:
-            return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+            let result = try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+            if SaisieRoute.isRead(method: method, path: path) { saisieSource.record(.pulse) }
+            return result
         case .both:
-            do {
-                return try await serverData(method: method, path: path, query: query, bodyData: bodyData)
-            } catch PulseAPIError.transport(_), PulseAPIError.notConfigured {
-                // Repli local si Pulse est injoignable : erreur de transport
-                // (DNS/TLS/offline/timeout) OU aucune adresse Pulse configurée
-                // (`.notConfigured` — « pas de Pulse du tout → tout local »,
-                // décision 2026-09-29). Jamais sur un code HTTP (même 5xx) ni
-                // sur 401 : ceux-là veulent dire que Pulse a répondu, donc ils
-                // remontent tels quels — cf. en-tête et `docs/stockage-local.md`.
-                return (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
-            }
+            return try await routedBoth(method: method, path: path, query: query, bodyData: bodyData)
         }
+    }
+
+    /// Mode « Les deux » (contrat des saisies §7). Lectures et écritures restent
+    /// « Pulse d'abord, repli local sur erreur de transport » (repli : erreur de
+    /// transport OU aucune adresse configurée — jamais un code HTTP, même 5xx, ni
+    /// 401), avec trois ajouts :
+    ///  - (c) s'il reste des changements locaux non envoyés APRÈS une tentative
+    ///    d'échange, les routes qui lisent des saisies sont servies en local (Pulse
+    ///    ne connaît pas encore ces lignes) ;
+    ///  - (a) une écriture qui porte un `id` numérique va à la base d'où vient la
+    ///    DERNIÈRE lecture de saisies ; si c'est Pulse et qu'il est injoignable,
+    ///    elle ÉCHOUE (un `id` local n'a aucun sens chez Pulse, et inversement) ;
+    ///  - (b) toute écriture de saisie réussie, d'où qu'elle vienne, déclenche un
+    ///    échange pour ramener ou pousser le changement.
+    private func routedBoth(method: String, path: String, query: [String: String], bodyData: Data?) async throws -> (Data, Int?) {
+        let isRead = SaisieRoute.isRead(method: method, path: path)
+        let isWrite = SaisieRoute.isWrite(method: method, path: path)
+
+        if isRead, let saisieSync, await saisieSync.stillPendingAfterAttempt() {
+            let data = try await localBackend.handle(method: method, path: path, query: query, body: bodyData)
+            saisieSource.record(.local)
+            return (data, nil)
+        }
+
+        if isWrite, SaisieRoute.carriesLocalId(method: method, path: path, body: bodyData) {
+            // Aucune lecture encore : l'`id` vient forcément de quelque part, on
+            // suppose Pulse (échec explicite plutôt qu'un `id` appliqué à la mauvaise
+            // base).
+            let result: (Data, Int?)
+            if saisieSource.last == .local {
+                result = (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+            } else {
+                result = try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+            }
+            saisieSync?.requestExchange()
+            return result
+        }
+
+        let result: (Data, Int?)
+        do {
+            result = try await serverData(method: method, path: path, query: query, bodyData: bodyData)
+            if isRead { saisieSource.record(.pulse) }
+        } catch PulseAPIError.transport(_), PulseAPIError.notConfigured {
+            // Repli local si Pulse est injoignable : erreur de transport
+            // (DNS/TLS/offline/timeout) OU aucune adresse Pulse configurée
+            // (`.notConfigured` — « pas de Pulse du tout → tout local »,
+            // décision 2026-09-29). Jamais sur un code HTTP (même 5xx) ni
+            // sur 401 : ceux-là veulent dire que Pulse a répondu, donc ils
+            // remontent tels quels — cf. en-tête et `docs/stockage-local.md`.
+            result = (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
+            if isRead { saisieSource.record(.local) }
+        }
+        if isWrite { saisieSync?.requestExchange() }
+        return result
     }
 
     /// Routes qui ne passent JAMAIS par le backend local, quel que soit le mode

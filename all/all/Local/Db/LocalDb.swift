@@ -29,7 +29,9 @@
 import Foundation
 
 final class LocalDb {
-    private let db: SQLiteDatabase
+    /// Internal (et non `private`) pour `LocalDb+Saisies.swift` : le journal de
+    /// synchro des saisies vit dans une extension d'un autre fichier.
+    let db: SQLiteDatabase
 
     convenience init() throws {
         let base = try FileManager.default.url(
@@ -58,7 +60,10 @@ final class LocalDb {
     // modification ni de suppression d'une entrée existante. La version de la base
     // (`PRAGMA user_version`) est le nombre de migrations déjà appliquées.
 
-    static let migrations: [String] = []
+    /// 1 : journal de synchro des saisies (`uid`, `saisie_changes`, triggers —
+    /// contrat `custom-connect/docs/pulse-saisies-sync-contract.md` §3), cf.
+    /// `LocalDb+Saisies.swift`.
+    static let migrations: [String] = [saisieSyncMigration]
 
     /// Applique les migrations manquantes, dans l'ordre, chacune dans sa
     /// transaction avec l'avancement de version. La version est relue DANS la
@@ -1040,7 +1045,11 @@ final class LocalDb {
     /// (cf. `HealthViewModel.saveWeight`).
     func syncWeightProfile() throws {
         guard let latest = try latestWeightRow() else { return }
-        try setSetting(key: "weightKg", value: Self.jsNumberString(latest.kg))
+        let value = Self.jsNumberString(latest.kg)
+        // Idempotent : ne réécrit pas une valeur déjà à jour (chaque écriture de
+        // `settings.weightKg` entre au journal de synchro des saisies).
+        guard try settingValue(key: "weightKg") != value else { return }
+        try setSetting(key: "weightKg", value: value)
     }
 
     /// `String(latest.kg)` (TS) — un nombre entier s'affiche sans `.0`
