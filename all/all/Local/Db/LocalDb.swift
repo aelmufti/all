@@ -2115,6 +2115,7 @@ final class LocalDb {
         let sport: String?
         let subSport: String?
         let durationS: Double?
+        let distanceM: Double?
     }
 
     /// Miroir de `activitiesSince` (TS, privée).
@@ -2122,13 +2123,14 @@ final class LocalDb {
         var out: [ProgrammeActivityHitRow] = []
         try db.run(
             """
-            SELECT id, substr(start_time, 1, 10) AS d, sport, sub_sport, duration_s
+            SELECT id, substr(start_time, 1, 10) AS d, sport, sub_sport, duration_s, distance_m
             FROM activities WHERE substr(start_time, 1, 10) >= ? ORDER BY start_time ASC
             """,
             [.text(startedOn)]) { r in
             guard let date = r.text(1) else { return }
             out.append(ProgrammeActivityHitRow(
-                id: Int(r.double(0) ?? 0), date: date, sport: r.text(2), subSport: r.text(3), durationS: r.double(4)))
+                id: Int(r.double(0) ?? 0), date: date, sport: r.text(2), subSport: r.text(3), durationS: r.double(4),
+                distanceM: r.double(5)))
         }
         return out
     }

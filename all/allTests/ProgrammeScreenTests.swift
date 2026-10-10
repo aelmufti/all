@@ -290,6 +290,31 @@ struct ProgrammeFormattingTests {
         #expect(plannedCell?.state == "planned")
     }
 
+    @Test func weekDaysMarksExtraOnlyWhenNothingElseIsThatDay() throws {
+        let current = try JSONDecoder().decode(ProgrammeCurrent.self, from: currentJSON)
+        let domain = current.domains[0]
+        guard case .training(let base) = domain.detail else {
+            Issue.record("attendu .training")
+            return
+        }
+        // Semaine 2 : 09-23 prévue (planned), 09-24 faite (done), 09-25 vide.
+        let extras = [
+            ProgrammeExtraActivity(id: 90, date: "2026-09-23", sport: "walking", subSport: nil, durationS: 3600, distanceM: 5000),
+            ProgrammeExtraActivity(id: 91, date: "2026-09-25", sport: "walking", subSport: nil, durationS: 3600, distanceM: 5000),
+        ]
+        let detail = ProgrammeTrainingDetail(
+            focus: base.focus, sessions: base.sessions, done: base.done, total: base.total,
+            missed: base.missed, today: base.today, extras: extras)
+        let cells = programmeWeekDays(domain: domain, detail: detail, shownWeek: 2)
+        #expect(cells.first { $0.date == "2026-09-23" }?.state == "planned")
+        #expect(cells.first { $0.date == "2026-09-24" }?.state == "done")
+        let extraCell = cells.first { $0.date == "2026-09-25" }
+        #expect(extraCell?.state == "extra")
+        #expect(extraCell?.title == "\(ActivitySport.name(sport: "walking")) · hors programme")
+        #expect(programmeWeekExtras(domain: domain, detail: detail, shownWeek: 2).count == 2)
+        #expect(programmeWeekExtras(domain: domain, detail: detail, shownWeek: 1).isEmpty)
+    }
+
     @Test func macroUnitMapsKcalAndGrams() {
         #expect(programmeMacroUnit("kcal") == "kcal")
         #expect(programmeMacroUnit("protein") == "g")

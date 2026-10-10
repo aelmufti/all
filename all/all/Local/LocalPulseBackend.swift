@@ -1343,7 +1343,8 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             ProgrammeEngineDoneSession(week: $0.week, session: $0.session, date: $0.date, activityId: $0.activityId, manual: true)
         }
         let activities = try db.programmeActivitiesSince(state.startedOn).map {
-            ProgrammeEngineActivityHit(id: $0.id, date: $0.date, sport: $0.sport, subSport: $0.subSport, durationS: $0.durationS)
+            ProgrammeEngineActivityHit(id: $0.id, date: $0.date, sport: $0.sport, subSport: $0.subSport,
+                durationS: $0.durationS, distanceM: $0.distanceM)
         }
         let sessions = ProgrammeProgressEngine.matchSessions(
             programme: programme, startedOn: state.startedOn, activities: activities, manual: manual, plan: plan, today: date)
@@ -1354,7 +1355,12 @@ final class RealLocalPulseBackend: LocalPulseBackend {
             done: sessions.filter { $0.done }.count,
             total: sessions.count,
             missed: sessions.filter { $0.status == .missed }.count,
-            today: sessions.filter { $0.plannedOn == date }.map(Self.programmeSessionProgressDTO))
+            today: sessions.filter { $0.plannedOn == date || ($0.done && $0.date == date) }.map(Self.programmeSessionProgressDTO),
+            extras: ProgrammeProgressEngine.extraActivities(activities: activities, sessions: sessions).map {
+                LocalProgrammeExtraActivityDTO(
+                    id: $0.id, date: $0.date, sport: $0.sport, subSport: $0.subSport,
+                    durationS: $0.durationS, distanceM: $0.distanceM)
+            })
     }
 
     private static func programmeSessionProgressDTO(_ s: ProgrammeEngineSessionProgress) -> LocalProgrammeSessionProgressDTO {
@@ -1862,6 +1868,16 @@ private struct LocalProgrammeTrainingDetailDTO: Encodable {
     let total: Int
     let missed: Int
     let today: [LocalProgrammeSessionProgressDTO]
+    let extras: [LocalProgrammeExtraActivityDTO]
+}
+
+private struct LocalProgrammeExtraActivityDTO: Encodable {
+    let id: Int
+    let date: String
+    let sport: String?
+    let subSport: String?
+    let durationS: Double?
+    let distanceM: Double?
 }
 
 private struct LocalProgrammeRangeDTO: Encodable {

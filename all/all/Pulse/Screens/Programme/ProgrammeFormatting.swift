@@ -121,7 +121,7 @@ func programmeLibraryNote(_ domain: ProgrammeDomainView) -> String {
 struct ProgrammeDayCell: Identifiable {
     let date: String
     let letter: String
-    /// `"done" | "planned" | "missed" | "empty"`.
+    /// `"done" | "planned" | "missed" | "extra" | "empty"`.
     let state: String
     let today: Bool
     let title: String
@@ -147,17 +147,23 @@ func programmeWeekDays(domain: ProgrammeDomainView, detail: ProgrammeTrainingDet
         }
     }
 
+    var extraOn: [String: ProgrammeExtraActivity] = [:]
+    for extra in detail.extras ?? [] where extraOn[extra.date] == nil {
+        extraOn[extra.date] = extra
+    }
+
     return (0..<7).compactMap { offset -> ProgrammeDayCell? in
         guard let date = ProgrammeDate.addDays(first, offset) else { return nil }
         let weekday = ProgrammeDate.weekday(of: date) ?? 0
         let doneName = doneOn[date]
         let planned = plannedOn[date]
+        let extra = extraOn[date]
 
         let state: String
         if doneName != nil {
             state = "done"
         } else if planned == nil || planned!.done {
-            state = "empty"
+            state = extra != nil ? "extra" : "empty"
         } else if planned!.status == .missed {
             state = "missed"
         } else {
@@ -171,6 +177,8 @@ func programmeWeekDays(domain: ProgrammeDomainView, detail: ProgrammeTrainingDet
             title = "\(planned.session.name) · faite le \(ProgrammeDate.shortLabel(planned.date))"
         } else if let planned {
             title = "\(planned.session.name) · \(planned.status == .missed ? "en retard" : "prévue")"
+        } else if let extra {
+            title = "\(ActivitySport.name(sport: extra.sport)) · hors programme"
         } else if date == today {
             title = "aujourd’hui · rien de prévu"
         } else {
@@ -185,6 +193,27 @@ func programmeWeekDays(domain: ProgrammeDomainView, detail: ProgrammeTrainingDet
             title: title
         )
     }
+}
+
+/// Activités hors programme tombant dans la semaine affichée — équivalent
+/// `weekExtras()` (Angular).
+func programmeWeekExtras(domain: ProgrammeDomainView, detail: ProgrammeTrainingDetail, shownWeek: Int) -> [ProgrammeExtraActivity] {
+    guard let startedOn = domain.active?.startedOn,
+          let from = ProgrammeDate.addDays(startedOn, (shownWeek - 1) * 7),
+          let to = ProgrammeDate.addDays(startedOn, shownWeek * 7)
+    else { return [] }
+    return (detail.extras ?? []).filter { $0.date >= from && $0.date < to }
+}
+
+/// Équivalent `extraMeta()` : date courte puis distance si présente, sinon durée.
+func programmeExtraMeta(_ extra: ProgrammeExtraActivity) -> String {
+    var bits = [ProgrammeDate.shortLabel(extra.date)]
+    if let km = ActivityFormat.distanceKm(extra.distanceM) {
+        bits.append(km)
+    } else if let durationS = extra.durationS {
+        bits.append("\(Int((durationS / 60).rounded())) min")
+    }
+    return bits.joined(separator: " · ")
 }
 
 /// Une pastille de la frise multi-semaines — équivalent `weekSegments()`.

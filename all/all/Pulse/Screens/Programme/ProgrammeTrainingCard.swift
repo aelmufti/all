@@ -21,6 +21,11 @@ struct ProgrammeTrainingSection: View {
         detail.sessions.filter { $0.week == viewModel.shownWeek }
     }
 
+    /// Activités hors programme de la semaine affichée.
+    private var weekExtras: [ProgrammeExtraActivity] {
+        programmeWeekExtras(domain: domain, detail: detail, shownWeek: viewModel.shownWeek)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.md) {
             trainingCard
@@ -147,6 +152,12 @@ struct ProgrammeTrainingSection: View {
                     Divider()
                 }
             }
+            ForEach(weekExtras) { extra in
+                if !weekSessions.isEmpty || extra.id != weekExtras.first?.id {
+                    Divider()
+                }
+                ProgrammeExtraRow(extra: extra)
+            }
         }
     }
 
@@ -184,6 +195,7 @@ struct ProgrammeTrainingSection: View {
         switch state {
         case "done": return .pulseTextPrimary
         case "planned": return .pulseTextSecondary.opacity(0.34)
+        case "extra": return .pulseSteps.opacity(0.55)
         // Web `.dbox.missed { background:none; border:1px solid … }` — pas de
         // remplissage, seul le liseré (posé par l'overlay ci-dessus) marque
         // l'état.
@@ -199,6 +211,9 @@ struct ProgrammeTrainingSection: View {
             ProgrammeLegendDot(color: .pulseTextSecondary.opacity(0.34), label: "prévue")
             ProgrammeLegendDot(color: .pulseTextPrimary, label: "faite")
             ProgrammeLegendDot(color: .pulseDanger.opacity(0.55), label: "en retard", outlined: true)
+            if !weekExtras.isEmpty {
+                ProgrammeLegendDot(color: .pulseSteps.opacity(0.55), label: "hors programme")
+            }
             ProgrammeLegendDot(color: .pulseTextSecondary, label: "aujourd’hui", dashed: true)
         }
         .font(.system(size: 11, design: .rounded))
@@ -312,6 +327,31 @@ struct ProgrammeTrainingSection: View {
                 Text(note).font(.system(size: 14))
             }
         }
+    }
+}
+
+// MARK: - Ligne hors programme
+
+private struct ProgrammeExtraRow: View {
+    let extra: ProgrammeExtraActivity
+
+    var body: some View {
+        HStack(spacing: PulseSpacing.sm) {
+            Image(systemName: ActivitySport.icon(sport: extra.sport))
+                .font(.title3)
+                .foregroundStyle(Color.pulseTextSecondary)
+                .frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ActivitySport.name(sport: extra.sport))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.pulseTextSecondary)
+                Text(programmeExtraMeta(extra))
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(Color.pulseTextSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, PulseSpacing.xs)
     }
 }
 

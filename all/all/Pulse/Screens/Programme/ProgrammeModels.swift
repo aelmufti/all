@@ -163,6 +163,16 @@ struct ProgrammeSessionProgress: Codable, Identifiable {
     var id: String { "\(week)-\(session.key)" }
 }
 
+/// Activité importée qui ne fait partie d'aucune séance (« hors programme »).
+struct ProgrammeExtraActivity: Codable, Identifiable {
+    let id: Int
+    let date: String
+    let sport: String?
+    let subSport: String?
+    let durationS: Double?
+    let distanceM: Double?
+}
+
 struct ProgrammeTrainingDetail: Codable {
     let focus: [ProgrammeWeekFocus]
     let sessions: [ProgrammeSessionProgress]
@@ -170,6 +180,8 @@ struct ProgrammeTrainingDetail: Codable {
     let total: Int
     let missed: Int
     let today: [ProgrammeSessionProgress]
+    /// Optionnel : un serveur Pulse non encore déployé ne l'envoie pas.
+    let extras: [ProgrammeExtraActivity]?
 }
 
 // MARK: - Détail alimentation (`kind == "nutrition"`)

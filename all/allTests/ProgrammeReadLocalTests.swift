@@ -445,3 +445,121 @@ struct ProgrammeReadLocalTests {
         #expect(metric("coucher").band?.label == "30 min ou moins")
     }
 }
+
+// MARK: - Appariement séances/activités (jour exact, même semaine, hors programme)
+
+/// Miroir de `server/src/programme/progress.test.ts` (`matchSessions` /
+/// `extraActivities`) — catalogue fictif : semaine 1 = muscu-a, muscu-b, cardio ;
+/// semaine 2 = muscu-a. Départ le 2026-08-03, jours 2/4/6 (mar/jeu/sam) →
+/// plan S1 : 08-04, 08-06, 08-08 ; S2 : 08-11.
+struct ProgrammeMatchingEngineTests {
+    private static let start = "2026-08-03"
+
+    private static func muscu(_ key: String) -> ProgrammeEngineTrainingSession {
+        ProgrammeEngineTrainingSession(
+            key: key, name: key, sport: "training", subSport: "strengthTraining", minMinutes: 30, items: [])
+    }
+
+    private static let programme = ProgrammeEngineProgramme(
+        id: "test-training", kind: .training, name: "Bloc test", goal: "Tester", source: "Test",
+        weeks: [
+            ProgrammeEngineWeek(index: 1, focus: nil, sessions: [
+                muscu("muscu-a"), muscu("muscu-b"),
+                ProgrammeEngineTrainingSession(
+                    key: "cardio", name: "Cardio", sport: "running", subSport: nil, minMinutes: 25, items: []),
+            ]),
+            ProgrammeEngineWeek(index: 2, focus: nil, sessions: [muscu("muscu-a")]),
+        ])
+
+    private static let walkProgramme = ProgrammeEngineProgramme(
+        id: "test-walk", kind: .training, name: "Marche", goal: "Tester", source: "Test",
+        weeks: [ProgrammeEngineWeek(index: 1, focus: nil, sessions: [
+            ProgrammeEngineTrainingSession(key: "marche", name: "Marche", sport: "walking", subSport: nil, minMinutes: nil, items: [])
+        ])])
+
+    private static let plan = ProgrammeProgressEngine.buildPlan(programme: programme, startedOn: start, days: [2, 4, 6])
+
+    private static func activity(
+        _ id: Int, _ date: String, _ sport: String, _ subSport: String? = nil, min: Double = 45, distanceM: Double? = nil
+    ) -> ProgrammeEngineActivityHit {
+        ProgrammeEngineActivityHit(id: id, date: date, sport: sport, subSport: subSport, durationS: min * 60, distanceM: distanceM)
+    }
+
+    private static func match(
+        _ activities: [ProgrammeEngineActivityHit], manual: [ProgrammeEngineDoneSession] = [],
+        programme: ProgrammeEngineProgramme = programme, plan: [ProgrammeEnginePlannedSession] = plan
+    ) -> [ProgrammeEngineSessionProgress] {
+        ProgrammeProgressEngine.matchSessions(
+            programme: programme, startedOn: start, activities: activities, manual: manual, plan: plan, today: "2026-08-17")
+    }
+
+    private static func find(_ sessions: [ProgrammeEngineSessionProgress], _ week: Int, _ key: String) -> ProgrammeEngineSessionProgress {
+        sessions.first { $0.week == week && $0.session.key == key }!
+    }
+
+    @Test func activityOnAnotherDayOfTheSameWeekChecksTheSession() {
+        // Remplace l'ancien attendu « jour exact seulement » (miroir TS).
+        let sessions = Self.match([Self.activity(1, "2026-08-05", "training", "strengthTraining")])
+        let first = Self.find(sessions, 1, "muscu-a")
+        #expect(first.done)
+        #expect(first.activityId == 1)
+        #expect(first.date == "2026-08-05")
+        #expect(first.manual == false)
+        #expect(first.plannedOn == "2026-08-04")
+    }
+
+    @Test func exactDayTakesPriorityOverSameWeek() {
+        let sessions = Self.match([
+            Self.activity(1, "2026-08-05", "training", "strengthTraining"),
+            Self.activity(2, "2026-08-06", "training", "strengthTraining"),
+        ])
+        #expect(Self.find(sessions, 1, "muscu-b").activityId == 2)
+        #expect(Self.find(sessions, 1, "muscu-a").activityId == 1)
+    }
+
+    @Test func closestPlannedDayWinsForSameSportSessions() {
+        let sessions = Self.match([
+            Self.activity(1, "2026-08-03", "training", "strengthTraining"),
+            Self.activity(2, "2026-08-07", "training", "strengthTraining"),
+        ])
+        #expect(Self.find(sessions, 1, "muscu-a").activityId == 1)
+        #expect(Self.find(sessions, 1, "muscu-b").activityId == 2)
+    }
+
+    @Test func activityOfAnotherWeekDoesNotCheckWeekOne() {
+        let sessions = Self.match([Self.activity(1, "2026-08-10", "training", "strengthTraining")])
+        #expect(sessions.filter { $0.week == 1 }.allSatisfy { !$0.done })
+        #expect(Self.find(sessions, 2, "muscu-a").activityId == 1)
+    }
+
+    @Test func shortWalkIsNeverMatchedAndLongWalkIs() {
+        func walk(_ distanceM: Double?) -> Bool {
+            Self.match([Self.activity(1, "2026-08-04", "walking", min: 60, distanceM: distanceM)],
+                       programme: Self.walkProgramme, plan: [])[0].done
+        }
+        #expect(walk(3999) == false)
+        #expect(walk(nil) == false)
+        #expect(walk(4000) == true)
+    }
+
+    @Test func extrasExcludeClaimedAndShortWalks() {
+        let activities = [
+            Self.activity(1, "2026-08-04", "training", "strengthTraining"),
+            Self.activity(2, "2026-08-05", "walking", min: 60, distanceM: 3000),
+            Self.activity(3, "2026-08-06", "walking", min: 90, distanceM: 6500),
+            Self.activity(4, "2026-08-07", "walking", min: 90),
+            Self.activity(5, "2026-08-08", "cycling", min: 60),
+        ]
+        let sessions = Self.match(activities)
+        let extras = ProgrammeProgressEngine.extraActivities(activities: activities, sessions: sessions)
+        #expect(extras.map(\.id) == [3, 5])
+    }
+
+    @Test func extrasExcludeManuallyClaimedActivity() {
+        let activities = [Self.activity(1, "2026-08-05", "cycling", min: 60)]
+        let sessions = Self.match(activities, manual: [
+            ProgrammeEngineDoneSession(week: 1, session: "cardio", date: "2026-08-05", activityId: 1, manual: true)
+        ])
+        #expect(ProgrammeProgressEngine.extraActivities(activities: activities, sessions: sessions).isEmpty)
+    }
+}
