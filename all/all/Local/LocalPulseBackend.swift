@@ -199,6 +199,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("GET", "stats/sleep-recommendation"):
             return try DashboardStatsBackend.sleepRecommendation(db: db, query: query, cache: sleepModelCache)
 
+        case ("GET", "stats/records"):
+            return try RecordsBackend.records(db: db)
+
         // MARK: Profil (incrément L6, miroir `ProfileController` — `profile.controller.ts`)
 
         case ("GET", "profile"):

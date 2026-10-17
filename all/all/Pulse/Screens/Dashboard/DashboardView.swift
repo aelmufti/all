@@ -39,6 +39,9 @@ struct DashboardView: View {
             .navigationDestination(for: DashboardTab.self) { tab in
                 DashboardDomainDetailView(tab: tab, viewModel: viewModel)
             }
+            .navigationDestination(for: RecordsRoute.self) { _ in
+                RecordsView()
+            }
         }
         .task { await viewModel.loadIfNeeded() }
         // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
@@ -83,6 +86,11 @@ struct DashboardView: View {
 
                 NavigationLink(value: DashboardTab.map) {
                     DashboardMapRow()
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: RecordsRoute.page) {
+                    DashboardRecordsRow()
                 }
                 .buttonStyle(.plain)
             }
@@ -143,6 +151,38 @@ private struct DashboardMapRow: View {
             Text("tracés GPS")
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.pulseTextSecondary)
+        }
+        .padding(PulseSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pulseSurface)
+        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: PulseRadius.card, style: .continuous)
+                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+        )
+    }
+}
+
+/// Ligne « Records » — même habillage discret que `DashboardMapRow`.
+private struct DashboardRecordsRow: View {
+    var body: some View {
+        HStack(spacing: PulseSpacing.md) {
+            Image(systemName: "trophy.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.pulseTextSecondary)
+                .frame(width: 26, height: 26)
+                .background(Color.pulseTextSecondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            Text("Records")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.pulseTextPrimary)
+
+            Spacer()
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
