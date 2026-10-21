@@ -52,6 +52,63 @@ struct ProgrammeCatalogueEngineTests {
         #expect(ProgrammeProgressEngine.sessionsPerWeek(programme) == 3)
     }
 
+    // MARK: - Blocs Maintien et Masse sèche (MAINTAIN_BLOCK / MASS_BLOCK)
+
+    private func sessionKeys(_ week: ProgrammeEngineWeek) -> [String] { week.sessions.map(\.key) }
+
+    private func expectNamesFit(_ programme: ProgrammeEngineProgramme) {
+        for week in programme.weeks {
+            for session in week.sessions {
+                #expect(session.name.count <= 30, "\(session.name)")
+                for item in session.items { #expect(item.name.count <= 30, "\(item.name)") }
+            }
+        }
+    }
+
+    @Test func maintainBlockStructure() {
+        let programme = ProgrammeCatalogue.programme(byId: "maintien-escalade-muscu-jscr-2021")!
+        #expect(programme.kind == .training)
+        #expect(programme.weeks.count == 12)
+        #expect(ProgrammeCatalogue.ruleCount(programme) == 0)
+        #expect(ProgrammeProgressEngine.sessionsPerWeek(programme) == 3)
+        for week in programme.weeks {
+            #expect(week.sessions.count == 3)
+            #expect(Set(sessionKeys(week)).count == week.sessions.count)
+            let light = week.index % 4 == 0
+            #expect(sessionKeys(week).contains("maintien-muscu-allegee") == light)
+            #expect(sessionKeys(week).contains("maintien-muscu") == !light)
+        }
+        expectNamesFit(programme)
+    }
+
+    @Test func massBlockStructure() {
+        let programme = ProgrammeCatalogue.programme(byId: "masse-seche-muscu-escalade-schoenfeld")!
+        #expect(programme.kind == .training)
+        #expect(programme.weeks.count == 12)
+        #expect(ProgrammeCatalogue.ruleCount(programme) == 0)
+        #expect(ProgrammeProgressEngine.sessionsPerWeek(programme) == 4)
+        for week in programme.weeks {
+            #expect(week.sessions.count == 4)
+            #expect(Set(sessionKeys(week)).count == week.sessions.count)
+            let keys = sessionKeys(week)
+            if week.index % 4 == 0 {
+                #expect(keys.contains("masse-muscu-a-allegee"))
+                #expect(keys.contains("masse-muscu-b-allegee"))
+            } else {
+                #expect(!keys.contains("masse-muscu-a-allegee"))
+                #expect(!keys.contains("masse-muscu-b-allegee"))
+            }
+        }
+        expectNamesFit(programme)
+    }
+
+    @Test func cataloguePreservesProgrammeOrder() {
+        #expect(ProgrammeCatalogue.programmes.map(\.id) == [
+            "seche-nutrients-2021", "seche-escalade-nutrients-2021", "maintien-escalade-muscu-jscr-2021",
+            "masse-seche-muscu-escalade-schoenfeld", "sommeil-regularite-nsf-2023", "debug-course-pipeline",
+        ])
+    }
+
     /// `seche-nutrients-2021` (FAT_LOSS) : kind `nutrition`, `weeks: []`,
     /// 4 règles (protein/carbs/fat/fiber) → `ruleCount` = 4 (PAS `sleepRules`,
     /// kind ≠ sleep), `sessionsPerWeek` = 0 (aucune semaine).
@@ -178,7 +235,10 @@ struct ProgrammeReadLocalTests {
         let current = try await getProgramme(backend)
 
         let training = domain(current, .training)
-        #expect(Set(training.choices.map(\.id)) == Set(["seche-escalade-nutrients-2021", "debug-course-pipeline"]))
+        #expect(Set(training.choices.map(\.id)) == Set([
+            "seche-escalade-nutrients-2021", "maintien-escalade-muscu-jscr-2021",
+            "masse-seche-muscu-escalade-schoenfeld", "debug-course-pipeline",
+        ]))
         let climb = training.choices.first { $0.id == "seche-escalade-nutrients-2021" }!
         #expect(climb.weeks == 4)
         #expect(climb.rules == 0)

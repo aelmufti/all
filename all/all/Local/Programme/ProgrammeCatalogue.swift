@@ -248,6 +248,214 @@ enum ProgrammeCatalogue {
             "La marche quotidienne fait déjà la dépense : inutile d’ajouter du cardio par-dessus, il ronge la récupération.",
         ])
 
+    // MARK: - Escalade partagée (climbIntensity / climbVolume)
+
+    private static func climbIntensity(key: String, note: String) -> ProgrammeEngineTrainingSession {
+        ProgrammeEngineTrainingSession(
+            key: key, name: "Escalade — intensité", sport: "rockClimbing",
+            subSport: "indoorClimbing", minMinutes: 45,
+            items: [
+                ProgrammeEngineTrainingItem(name: "Échauffement progressif", prescription: "15 min, blocs faciles en montant", note: nil),
+                ProgrammeEngineTrainingItem(
+                    name: "Blocs limites", prescription: "5 à 8 essais maximum, repos long entre chaque", note: note),
+                ProgrammeEngineTrainingItem(name: "Retour au calme", prescription: "10 min de blocs faciles", note: nil),
+            ])
+    }
+
+    private static func climbVolume(key: String) -> ProgrammeEngineTrainingSession {
+        ProgrammeEngineTrainingSession(
+            key: key, name: "Escalade — volume", sport: "rockClimbing",
+            subSport: "indoorClimbing", minMinutes: 45,
+            items: [
+                ProgrammeEngineTrainingItem(name: "Échauffement", prescription: "10 à 15 min", note: nil),
+                ProgrammeEngineTrainingItem(name: "Blocs deux crans sous le max", prescription: "10 à 15 blocs, repos court", note: nil),
+                ProgrammeEngineTrainingItem(name: "Travail de pieds", prescription: "10 min en silence, sans lâcher les prises", note: nil),
+            ])
+    }
+
+    // MARK: - Maintien (MAINTAIN_BLOCK)
+
+    private static let maintainClimbHard = climbIntensity(
+        key: "maintien-escalade-intensite",
+        note: "Garder les essais au niveau max : c’est l’intensité qui maintient, pas le volume.")
+    private static let maintainClimbVolume = climbVolume(key: "maintien-escalade-volume")
+
+    private static let maintainLift = ProgrammeEngineTrainingSession(
+        key: "maintien-muscu", name: "Muscu — entretien", sport: "training",
+        subSport: "strengthTraining", minMinutes: 30,
+        items: [
+            ProgrammeEngineTrainingItem(name: "Échauffement", prescription: "10 min, montée en charge sur le squat", note: nil),
+            ProgrammeEngineTrainingItem(
+                name: "Squat ou presse", prescription: "2 × 6 à 8, une à deux répétitions en réserve",
+                note: "Garder la charge lourde : une séance par semaine suffit si l’intensité ne baisse pas."),
+            ProgrammeEngineTrainingItem(name: "Développé couché", prescription: "2 × 6 à 10, une à deux répétitions en réserve", note: nil),
+            ProgrammeEngineTrainingItem(name: "Soulevé de terre roumain", prescription: "2 × 8 à 10, deux répétitions en réserve", note: nil),
+            ProgrammeEngineTrainingItem(name: "Développé militaire", prescription: "2 × 8 à 10, deux répétitions en réserve", note: nil),
+            ProgrammeEngineTrainingItem(name: "Rotateurs externes", prescription: "2 × 15 à l’élastique", note: nil),
+            ProgrammeEngineTrainingItem(name: "Gainage anti-rotation", prescription: "2 × 30 s par côté", note: nil),
+        ])
+
+    private static let maintainLiftLight = ProgrammeEngineTrainingSession(
+        key: "maintien-muscu-allegee", name: "Muscu — semaine allégée", sport: "training",
+        subSport: "strengthTraining", minMinutes: 20,
+        items: [
+            ProgrammeEngineTrainingItem(name: "Échauffement", prescription: "10 min", note: nil),
+            ProgrammeEngineTrainingItem(name: "Squat ou presse", prescription: "1 × 6, mêmes charges, trois répétitions en réserve", note: nil),
+            ProgrammeEngineTrainingItem(name: "Développé couché", prescription: "1 × 6, mêmes charges, trois répétitions en réserve", note: nil),
+            ProgrammeEngineTrainingItem(name: "Soulevé de terre roumain", prescription: "1 × 8, mêmes charges", note: nil),
+            ProgrammeEngineTrainingItem(name: "Rotateurs externes", prescription: "2 × 15 à l’élastique", note: nil),
+        ])
+
+    private static let maintainFocus = [
+        "Prise de repères : noter les charges et les blocs de référence",
+        "Mêmes charges, mêmes blocs : l’intensité suffit à maintenir",
+        "Une série passe avec trois répétitions en réserve : ajouter un cran",
+        "Semaine allégée : muscu réduite, escalade au plaisir",
+        "Reprise aux charges de la semaine 3",
+        "On tient les charges, on ne rallonge pas les séances",
+        "Tenter un bloc au-dessus du niveau de référence",
+        "Semaine allégée : muscu réduite, escalade au plaisir",
+        "Reprise aux charges de la semaine 7",
+        "Même intensité, volume inchangé",
+        "Dernière semaine pleine : comparer aux repères de la semaine 1",
+        "Semaine allégée et bilan du bloc",
+    ]
+
+    private static func buildMaintainWeeks() -> [ProgrammeEngineWeek] {
+        maintainFocus.enumerated().map { i, focus in
+            ProgrammeEngineWeek(
+                index: i + 1, focus: focus,
+                sessions: [maintainClimbHard, (i + 1) % 4 == 0 ? maintainLiftLight : maintainLift, maintainClimbVolume])
+        }
+    }
+
+    private static let maintainBlock = ProgrammeEngineProgramme(
+        id: "maintien-escalade-muscu-jscr-2021", kind: .training, name: "Maintien — escalade et muscu",
+        goal: "Garder force, muscle et niveau de bloc avec le minimum efficace",
+        source: "Spiering et al., J Strength Cond Res 2021;35:1449",
+        weeks: buildMaintainWeeks(),
+        notes: [
+            "Trois séances par semaine : deux d’escalade, une de muscu. La revue montre que force et masse se maintiennent avec une séance par semaine, une à trois séries par exercice.",
+            "Le volume peut baisser, l’intensité jamais : garder des charges lourdes et des essais durs, c’est ce qui retient les acquis.",
+            "Une semaine allégée toutes les quatre. Trois cycles de quatre semaines, puis le bloc se relance.",
+        ])
+
+    // MARK: - Masse sèche (MASS_BLOCK)
+
+    private struct MassCycle {
+        let key: String
+        let heavy: String
+        let accessory: String
+        let focus: [String]
+    }
+
+    private static let massCycles: [MassCycle] = [
+        MassCycle(
+            key: "c1",
+            heavy: "3 × 8 à 10, deux à trois répétitions en réserve",
+            accessory: "3 × 10 à 12, deux répétitions en réserve",
+            focus: [
+                "Prise de repères : charges à deux ou trois répétitions de l’échec",
+                "Ajouter une répétition par série avant d’ajouter du poids",
+                "Haut de fourchette atteint sur toutes les séries : monter la charge",
+            ]),
+        MassCycle(
+            key: "c2",
+            heavy: "4 × 8 à 10, une à deux répétitions en réserve",
+            accessory: "4 × 10 à 12, une à deux répétitions en réserve",
+            focus: [
+                "Une série de plus sur chaque mouvement",
+                "Se rapprocher de l’échec : une à deux répétitions en réserve",
+                "Pic de volume du bloc",
+            ]),
+        MassCycle(
+            key: "c3",
+            heavy: "4 × 6 à 8, une à deux répétitions en réserve",
+            accessory: "3 × 8 à 10, une répétition en réserve",
+            focus: [
+                "Charges plus lourdes, répétitions plus basses",
+                "Progresser en charge, pas en séries",
+                "Dernière semaine pleine : comparer aux repères de la semaine 1",
+            ]),
+    ]
+
+    private static func massLiftA(cycle: Int, heavy: String, accessory: String) -> ProgrammeEngineTrainingSession {
+        ProgrammeEngineTrainingSession(
+            key: "masse-muscu-a-\(cycle > 0 ? "c\(cycle)" : "allegee")",
+            name: cycle > 0 ? "Muscu A — cycle \(cycle)" : "Muscu A — semaine allégée",
+            sport: "training", subSport: "strengthTraining", minMinutes: cycle > 0 ? 40 : 25,
+            items: [
+                ProgrammeEngineTrainingItem(name: "Échauffement", prescription: "10 min, montée en charge sur le squat", note: nil),
+                ProgrammeEngineTrainingItem(
+                    name: "Squat", prescription: heavy,
+                    note: "Repos de deux à trois minutes. Monter la charge dès que le haut de la fourchette passe partout."),
+                ProgrammeEngineTrainingItem(name: "Développé couché", prescription: heavy, note: nil),
+                ProgrammeEngineTrainingItem(
+                    name: "Rowing haltère", prescription: accessory,
+                    note: "L’escalade fait déjà travailler le dos : le rowing complète sans user les doigts."),
+                ProgrammeEngineTrainingItem(name: "Élévations latérales", prescription: accessory, note: nil),
+                ProgrammeEngineTrainingItem(name: "Rotateurs externes", prescription: "2 × 15 à l’élastique", note: nil),
+            ])
+    }
+
+    private static func massLiftB(cycle: Int, heavy: String, accessory: String) -> ProgrammeEngineTrainingSession {
+        ProgrammeEngineTrainingSession(
+            key: "masse-muscu-b-\(cycle > 0 ? "c\(cycle)" : "allegee")",
+            name: cycle > 0 ? "Muscu B — cycle \(cycle)" : "Muscu B — semaine allégée",
+            sport: "training", subSport: "strengthTraining", minMinutes: cycle > 0 ? 40 : 25,
+            items: [
+                ProgrammeEngineTrainingItem(name: "Échauffement", prescription: "10 min, montée en charge sur le soulevé", note: nil),
+                ProgrammeEngineTrainingItem(name: "Soulevé de terre roumain", prescription: heavy, note: nil),
+                ProgrammeEngineTrainingItem(name: "Développé militaire", prescription: heavy, note: nil),
+                ProgrammeEngineTrainingItem(name: "Fentes bulgares", prescription: "\(accessory), par jambe", note: nil),
+                ProgrammeEngineTrainingItem(name: "Dips ou pompes lestées", prescription: accessory, note: nil),
+                ProgrammeEngineTrainingItem(name: "Gainage anti-rotation", prescription: "3 × 30 s par côté", note: nil),
+            ])
+    }
+
+    private static let massLightHeavy = "2 × 8, mêmes charges que la semaine précédente"
+    private static let massLightAccessory = "2 × 10, mêmes charges"
+    private static let massClimbHard = climbIntensity(
+        key: "masse-escalade-intensite",
+        note: "Le poids monte : garder les essais durs pour que le niveau suive la balance.")
+    private static let massClimbVolume = climbVolume(key: "masse-escalade-volume")
+
+    private static func buildMassWeeks() -> [ProgrammeEngineWeek] {
+        let lightA = massLiftA(cycle: 0, heavy: massLightHeavy, accessory: massLightAccessory)
+        let lightB = massLiftB(cycle: 0, heavy: massLightHeavy, accessory: massLightAccessory)
+        var weeks: [ProgrammeEngineWeek] = []
+        for (c, cycle) in massCycles.enumerated() {
+            let liftA = massLiftA(cycle: c + 1, heavy: cycle.heavy, accessory: cycle.accessory)
+            let liftB = massLiftB(cycle: c + 1, heavy: cycle.heavy, accessory: cycle.accessory)
+            for (w, focus) in cycle.focus.enumerated() {
+                weeks.append(
+                    ProgrammeEngineWeek(
+                        index: c * 4 + w + 1, focus: focus,
+                        sessions: [liftA, massClimbHard, liftB, massClimbVolume]))
+            }
+            weeks.append(
+                ProgrammeEngineWeek(
+                    index: c * 4 + 4,
+                    focus: c == massCycles.count - 1
+                        ? "Semaine allégée et bilan du bloc"
+                        : "Semaine allégée : moitié des séries, mêmes charges",
+                    sessions: [lightA, massClimbHard, lightB, massClimbVolume]))
+        }
+        return weeks
+    }
+
+    private static let massBlock = ProgrammeEngineProgramme(
+        id: "masse-seche-muscu-escalade-schoenfeld", kind: .training, name: "Masse sèche — muscu et escalade",
+        goal: "Prendre du muscle sans prendre de gras",
+        source: "Schoenfeld et al., Sports Med 2016;46:1689 et J Sports Sci 2017;35:1073",
+        weeks: buildMassWeeks(),
+        notes: [
+            "Quatre séances par semaine : deux de muscu, deux d’escalade. Chaque muscle travaille deux fois par semaine, la fréquence qui fait le plus grossir à volume égal.",
+            "Le volume monte d’un cycle à l’autre jusqu’à une dizaine de séries par grand groupe musculaire et par semaine, là où la relation dose-réponse reste nette.",
+            "Une semaine allégée toutes les quatre : moitié des séries, mêmes charges. C’est elle qui permet de repartir plus lourd.",
+            "Sans gras, la prise de poids se règle à l’assiette : côté entraînement, ce qui compte, c’est que les charges montent. Noter chaque séance.",
+        ])
+
     // MARK: - Sommeil — régularité (SLEEP_REGULARITY)
 
     private static let onsetBands: [ProgrammeEngineSleepBand] = [
@@ -353,7 +561,7 @@ enum ProgrammeCatalogue {
             "Aucune durée minimale : une sortie de trois minutes suffit à cocher la séance au retour de synchro.",
         ])
 
-    static let programmes: [ProgrammeEngineProgramme] = [fatLoss, climbBlock, sleepRegularity, debugRun]
+    static let programmes: [ProgrammeEngineProgramme] = [fatLoss, climbBlock, maintainBlock, massBlock, sleepRegularity, debugRun]
 
     static func programme(byId id: String) -> ProgrammeEngineProgramme? {
         programmes.first { $0.id == id }
