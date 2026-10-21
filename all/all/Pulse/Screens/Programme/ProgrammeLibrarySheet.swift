@@ -15,17 +15,16 @@ import SwiftUI
 struct ProgrammeLibrarySheet: View {
     let domain: ProgrammeDomainView
     let isBusy: Bool
+    /// Jours proposés d'après les habitudes pour un nombre de séances donné.
+    let suggest: (Int) -> ProgrammeDaySuggestion
+    let loadHabits: () async -> Void
     let onActivate: (String, [Int]) -> Void
     let onStop: () -> Void
 
     @State private var picking: ProgrammeChoice?
     @State private var pickedDays: Set<Int> = []
 
-    /// Équivalent `DAY_ORDER` (Angular) : ordre de remplissage par défaut des
-    /// jours d'entraînement (lundi, mercredi, vendredi, puis les autres).
-    private static let dayOrder = [1, 3, 5, 2, 4, 6, 0]
     private static let workDays = [1, 2, 3, 4, 5]
-    private static let pickerOrder = [1, 2, 3, 4, 5, 6, 0]
 
     var body: some View {
         NavigationStack {
@@ -47,6 +46,7 @@ struct ProgrammeLibrarySheet: View {
                     }
                 }
             }
+            .task { if domain.kind == .training { await loadHabits() } }
             .navigationTitle(domain.label)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -61,28 +61,24 @@ struct ProgrammeLibrarySheet: View {
 
     @ViewBuilder
     private func pickingSection(_ choice: ProgrammeChoice) -> some View {
-        // Web `.u11 { font-family:mono; font-size:11px }` pour les trois
-        // textes ci-dessous (intro, consigne, note de sélection).
         Section {
-            Text(pickIntro(choice))
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(Color.pulseTextSecondary)
-            Text(domain.kind == .sleep
-                 ? "Coche les jours où tu dois te lever à heure imposée. Les autres servent de référence pour le décalage social et le rattrapage."
-                 : "Choisis les jours où tu peux t’entraîner.")
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(Color.pulseTextSecondary)
-            ProgrammeDayPicker(order: Self.pickerOrder, picked: $pickedDays)
-                .listRowInsets(EdgeInsets())
-                .padding(.vertical, PulseSpacing.xs)
-            Text(pickNote(choice))
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(pickShort(choice) ? Color.pulseDanger : Color.pulseTextSecondary)
-            Button("Commencer aujourd’hui") {
+            if domain.kind == .sleep {
+                Text("Réveil imposé")
+                    .font(.subheadline.weight(.semibold))
+                ProgrammeDayPicker(order: programmeDayPickerOrder, picked: $pickedDays)
+                    .listRowInsets(EdgeInsets())
+                    .padding(.vertical, PulseSpacing.xs)
+            } else {
+                ProgrammeDaysSelector(
+                    perWeek: choice.perWeek, suggestion: suggest(choice.perWeek), picked: $pickedDays)
+            }
+            Button("Commencer") {
                 onActivate(choice.id, pickedDays.sorted())
                 picking = nil
             }
             .disabled(isBusy || (domain.kind == .training && pickedDays.count < choice.perWeek))
+        } header: {
+            Text(choice.name)
         }
     }
 
@@ -95,7 +91,7 @@ struct ProgrammeLibrarySheet: View {
             pickedDays = Set(existing.isEmpty ? Self.workDays : existing)
             picking = choice
         case .training:
-            pickedDays = Set(Self.dayOrder.prefix(choice.perWeek))
+            pickedDays = Set(suggest(choice.perWeek).days)
             picking = choice
         }
     }
@@ -106,37 +102,6 @@ struct ProgrammeLibrarySheet: View {
         case .sleep: return "\(choice.rules) critères sur 14 nuits"
         case .training: return "\(choice.weeks) semaines"
         }
-    }
-
-    private func pickIntro(_ choice: ProgrammeChoice) -> String {
-        if domain.kind == .sleep {
-            return "\(choice.name) · \(choice.rules) critères relus à chaque synchro, sur les quatorze dernières nuits."
-        }
-        return "\(choice.name) · \(choice.perWeek) séance\(choice.perWeek > 1 ? "s" : "") par semaine sur \(choice.weeks) semaines."
-    }
-
-    private func pickShort(_ choice: ProgrammeChoice) -> Bool {
-        if domain.kind == .sleep { return pickedDays.isEmpty || pickedDays.count == 7 }
-        return pickedDays.count < choice.perWeek
-    }
-
-    private func pickNote(_ choice: ProgrammeChoice) -> String {
-        if domain.kind == .sleep {
-            let work = pickedDays.count
-            let free = 7 - work
-            if work == 0 || free == 0 {
-                return "Sans jours des deux sortes, le décalage social et le rattrapage resteront vides — les autres critères tiennent quand même."
-            }
-            return "\(work) jour\(work > 1 ? "s" : "") à réveil imposé, \(free) jour\(free > 1 ? "s" : "") libre\(free > 1 ? "s" : "")."
-        }
-        let missing = choice.perWeek - pickedDays.count
-        if missing > 0 {
-            return "Encore \(missing) jour\(missing > 1 ? "s" : "") à cocher."
-        }
-        let extra = pickedDays.count - choice.perWeek
-        return extra > 0
-            ? "\(pickedDays.count) jours cochés, \(choice.perWeek) utilisés — les premiers de la semaine."
-            : "\(choice.perWeek) séance\(choice.perWeek > 1 ? "s" : "") par semaine, une par jour coché."
     }
 }
 
@@ -171,34 +136,5 @@ private struct ProgrammeChoiceRow: View {
             }
         }
         .padding(.vertical, PulseSpacing.xs)
-    }
-}
-
-private struct ProgrammeDayPicker: View {
-    let order: [Int]
-    @Binding var picked: Set<Int>
-
-    // Web `.dpick { gap:6px }`, `.dbtn { height:46px; min-height:46px }`.
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(order, id: \.self) { day in
-                let isOn = picked.contains(day)
-                Button {
-                    if isOn { picked.remove(day) } else { picked.insert(day) }
-                } label: {
-                    Text(ProgrammeDate.weekdayLetters[day])
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(isOn ? Color.pulseTextPrimary : Color.pulseSurface)
-                        .foregroundStyle(isOn ? Color.pulseSurface : Color.pulseTextSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
-                                .strokeBorder(Color.pulseBorder, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 }

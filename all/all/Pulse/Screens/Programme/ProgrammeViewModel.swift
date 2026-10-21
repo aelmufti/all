@@ -55,6 +55,13 @@ final class ProgrammeViewModel {
 
     /// Domaine dont la bibliothèque est ouverte (`nil` = sheet fermé).
     var libraryKind: ProgrammeKind?
+    /// Feuille « choix d'objectif » ouverte.
+    var showObjectives = false
+
+    /// Activités récentes pour proposer des jours d'après les habitudes ;
+    /// vide tant qu'elles ne sont pas chargées (ou si le chargement échoue).
+    private(set) var habitActivities: [Activity] = []
+    private var habitsLoaded = false
 
     var pushStatus: ProgrammePushStatus?
     /// Nombre de fichiers de la dernière `POST push` de cette session — le
@@ -127,10 +134,33 @@ final class ProgrammeViewModel {
         libraryKind = nil
     }
 
+    func openObjectives() {
+        showObjectives = true
+    }
+
+    /// Jours proposés pour `perWeek` séances (repli silencieux sur l'ordre par défaut).
+    func daySuggestion(perWeek: Int) -> ProgrammeDaySuggestion {
+        programmeSuggestDays(activities: habitActivities, perWeek: perWeek)
+    }
+
+    /// Même route que l'écran Activités ; un échec laisse l'ordre par défaut.
+    func loadHabitsIfNeeded() async {
+        guard !habitsLoaded else { return }
+        do {
+            let response: ActivityListResponse = try await client.get(
+                "api/activities", query: ["limit": "500"])
+            habitActivities = response.items
+            habitsLoaded = true
+        } catch {
+            // Habitudes facultatives : on retombe sur l'ordre par défaut.
+        }
+    }
+
     // MARK: - Actions (entraînement/alimentation/sommeil)
 
     /// `POST api/programme/activate` — équivalent `activate(programmeId, days)`.
-    func activate(programmeId: String, days: [Int]) async {
+    @discardableResult
+    func activate(programmeId: String, days: [Int]) async -> Bool {
         await mutate {
             let body = ProgrammeActivateRequest(programmeId: programmeId, days: days)
             return try await self.client.post("api/programme/activate", body: body)
@@ -167,16 +197,26 @@ final class ProgrammeViewModel {
         }
     }
 
-    private func mutate(_ operation: () async throws -> ProgrammeCurrent) async {
-        guard !isBusy else { return }
+    /// Active la paire d'un objectif : entraînement (avec les jours) puis
+    /// alimentation. Chacun remplace l'actif de son domaine. `true` si les deux passent.
+    func activateObjective(_ choices: ProgrammeObjectiveChoices, days: [Int]) async -> Bool {
+        guard await activate(programmeId: choices.training.id, days: days) else { return false }
+        return await activate(programmeId: choices.nutrition.id, days: [])
+    }
+
+    @discardableResult
+    private func mutate(_ operation: () async throws -> ProgrammeCurrent) async -> Bool {
+        guard !isBusy else { return false }
         isBusy = true
         actionError = nil
         defer { isBusy = false }
         do {
             let result = try await operation()
             apply(result)
+            return true
         } catch {
             actionError = Self.message(for: error)
+            return false
         }
     }
 

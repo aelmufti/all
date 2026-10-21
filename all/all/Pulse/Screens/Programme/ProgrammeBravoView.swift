@@ -48,7 +48,7 @@ struct ProgrammeBravoView: View {
                     Button("Relancer le bloc", action: onRestart)
                         .buttonStyle(.pulsePrimary)
                         .disabled(isBusy)
-                    Button("Choisir un autre programme", action: onChooseOther)
+                    Button("Choisir un autre objectif", action: onChooseOther)
                         .buttonStyle(.pulseSecondary)
                     Button("Fermer", action: onClose)
                         .buttonStyle(.pulseSecondary)
@@ -142,7 +142,7 @@ private struct ProgrammeBravoCover: ViewModifier {
                         Task {
                             // Laisser la couverture se refermer avant la feuille.
                             try? await Task.sleep(nanoseconds: 500_000_000)
-                            viewModel.openLibrary(for: .training)
+                            viewModel.openObjectives()
                         }
                     },
                     onClose: { isPresented = false }

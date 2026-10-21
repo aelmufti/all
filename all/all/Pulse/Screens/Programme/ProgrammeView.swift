@@ -17,7 +17,7 @@
 import SwiftUI
 
 struct ProgrammeView: View {
-    @State private var viewModel = ProgrammeViewModel()
+    @State fileprivate var viewModel = ProgrammeViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var showBravo = false
 
@@ -31,9 +31,6 @@ struct ProgrammeView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     SheetCloseButton { dismiss() }
-                    if case .loaded = viewModel.state {
-                        ToolbarItem(placement: .topBarLeading) { libraryMenu }
-                    }
                 }
         }
         .task {
@@ -41,27 +38,36 @@ struct ProgrammeView: View {
             presentBravoIfNeeded()
         }
         .programmeBravoCover(isPresented: $showBravo, viewModel: viewModel)
-        .sheet(isPresented: Binding(
-            get: { viewModel.libraryKind != nil },
-            set: { presented in if !presented { viewModel.closeLibrary() } }
-        )) {
-            if let domain = viewModel.libraryDomain {
-                ProgrammeLibrarySheet(
-                    domain: domain,
-                    isBusy: viewModel.isBusy,
-                    onActivate: { id, days in
-                        Task {
-                            await viewModel.activate(programmeId: id, days: days)
-                            viewModel.closeLibrary()
+        .sheet(item: Binding(
+            get: { viewModel.showObjectives ? .objectives : viewModel.libraryKind.map(ProgrammeSheet.library) },
+            set: { sheet in
+                if sheet == nil { viewModel.showObjectives = false; viewModel.closeLibrary() }
+            }
+        )) { sheet in
+            switch sheet {
+            case .objectives:
+                ProgrammeObjectiveSheet(viewModel: viewModel) { viewModel.showObjectives = false }
+            case .library:
+                if let domain = viewModel.libraryDomain {
+                    ProgrammeLibrarySheet(
+                        domain: domain,
+                        isBusy: viewModel.isBusy,
+                        suggest: { viewModel.daySuggestion(perWeek: $0) },
+                        loadHabits: { await viewModel.loadHabitsIfNeeded() },
+                        onActivate: { id, days in
+                            Task {
+                                await viewModel.activate(programmeId: id, days: days)
+                                viewModel.closeLibrary()
+                            }
+                        },
+                        onStop: {
+                            Task {
+                                await viewModel.stop(domain.kind)
+                                viewModel.closeLibrary()
+                            }
                         }
-                    },
-                    onStop: {
-                        Task {
-                            await viewModel.stop(domain.kind)
-                            viewModel.closeLibrary()
-                        }
-                    }
-                )
+                    )
+                }
             }
         }
     }
@@ -75,18 +81,6 @@ struct ProgrammeView: View {
         else { return }
         programmeBravoMarkSeen(programmeId: active.programmeId, startedOn: active.startedOn)
         showBravo = true
-    }
-
-    /// Accès à la bibliothèque, un domaine à la fois.
-    private var libraryMenu: some View {
-        Menu {
-            ForEach(viewModel.domains) { domain in
-                Button(domain.label) { viewModel.openLibrary(for: domain.kind) }
-            }
-        } label: {
-            Image(systemName: "plus")
-        }
-        .tint(Color.pulseAccent)
     }
 
     @ViewBuilder
@@ -110,13 +104,67 @@ struct ProgrammeView: View {
                     DashboardInlineError(message: message) { Task { await viewModel.reload() } }
                 }
 
+                objectiveEntry
+
                 ForEach(viewModel.domains) { domain in
-                    ProgrammeSummaryCard(domain: domain, viewModel: viewModel)
+                    // Sans objectif ni programme, la carte vide ferait doublon
+                    // avec « Choisir un objectif » (sauf le sommeil).
+                    if domain.kind == .sleep || domain.active != nil || hasAnyTrainingOrNutrition {
+                        ProgrammeSummaryCard(domain: domain, viewModel: viewModel)
+                    }
                 }
             }
             .padding(PulseSpacing.lg)
         }
         .pulseTabBarClearance()
+    }
+}
+
+// MARK: - Entrée « objectif »
+
+private enum ProgrammeSheet: Identifiable, Equatable {
+    case objectives
+    case library(ProgrammeKind)
+
+    var id: String {
+        switch self {
+        case .objectives: "objectives"
+        case .library(let kind): "library-\(kind.rawValue)"
+        }
+    }
+}
+
+extension ProgrammeView {
+    fileprivate var hasAnyTrainingOrNutrition: Bool {
+        viewModel.domains.contains { $0.kind != .sleep && $0.active != nil }
+    }
+
+    /// Gros bouton quand rien n'est actif ; sinon « Objectif : … » + « Changer ».
+    @ViewBuilder
+    fileprivate var objectiveEntry: some View {
+        if !hasAnyTrainingOrNutrition {
+            Button("Choisir un objectif") { viewModel.openObjectives() }
+                .buttonStyle(PulseButtonStyle(kind: .primary))
+                .tint(Color.pulseAccent)
+        } else {
+            PulseCard {
+                HStack {
+                    Text("Objectif : \(objectiveName)")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button("Changer") { viewModel.openObjectives() }
+                        .buttonStyle(PulseButtonStyle(kind: .secondary, fullWidth: false))
+                }
+            }
+        }
+    }
+
+    private var objectiveName: String {
+        if let objective = programmeActiveObjective(domains: viewModel.domains) { return objective.name }
+        return viewModel.domains
+            .filter { $0.kind != .sleep }
+            .compactMap { $0.active?.name }
+            .joined(separator: " · ")
     }
 }
 

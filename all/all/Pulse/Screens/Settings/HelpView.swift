@@ -131,6 +131,9 @@ private enum HelpContent {
         ]),
         HelpSection(title: "Programme", topics: [
             HelpTopic(
+                title: "Choisir un objectif",
+                body: "Sèche, maintien ou masse sèche : un geste active l'entraînement et l'alimentation ensemble. Les jours d'entraînement proposés suivent tes habitudes des huit dernières semaines (marches exclues) ; « Personnaliser » permet de les choisir."),
+            HelpTopic(
                 title: "Entraînement",
                 body: "Un programme d'entraînement pilote les séances et le calendrier. Les séances se cochent avec les activités importées de la montre. L'écran Programme affiche un résumé par domaine ; touche-le pour le détail, et ⓘ pour l'objectif, les notes et l'arrêt du programme. En fin de bloc, un bilan des séances s'affiche une fois ; il reste accessible par « Bilan » dans le détail."),
             HelpTopic(
