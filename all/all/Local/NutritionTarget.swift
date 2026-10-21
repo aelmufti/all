@@ -143,6 +143,9 @@ struct NutritionEngineTargetResult {
     let deficitKcal: Double?
     let plannedDeficitKcal: Double?
     let deficitFromRate: Bool
+    /// `"settings"` | `"programme"` — origine du bilan (programme alimentation
+    /// actif qui fixe le bilan ; en surplus `deficitKcal`/`weeklyLossKg` < 0).
+    let balanceSource: String
     let weeklyLossKg: Double?
     let fatFreeMassKg: Double?
     let availabilityFloorKcal: Double?
@@ -249,6 +252,15 @@ enum NutritionTargetEngine {
         return (round(weeklyKcal / 7), true)
     }
 
+    /// Miroir de `programmeBalanceFor` (TS) : bilan quotidien signé (kcal,
+    /// positif = déficit) d'un programme qui fixe `weeklyWeightPct`.
+    static func programmeBalanceFor(weeklyWeightPct: Double?, weightKg: Double?) -> Double? {
+        guard let pct = weeklyWeightPct, pct.isFinite, let weightKg, weightKg > 0 else { return nil }
+        let perDay = round(weightKg * (abs(pct) / 100) * KCAL_PER_KG_BW / 7)
+        if perDay == 0 { return 0 }
+        return pct > 0 ? -perDay : perDay
+    }
+
     static func missingProfileFields(_ profile: NutritionEngineProfile) -> [String] {
         var missing: [String] = []
         if profile.birthYear == nil { missing.append("birthYear") }
@@ -353,7 +365,7 @@ enum NutritionTargetEngine {
         let sessionKcal = sessions.reduce(0.0) { $0 + ($1.calories ?? 0) }
         return NutritionEngineTargetResult(
             status: "unavailable", source: "formula", missing: missing,
-            targetKcal: nil, expenditureKcal: nil, deficitKcal: nil, plannedDeficitKcal: nil, deficitFromRate: false,
+            targetKcal: nil, expenditureKcal: nil, deficitKcal: nil, plannedDeficitKcal: nil, deficitFromRate: false, balanceSource: "settings",
             weeklyLossKg: nil, fatFreeMassKg: nil, availabilityFloorKcal: nil, energyAvailability: nil, proteinG: nil,
             macros: emptyMacros, guardStatus: "none",
             detail: .init(restingKcal: nil, watchActiveKcal: nil, sessionKcal: round(sessionKcal), activeKcal: nil, sessions: []))
@@ -364,7 +376,8 @@ enum NutritionTargetEngine {
     /// d'encodage, jamais calculé ici.
     static func computeDayTarget(
         date: String, profile: NutritionEngineProfile, watch: NutritionEngineWatchDay,
-        sessions: [NutritionEngineSession], settings: NutritionEngineSettings
+        sessions: [NutritionEngineSession], settings: NutritionEngineSettings,
+        constraints: ProgrammeEngineMacroConstraints? = nil
     ) -> NutritionEngineTargetResult {
         let ageYears: Double? = profile.birthYear.map { Double(ageOn(date: date, birthYear: $0)) }
         let formulaBmr: Double? = ageYears.flatMap { basalMetabolicRate(profile: profile, ageYears: $0) }
@@ -407,7 +420,11 @@ enum NutritionTargetEngine {
         let adjustedActive = active * settings.sportFactor
         let expenditure = resting + adjustedActive
 
-        let deficit = dailyDeficitFor(settings: settings, weightKg: profile.weightKg)
+        let programmeBalance = programmeBalanceFor(
+            weeklyWeightPct: constraints?.weeklyWeightPct, weightKg: profile.weightKg)
+        let balanceSource = programmeBalance != nil ? "programme" : "settings"
+        let deficit: (kcal: Double, fromRate: Bool) = programmeBalance.map { ($0, true) }
+            ?? dailyDeficitFor(settings: settings, weightKg: profile.weightKg)
         let ffmKg = fatFreeMassKg(profile: profile, ageYears: ageYears)
         let availabilityFloor: Double? = ffmKg.map {
             $0 * (profile.sex == "female" ? AVAILABILITY_FEMALE : AVAILABILITY_MALE) + adjustedActive
@@ -431,7 +448,7 @@ enum NutritionTargetEngine {
             target = settings.floorKcal
             guardStatus = "absolute"
         }
-        if target > expenditure {
+        if deficit.kcal >= 0 && target > expenditure {
             target = expenditure
         }
 
@@ -445,7 +462,7 @@ enum NutritionTargetEngine {
         return NutritionEngineTargetResult(
             status: "ok", source: source, missing: profile.weightKg == nil ? ["weightKg"] : [],
             targetKcal: targetKcal, expenditureKcal: expenditureKcal, deficitKcal: deficitKcal,
-            plannedDeficitKcal: round(deficit.kcal), deficitFromRate: deficit.fromRate,
+            plannedDeficitKcal: round(deficit.kcal), deficitFromRate: deficit.fromRate, balanceSource: balanceSource,
             weeklyLossKg: round2(deficitKcal * 7 / KCAL_PER_KG_BW),
             fatFreeMassKg: ffmKg,
             availabilityFloorKcal: availabilityFloor.map(round),

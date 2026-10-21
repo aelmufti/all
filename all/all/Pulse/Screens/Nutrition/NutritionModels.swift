@@ -112,6 +112,8 @@ struct NutritionAutoTarget: Codable {
     let targetKcal: Double?
     let expenditureKcal: Double?
     let deficitKcal: Double?
+    /// `"settings"` | `"programme"` — absent des anciens serveurs.
+    let balanceSource: String?
     let macros: NutritionMacroPlan
     /// `"none"` | `"availability"` | `"resting"` | `"absolute"` — plancher
     /// qui a relevé l'objectif, si applicable. Nommé `guardStatus` côté
@@ -120,7 +122,7 @@ struct NutritionAutoTarget: Codable {
     let detail: NutritionAutoDetail
 
     enum CodingKeys: String, CodingKey {
-        case status, source, missing, targetKcal, expenditureKcal, deficitKcal, macros, detail
+        case status, source, missing, targetKcal, expenditureKcal, deficitKcal, balanceSource, macros, detail
         case guardStatus = "guard"
     }
 }
@@ -135,6 +137,8 @@ struct NutritionTargetInfo: Codable {
     /// `mode` si le calcul auto est indisponible).
     let source: String
     let auto: NutritionAutoTarget
+    /// Programme alimentation actif (nom), si le serveur le renvoie.
+    let programme: NutritionProgrammeRef?
 }
 
 // MARK: - `GET api/nutrition/weekly`

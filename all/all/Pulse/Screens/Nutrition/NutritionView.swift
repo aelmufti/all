@@ -580,7 +580,12 @@ private struct NutritionObjectiveCard: View {
 
     private var deficitPillText: String {
         if target.auto.guardStatus == "none", let deficit = target.auto.deficitKcal {
-            return "−\(Int(deficit.rounded())) kcal"
+            let kcal = Int(abs(deficit).rounded())
+            let text = kcal == 0 ? "Maintien" : deficit > 0 ? "−\(kcal) kcal" : "Surplus +\(kcal) kcal"
+            if target.auto.balanceSource == "programme", let name = target.programme?.name {
+                return "\(text) · \(name)"
+            }
+            return text
         }
         return "plancher atteint"
     }

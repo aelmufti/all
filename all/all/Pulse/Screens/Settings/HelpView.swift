@@ -135,7 +135,7 @@ private enum HelpContent {
                 body: "Un programme d'entraînement pilote les séances et le calendrier. Les séances se cochent avec les activités importées de la montre. L'écran Programme affiche un résumé par domaine ; touche-le pour le détail, et ⓘ pour l'objectif, les notes et l'arrêt du programme."),
             HelpTopic(
                 title: "Alimentation",
-                body: "Un programme d'alimentation pilote les cibles de la page Nutrition : les cibles du jour sont recadrées par ses règles. La frise montre les sept derniers jours — la part des cibles tenues, en pointillés quand rien n'est saisi."),
+                body: "Un programme d'alimentation pilote les cibles de la page Nutrition : les cibles du jour sont recadrées par ses règles. Certains programmes fixent aussi le bilan énergétique (maintien, léger surplus, perte), qui remplace alors le déficit des réglages tant qu'ils sont actifs. La frise montre les sept derniers jours — la part des cibles tenues, en pointillés quand rien n'est saisi."),
             HelpTopic(
                 title: "Sommeil",
                 body: "Un programme de sommeil lit les nuits de la montre : celles déjà importées sont comparées à ses critères, il n'y a rien à saisir."),

@@ -839,7 +839,23 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         return NutritionTargetEngine.computeDayTarget(
             date: date, profile: profile,
             watch: NutritionEngineWatchDay(restingKcal: watchRow.restingKcal, activeKcal: watchRow.activeKcal),
-            sessions: sessions, settings: settings)
+            sessions: sessions, settings: settings, constraints: try activeConstraints())
+    }
+
+    /// Miroir de `activeConstraints` (TS) — programme alimentation actif.
+    /// Localement seul `weeklyWeightPct` (bilan) en est consommé ; les bornes
+    /// de macros ne recadrent pas encore les cibles locales.
+    private func activeConstraints() throws -> ProgrammeEngineMacroConstraints? {
+        guard let row = try db.programmeActiveState(kind: "nutrition"),
+              let programme = ProgrammeCatalogue.programme(byId: row.programmeId)
+        else { return nil }
+        return ProgrammeConstraintsEngine.macroConstraints(programme)
+    }
+
+    /// Nom du programme alimentation qui fixe le bilan, sinon `nil`.
+    private func balanceProgrammeName() throws -> String? {
+        guard let constraints = try activeConstraints(), constraints.weeklyWeightPct != nil else { return nil }
+        return constraints.name
     }
 
     /// Miroir de `profileOn` (TS) — profil de base (`readProfile()`, mêmes
@@ -999,7 +1015,8 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         let (targets, source) = try effectiveTargets(date: date, auto: auto)
         let dto = LocalNutritionTargetsResponseDTO(
             mode: try readMode(), targets: targets, source: source,
-            auto: LocalNutritionAutoTargetComputedDTO(auto))
+            auto: LocalNutritionAutoTargetComputedDTO(auto),
+            programme: try balanceProgrammeName().map { LocalNutritionProgrammeRefDTO(name: $0) })
         return try JSONEncoder().encode(dto)
     }
 
@@ -2522,16 +2539,18 @@ private struct LocalNutritionAutoTargetComputedDTO: Encodable {
     let targetKcal: Double?
     let expenditureKcal: Double?
     let deficitKcal: Double?
+    let balanceSource: String
     let macros: LocalNutritionMacroPlanDTO
     let guardStatus: String
     let detail: LocalNutritionAutoDetailComputedDTO
 
     enum CodingKeys: String, CodingKey {
-        case status, source, missing, targetKcal, expenditureKcal, deficitKcal, macros, detail
+        case status, source, missing, targetKcal, expenditureKcal, deficitKcal, balanceSource, macros, detail
         case guardStatus = "guard"
     }
 
     init(_ r: NutritionEngineTargetResult) {
+        balanceSource = r.balanceSource
         status = r.status
         source = r.source
         missing = r.missing
@@ -2551,6 +2570,7 @@ private struct LocalNutritionTargetsResponseDTO: Encodable {
     let targets: LocalNutritionMacrosDTO
     let source: String
     let auto: LocalNutritionAutoTargetComputedDTO
+    let programme: LocalNutritionProgrammeRefDTO?
 }
 
 private struct LocalNutritionWeeklyResponseDTO: Encodable {

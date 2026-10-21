@@ -104,7 +104,8 @@ struct ProgrammeCatalogueEngineTests {
 
     @Test func cataloguePreservesProgrammeOrder() {
         #expect(ProgrammeCatalogue.programmes.map(\.id) == [
-            "seche-nutrients-2021", "seche-escalade-nutrients-2021", "maintien-escalade-muscu-jscr-2021",
+            "seche-nutrients-2021", "maintien-nutrition-acsm-2016", "masse-seche-nutrition-iraki-2019",
+            "seche-escalade-nutrients-2021", "maintien-escalade-muscu-jscr-2021",
             "masse-seche-muscu-escalade-schoenfeld", "sommeil-regularite-nsf-2023", "debug-course-pipeline",
         ])
     }
@@ -245,7 +246,7 @@ struct ProgrammeReadLocalTests {
         #expect(climb.perWeek == 3)
 
         let nutrition = domain(current, .nutrition)
-        #expect(nutrition.choices.count == 1)
+        #expect(nutrition.choices.count == 3)
         #expect(nutrition.choices[0].id == "seche-nutrients-2021")
         #expect(nutrition.choices[0].rules == 4)
 

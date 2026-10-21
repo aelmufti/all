@@ -140,12 +140,16 @@ struct ProgrammeEngineProgramme {
     let rules: [ProgrammeEngineNutritionRule]
     let sleepRules: [ProgrammeEngineSleepRule]
     let notes: [String]
+    /// Alimentation : variation de poids visée, en % du poids par semaine,
+    /// signée (+ prise, 0 maintien, − perte). Fixe le bilan énergétique.
+    let weeklyWeightPct: Double?
 
     init(
         id: String, kind: ProgrammeEngineKind, name: String, goal: String, source: String,
         weeks: [ProgrammeEngineWeek] = [], rules: [ProgrammeEngineNutritionRule] = [],
-        sleepRules: [ProgrammeEngineSleepRule] = [], notes: [String] = []
+        sleepRules: [ProgrammeEngineSleepRule] = [], notes: [String] = [], weeklyWeightPct: Double? = nil
     ) {
+        self.weeklyWeightPct = weeklyWeightPct
         self.id = id
         self.kind = kind
         self.name = name
@@ -237,6 +241,50 @@ enum ProgrammeCatalogue {
             "Répartir les protéines sur trois à six prises, dont une dans les deux à trois heures avant la séance et une après.",
             "Les glucides passent avant les lipides une fois les protéines servies : c’est l’ordre de priorité de la revue.",
         ])
+
+    private static let maintainNutrition = ProgrammeEngineProgramme(
+        id: "maintien-nutrition-acsm-2016", kind: .nutrition, name: "Maintien — poids stable",
+        goal: "Garder le poids et nourrir l’entraînement",
+        source: "Thomas et al., J Acad Nutr Diet 2016;116:501 — position ACSM/AND/DC",
+        rules: [
+            ProgrammeEngineNutritionRule(
+                key: "protein", label: "Protéines", detail: "1,6 à 2,0 g par kg de poids", metric: "protein",
+                min: 1.6, max: 2, perKg: true),
+            ProgrammeEngineNutritionRule(
+                key: "carbs", label: "Glucides", detail: "3 à 5 g par kg de poids", metric: "carbs",
+                min: 3, max: 5, perKg: true),
+            ProgrammeEngineNutritionRule(
+                key: "fiber", label: "Fibres", detail: "au moins 25 g par jour", metric: "fiber", min: 25),
+        ],
+        notes: [
+            "La cible du jour est la dépense du jour : ni déficit ni surplus, le poids reste stable.",
+            "Répartir les protéines sur trois à cinq prises.",
+            "Caler les glucides sur les jours d’entraînement.",
+        ],
+        weeklyWeightPct: 0)
+
+    private static let leanMass = ProgrammeEngineProgramme(
+        id: "masse-seche-nutrition-iraki-2019", kind: .nutrition, name: "Masse sèche — léger surplus",
+        goal: "Prendre du muscle sans prendre de gras", source: "Iraki et al., Sports 2019;7:154",
+        rules: [
+            ProgrammeEngineNutritionRule(
+                key: "protein", label: "Protéines", detail: "1,6 à 2,2 g par kg de poids", metric: "protein",
+                min: 1.6, max: 2.2, perKg: true),
+            ProgrammeEngineNutritionRule(
+                key: "carbs", label: "Glucides", detail: "3 à 5 g par kg de poids", metric: "carbs",
+                min: 3, max: 5, perKg: true),
+            ProgrammeEngineNutritionRule(
+                key: "fat", label: "Lipides", detail: "0,5 à 1,5 g par kg de poids", metric: "fat",
+                min: 0.5, max: 1.5, perKg: true),
+            ProgrammeEngineNutritionRule(
+                key: "fiber", label: "Fibres", detail: "au moins 25 g par jour", metric: "fiber", min: 25),
+        ],
+        notes: [
+            "Viser 0,25 % du poids par semaine, le bas de la fourchette de la revue (0,25 à 0,5 %) : au-delà, le surplus part surtout en gras chez un pratiquant entraîné.",
+            "Si la balance ne bouge pas en trois semaines, ajouter une centaine de kcal.",
+            "Répartir les protéines sur trois à six prises.",
+        ],
+        weeklyWeightPct: 0.25)
 
     private static let climbBlock = ProgrammeEngineProgramme(
         id: "seche-escalade-nutrients-2021", kind: .training, name: "Sèche — escalade, trois séances",
@@ -561,7 +609,7 @@ enum ProgrammeCatalogue {
             "Aucune durée minimale : une sortie de trois minutes suffit à cocher la séance au retour de synchro.",
         ])
 
-    static let programmes: [ProgrammeEngineProgramme] = [fatLoss, climbBlock, maintainBlock, massBlock, sleepRegularity, debugRun]
+    static let programmes: [ProgrammeEngineProgramme] = [fatLoss, maintainNutrition, leanMass, climbBlock, maintainBlock, massBlock, sleepRegularity, debugRun]
 
     static func programme(byId id: String) -> ProgrammeEngineProgramme? {
         programmes.first { $0.id == id }

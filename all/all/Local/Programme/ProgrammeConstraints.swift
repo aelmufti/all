@@ -32,6 +32,8 @@ struct ProgrammeEngineMacroConstraints {
     let carbsPerKg: ProgrammeEngineMacroBound
     let fatPerKg: ProgrammeEngineMacroBound
     let fiberG: ProgrammeEngineMacroBound
+    /// Variation de poids visée (% du poids / semaine, signée). `nil` : bilan des réglages.
+    var weeklyWeightPct: Double? = nil
 }
 
 enum ProgrammeConstraintsEngine {
@@ -51,8 +53,10 @@ enum ProgrammeConstraintsEngine {
             proteinPerKg: bound(programme, metric: "protein", perKg: true),
             carbsPerKg: bound(programme, metric: "carbs", perKg: true),
             fatPerKg: bound(programme, metric: "fat", perKg: true),
-            fiberG: bound(programme, metric: "fiber", perKg: false))
+            fiberG: bound(programme, metric: "fiber", perKg: false),
+            weeklyWeightPct: programme.weeklyWeightPct)
         let bounds = [constraints.proteinPerKg, constraints.carbsPerKg, constraints.fatPerKg, constraints.fiberG]
-        return bounds.contains(where: { $0.min != nil || $0.max != nil }) ? constraints : nil
+        return bounds.contains(where: { $0.min != nil || $0.max != nil }) || constraints.weeklyWeightPct != nil
+            ? constraints : nil
     }
 }
