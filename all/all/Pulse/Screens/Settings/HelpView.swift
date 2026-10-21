@@ -132,7 +132,7 @@ private enum HelpContent {
         HelpSection(title: "Programme", topics: [
             HelpTopic(
                 title: "Entraînement",
-                body: "Un programme d'entraînement pilote les séances et le calendrier. Les séances se cochent avec les activités importées de la montre. L'écran Programme affiche un résumé par domaine ; touche-le pour le détail, et ⓘ pour l'objectif, les notes et l'arrêt du programme."),
+                body: "Un programme d'entraînement pilote les séances et le calendrier. Les séances se cochent avec les activités importées de la montre. L'écran Programme affiche un résumé par domaine ; touche-le pour le détail, et ⓘ pour l'objectif, les notes et l'arrêt du programme. En fin de bloc, un bilan des séances s'affiche une fois ; il reste accessible par « Bilan » dans le détail."),
             HelpTopic(
                 title: "Alimentation",
                 body: "Un programme d'alimentation pilote les cibles de la page Nutrition : les cibles du jour sont recadrées par ses règles. La frise montre les sept derniers jours — la part des cibles tenues, en pointillés quand rien n'est saisi."),

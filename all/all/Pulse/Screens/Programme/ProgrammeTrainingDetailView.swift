@@ -15,6 +15,7 @@ struct ProgrammeTrainingDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var expandedKey: String?
+    @State private var showBravo = false
 
     private var domain: ProgrammeDomainView? { viewModel.trainingDomain }
 
@@ -35,6 +36,8 @@ struct ProgrammeTrainingDetailView: View {
                         }
                         .buttonStyle(.pulseSecondary)
                         .disabled(viewModel.isBusy)
+                        Button("Bilan") { showBravo = true }
+                            .buttonStyle(.pulseSecondary)
                     }
                 }
                 .padding(PulseSpacing.lg)
@@ -44,6 +47,7 @@ struct ProgrammeTrainingDetailView: View {
         .navigationTitle(domain?.active?.name ?? "Entraînement")
         .navigationBarTitleDisplayMode(.inline)
         .programmeAbout(kind: .training, viewModel: viewModel)
+        .programmeBravoCover(isPresented: $showBravo, viewModel: viewModel)
         .onAppear { viewModel.resetShownWeek() }
         .onChange(of: domain?.active == nil) { _, stopped in if stopped { dismiss() } }
     }
