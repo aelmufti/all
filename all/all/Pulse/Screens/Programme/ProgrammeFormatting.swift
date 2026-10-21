@@ -100,20 +100,6 @@ func programmeFinished(_ domain: ProgrammeDomainView) -> Bool {
     return active.week > active.weeks
 }
 
-/// "N actifs" / "aucun programme actif" — équivalent `activeNote()`.
-func programmeActiveNote(_ domains: [ProgrammeDomainView]) -> String {
-    let count = domains.filter { $0.active != nil }.count
-    if count == 0 { return "aucun programme actif" }
-    return "\(count) actif\(count > 1 ? "s" : "")"
-}
-
-/// "N programmes · en cours : X" — équivalent `libNote()`.
-func programmeLibraryNote(_ domain: ProgrammeDomainView) -> String {
-    let count = "\(domain.choices.count) programme\(domain.choices.count > 1 ? "s" : "")"
-    guard let active = domain.active else { return "\(count) · aucun en cours" }
-    return "\(count) · en cours : \(active.name)"
-}
-
 // MARK: - Entraînement — semaine affichée
 
 /// Une case du calendrier de la semaine affichée — équivalent de l'objet
@@ -259,6 +245,14 @@ func programmeNextLabel(detail: ProgrammeTrainingDetail, shownWeek: Int) -> Stri
     return "\(pending.session.name) · \(gap)"
 }
 
+/// « Prochaine : Séance A, 14 oct. » (carte résumé) — première séance non
+/// faite de la semaine ; `nil` si la semaine est complète.
+func programmeNextSummary(detail: ProgrammeTrainingDetail, week: Int) -> String? {
+    guard let pending = detail.sessions.first(where: { $0.week == week && !$0.done }) else { return nil }
+    guard let plannedOn = pending.plannedOn else { return "Prochaine : \(pending.session.name)" }
+    return "Prochaine : \(pending.session.name), \(ProgrammeDate.shortLabel(plannedOn))"
+}
+
 /// Sous-titre d'une ligne de séance — équivalent `sessionMeta()`.
 func programmeSessionMeta(_ session: ProgrammeSessionProgress) -> String {
     if session.done {
@@ -402,20 +396,4 @@ func programmeWorkDaysLabel(_ domain: ProgrammeDomainView) -> String {
 func programmePushSummary(filesSent: Int?) -> String {
     guard let filesSent else { return "jamais envoyées" }
     return "\(filesSent) séance\(filesSent > 1 ? "s" : "") distincte\(filesSent > 1 ? "s" : "")"
-}
-
-/// Équivalent `pushHint()`.
-func programmePushHint(status: ProgrammePushStatus?) -> String {
-    switch status?.state {
-    case "running":
-        return "L’hôte pousse les fichiers ; valide l’installation sur le téléphone."
-    case "ok":
-        let dateKey = status?.at.map { String($0.prefix(10)) }
-        let suffix = dateKey.map { " le " + ProgrammeDate.shortLabel($0) } ?? ""
-        return "Passées à Gadgetbridge\(suffix). Les séances arrivent sans date : c’est ce calendrier qui fait foi."
-    case "error":
-        return "L’hôte n’a pas pu joindre le téléphone. Vérifie le câble adb."
-    default:
-        return "Par Bluetooth via Gadgetbridge. Une seule fois par programme : les semaines répètent les mêmes séances."
-    }
 }

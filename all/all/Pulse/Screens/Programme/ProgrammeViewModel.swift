@@ -45,7 +45,7 @@ final class ProgrammeViewModel {
     private(set) var actionError: String?
     var current: ProgrammeCurrent?
 
-    /// Semaine affichée dans la carte entraînement — équivalent `shownWeek`.
+    /// Semaine affichée dans le détail entraînement — équivalent `shownWeek`.
     var shownWeek: Int = 1
 
     /// `true` pendant une mutation (activer/arrêter/cocher/envoyer) —
@@ -102,6 +102,12 @@ final class ProgrammeViewModel {
             }
         }
         await refreshPushStatus()
+    }
+
+    /// Remet la semaine affichée sur la semaine active (entrée dans le détail).
+    func resetShownWeek() {
+        guard let active = trainingDomain?.active, active.weeks > 0 else { return }
+        shownWeek = min(max(active.week, 1), active.weeks)
     }
 
     private func apply(_ result: ProgrammeCurrent) {
