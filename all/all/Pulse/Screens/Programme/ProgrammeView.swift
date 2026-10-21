@@ -19,6 +19,7 @@ import SwiftUI
 struct ProgrammeView: View {
     @State private var viewModel = ProgrammeViewModel()
     @Environment(\.dismiss) private var dismiss
+    @State private var showBravo = false
 
     var body: some View {
         NavigationStack {
@@ -37,7 +38,9 @@ struct ProgrammeView: View {
         }
         .task {
             await viewModel.reload()
+            presentBravoIfNeeded()
         }
+        .programmeBravoCover(isPresented: $showBravo, viewModel: viewModel)
         .sheet(isPresented: Binding(
             get: { viewModel.libraryKind != nil },
             set: { presented in if !presented { viewModel.closeLibrary() } }
@@ -61,6 +64,17 @@ struct ProgrammeView: View {
                 )
             }
         }
+    }
+
+    /// Bilan de fin de bloc : une seule fois par exécution du programme.
+    private func presentBravoIfNeeded() {
+        guard let training = viewModel.trainingDomain,
+              programmeFinished(training),
+              let active = training.active,
+              !programmeBravoSeen(programmeId: active.programmeId, startedOn: active.startedOn)
+        else { return }
+        programmeBravoMarkSeen(programmeId: active.programmeId, startedOn: active.startedOn)
+        showBravo = true
     }
 
     /// Accès à la bibliothèque, un domaine à la fois.
