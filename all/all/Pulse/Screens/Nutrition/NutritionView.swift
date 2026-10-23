@@ -69,13 +69,11 @@ struct NutritionView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
-            LoadingView(message: "Chargement de la nutrition…")
         case .failed(let message):
             ErrorView(message: message) {
                 Task { await viewModel.reload() }
             }
-        case .loaded:
+        case .loading, .loaded:
             loadedContent
         }
     }
@@ -86,7 +84,14 @@ struct NutritionView: View {
     private var loadedContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: PulseSpacing.md) {
-                NutritionDayHeader(viewModel: viewModel)
+                PulseDayPickerHeader(
+                    title: "Nutrition",
+                    selected: viewModel.date,
+                    range: PulseDayPicker.normalized(
+                        lower: PulseDayPicker.defaultLowerBound,
+                        upper: NutritionViewModel.today()),
+                    daysWithData: viewModel.daysWithData
+                ) { viewModel.selectDate($0) }
 
                 if let message = viewModel.actionError {
                     DashboardInlineError(message: message) { Task { await viewModel.reload() } }
@@ -94,8 +99,8 @@ struct NutritionView: View {
 
                 if let day = viewModel.day {
                     NutritionMacrosCard(day: day)
-                } else if viewModel.isDateLoading {
-                    // Autre date en cours de chargement : emplacements réservés,
+                } else if viewModel.isLoading(.day) {
+                    // Premier chargement ou autre date : emplacements réservés,
                     // jamais les données de l'ancienne date.
                     PulseSkeletonCard(height: 150)
                 }
@@ -108,7 +113,7 @@ struct NutritionView: View {
 
                 if let target = viewModel.targetInfo {
                     NutritionObjectiveCard(target: target, weekly: viewModel.weekly)
-                } else if viewModel.isDateLoading {
+                } else if viewModel.isLoading(.targets) {
                     PulseSkeletonCard(height: 120)
                 }
 
@@ -119,7 +124,7 @@ struct NutritionView: View {
                         onEdit: { entry in viewModel.editEntry(entry) },
                         onDelete: { id in Task { await viewModel.deleteEntry(id) } }
                     )
-                } else if viewModel.isDateLoading {
+                } else if viewModel.isLoading(.day) {
                     PulseSkeletonCard(height: 160)
                 }
 
@@ -136,6 +141,7 @@ struct NutritionView: View {
             }
             .padding(.horizontal, PulseSpacing.lg)
             .padding(.top, PulseSpacing.lg)
+            .pulseReveal(viewModel.settled)
             // Espace pour ne pas laisser le FAB recouvrir la dernière carte
             // (le FAB flotte au-dessus de la barre, plus haut que le clearance).
             .padding(.bottom, PulseSpacing.xxl)
@@ -144,102 +150,6 @@ struct NutritionView: View {
         // ne passe pas dessous en fin de défilement (cf. pulseTabBarClearance).
         .pulseTabBarClearance()
     }
-}
-
-// MARK: - En-tête (titre + navigation de jour)
-//
-// Miroir de `.head`/`.head-id`/`.nav-day`/`.sq`/`.picker` (Angular, lignes
-// 973-982 du CSS) : titre 24pt semibold tracking -0.2, 3 pastilles 40×40
-// rayon 11 (‹ / libellé du jour / ›), la pastille suivante pâlie quand
-// désactivée (déjà aujourd'hui). Le libellé central n'ouvre pas de
-// calendrier (pas d'équivalent natif à `app-date-picker` repris ici) : texte
-// seul, la navigation se fait via les deux pastilles ‹ ›.
-
-private struct NutritionDayHeader: View {
-    var viewModel: NutritionViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-        // Titre aligné en haut (`.top`) : la pastille de date fait 40pt de haut ;
-        // en `.center` le titre était centré dans cette ligne et retombait plus
-        // bas que sur les écrans sans pastille. Titre à la même hauteur partout.
-        HStack(alignment: .top, spacing: PulseSpacing.md) {
-            Text("Nutrition")
-                .font(.system(size: 24, weight: .semibold))
-                .tracking(-0.2)
-                .foregroundStyle(Color.pulseTextPrimary)
-            Spacer()
-            HStack(spacing: 6) {
-                Button {
-                    viewModel.shiftDay(by: -1)
-                } label: {
-                    Text("‹").font(.system(size: 14, design: .rounded))
-                }
-                .buttonStyle(NutritionDayPillStyle())
-
-                Text(nutritionShortDateLabel(isToday: viewModel.isToday, date: viewModel.date))
-                    .font(.system(size: 13, design: .rounded))
-                    .foregroundStyle(Color.pulseTextPrimary)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.horizontal, PulseSpacing.md)
-                    .frame(height: 40)
-                    .background(Color.pulseSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .strokeBorder(Color.pulseBorder, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                Button {
-                    viewModel.shiftDay(by: 1)
-                } label: {
-                    Text("›").font(.system(size: 14, design: .rounded))
-                }
-                .buttonStyle(NutritionDayPillStyle())
-                .disabled(viewModel.isToday)
-            }
-        }
-        Text(viewModel.dateLabel)
-            .font(.footnote)
-            .foregroundStyle(Color.pulseTextSecondary)
-        }
-    }
-}
-
-private struct NutritionDayPillStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(width: 40, height: 40)
-            .foregroundStyle(isEnabled ? Color.pulseTextSecondary : Color.pulseAbsent)
-            .background(isEnabled ? Color.pulseSurface : Color.pulseSurfaceAlt)
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(Color.pulseBorder.opacity(isEnabled ? 1 : 0.6), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .opacity(configuration.isPressed ? 0.6 : 1)
-    }
-}
-
-private func nutritionParseDay(_ value: String) -> Date? {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(identifier: "UTC")
-    formatter.dateFormat = "yyyy-MM-dd"
-    return formatter.date(from: value)
-}
-
-private func nutritionShortDateLabel(isToday: Bool, date: String) -> String {
-    if isToday { return "aujourd'hui" }
-    guard let parsed = nutritionParseDay(date) else { return date }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "fr_FR")
-    formatter.timeZone = TimeZone(identifier: "UTC")
-    formatter.dateFormat = "d MMM"
-    return formatter.string(from: parsed)
 }
 
 // MARK: - Libellé de section (mono UPPERCASE) — équivalent `.lab`

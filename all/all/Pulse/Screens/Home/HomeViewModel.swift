@@ -184,117 +184,172 @@ final class HomeViewModel {
         await gate.run(trailing: trailing) { [self] in await self.load() }
     }
 
-    /// Garde l'écran déjà rempli visible pendant le rechargement (plein écran
-    /// de chargement seulement tant qu'il n'y a rien) ; un échec ne le vide pas.
+    /// Sections de l'écran, chacune se remplit dès que SES données sont arrivées
+    /// (réussies ou non) : tant qu'elle n'est pas « réglée », la vue affiche son
+    /// squelette. Une fois réglée, une section ne retourne jamais au squelette
+    /// (le rafraîchissement garde les données affichées).
+    enum Part: Hashable {
+        case day, activities, programme, intensity, sleepDebt, nutrition
+    }
+
+    private(set) var settled: Set<Part> = []
+
+    func isLoading(_ part: Part...) -> Bool {
+        part.contains { !settled.contains($0) }
+    }
+
+    private func resetContent() {
+        day = nil
+        activities = []
+        programme = []
+        intensity = nil
+        sleepDebt = nil
+        dayTarget = nil
+        intake = nil
+        intakeTarget = nil
+        settled = []
+    }
+
+    /// Chargement parallèle : chaque section pose ses données à l'arrivée. Garde
+    /// l'écran déjà rempli visible pendant le rechargement ; un échec ne le
+    /// vide pas. Plein écran d'erreur seulement si l'Accueil n'a RIEN à montrer
+    /// (jour ET activités en échec).
     func load() async {
-        if case .loaded = state {} else { state = .loading }
+        var wasLoaded = false
+        if case .loaded = state { wasLoaded = true } else { state = .loading }
         let mode = modeProvider()
-        let sourceChanged = loadedMode != nil && loadedMode != mode
+        // Le contenu affiché vient d'un autre backend : on le retire d'emblée,
+        // la nouvelle source se présente en squelette puis se remplit.
+        if loadedMode != nil && loadedMode != mode {
+            resetContent()
+            state = .loading
+            wasLoaded = false
+        }
+        loadedMode = mode
+        let today = Self.todayKey()
+
+        async let dayResult = loadDay(today)
+        async let activitiesResult = loadActivities()
+        // La FC live arrive par un canal séparé (`api/live/hr`, temps réel) de
+        // l'historique du jour (`api/wellness/day`, alimenté par ingestion `.fit`).
+        async let liveTask: Void = refreshLive()
+        async let programmeTask: Void = loadProgramme(date: today)
+        async let intensityTask: Void = loadIntensity()
+        async let sleepDebtTask: Void = loadSleepDebt()
+        async let nutritionTask: Void = loadNutrition(date: today)
+
+        let dayError = await dayResult
+        let activitiesError = await activitiesResult
+        _ = await (liveTask, programmeTask, intensityTask, sleepDebtTask, nutritionTask)
+
+        if !wasLoaded, let error = dayError, activitiesError != nil, day == nil, activities.isEmpty {
+            state = .failed(error.localizedDescription)
+            return
+        }
+        state = .loaded
+    }
+
+    /// Toujours le jour du calendrier, même vide : après minuit le nouveau jour
+    /// n'existe côté Pulse qu'à l'ingestion du premier `.fit` qui le couvre.
+    private func loadDay(_ today: String) async -> Error? {
+        defer { settled.insert(.day) }
+        if day == nil, let stale: HomeDayDetail = await client.cachedValue("api/wellness/day/\(today)"), day == nil {
+            day = stale
+            settled.insert(.day)
+        }
         do {
-            let today = Self.todayKey()
-            async let dayTask: HomeDayDetail = client.get("api/wellness/day/\(today)")
-            async let activitiesTask: HomeActivityListResponse = client.get(
-                "api/activities", query: ["limit": "40"])
-            // La FC live est rapatriée AVANT de décider du repli : elle arrive
-            // par un canal séparé (`api/live/hr`, temps réel) de l'historique du
-            // jour (`api/wellness/day`, alimenté par ingestion `.fit` par lots).
-            async let liveTask: Void = refreshLive()
-            let day = try await dayTask
-            let activityList = try await activitiesTask
-            self.activities = activityList.items
-            await liveTask
-
-            // Toujours le jour du calendrier, même vide : après minuit le
-            // nouveau jour n'existe côté Pulse qu'à l'ingestion du premier
-            // `.fit` qui le couvre — les panneaux se remplissent alors.
-            self.day = day
-            state = .loaded
-            // Le contenu affiché vient maintenant de `mode` (et pas avant : un
-            // échec ne doit pas faire oublier que l'écran montre l'ancienne source).
-            loadedMode = mode
-
-            // Best-effort : ne bloquent pas l'affichage principal (le live est
-            // déjà rapatrié ci-dessus).
-            async let programmeTask = loadProgramme(date: today, sourceChanged: sourceChanged)
-            async let intensityTask = loadIntensity(sourceChanged: sourceChanged)
-            async let sleepDebtTask = loadSleepDebt(sourceChanged: sourceChanged)
-            async let nutritionTask = loadNutrition(date: today, sourceChanged: sourceChanged)
-            _ = await (programmeTask, intensityTask, sleepDebtTask, nutritionTask)
+            day = try await client.getCached("api/wellness/day/\(today)")
+            return nil
         } catch {
-            // Source changée : le contenu affiché vient d'un autre backend, on ne
-            // le présente pas comme celui de la nouvelle source — plein écran
-            // d'erreur et on vide le contenu (`loadedMode` reste l'ancienne source
-            // : le réessai voit toujours le changement).
-            if sourceChanged {
-                day = nil
-                activities = []
-                programme = []
-                intensity = nil
-                sleepDebt = nil
-                dayTarget = nil
-                intake = nil
-                intakeTarget = nil
-                state = .failed(error.localizedDescription)
-                return
-            }
-            // Même source, déjà rempli : on garde le contenu (aucun bandeau
-            // d'erreur sur cet écran) ; sinon plein écran d'erreur.
-            if case .loaded = state {} else { state = .failed(error.localizedDescription) }
+            return error
         }
     }
 
-    // Les chargements secondaires gardent la valeur affichée en cas d'échec
-    // (sauf si la SOURCE de données a changé : on ne garde pas l'autre backend).
-
-    private func loadProgramme(date: String, sourceChanged: Bool) async {
+    private func loadActivities() async -> Error? {
+        defer { settled.insert(.activities) }
+        let query = ["limit": "40"]
+        if activities.isEmpty, let stale: HomeActivityListResponse = await client.cachedValue("api/activities", query: query),
+           activities.isEmpty {
+            activities = stale.items
+            settled.insert(.activities)
+        }
         do {
-            let response: HomeProgrammeResponse = try await client.get(
-                "api/programme", query: ["date": date])
+            let list: HomeActivityListResponse = try await client.getCached("api/activities", query: query)
+            activities = list.items
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    // Les chargements secondaires gardent la valeur affichée en cas d'échec.
+
+    private func loadProgramme(date: String) async {
+        defer { settled.insert(.programme) }
+        let query = ["date": date]
+        if programme.isEmpty, let stale: HomeProgrammeResponse = await client.cachedValue("api/programme", query: query),
+           programme.isEmpty {
+            programme = stale.domains
+            settled.insert(.programme)
+        }
+        do {
+            let response: HomeProgrammeResponse = try await client.getCached("api/programme", query: query)
             programme = response.domains
-        } catch {
-            if sourceChanged { programme = [] }
-        }
+        } catch {}
     }
 
-    private func loadIntensity(sourceChanged: Bool) async {
-        do {
-            intensity = try await client.get("api/wellness/intensity")
-        } catch {
-            if sourceChanged { intensity = nil }
+    private func loadIntensity() async {
+        defer { settled.insert(.intensity) }
+        if intensity == nil, let stale: HomeIntensityReport = await client.cachedValue("api/wellness/intensity"),
+           intensity == nil {
+            intensity = stale
+            settled.insert(.intensity)
         }
+        do {
+            intensity = try await client.getCached("api/wellness/intensity")
+        } catch {}
     }
 
     /// `GET api/stats/sleep-debt` — alimente `nightDelta` (écart de la nuit
     /// affichée vs l'habitude récente), `sleepDebt()` côté Angular.
-    private func loadSleepDebt(sourceChanged: Bool) async {
-        do {
-            sleepDebt = try await client.get("api/stats/sleep-debt")
-        } catch {
-            if sourceChanged { sleepDebt = nil }
+    private func loadSleepDebt() async {
+        defer { settled.insert(.sleepDebt) }
+        if sleepDebt == nil, let stale: HomeSleepDebt = await client.cachedValue("api/stats/sleep-debt"),
+           sleepDebt == nil {
+            sleepDebt = stale
+            settled.insert(.sleepDebt)
         }
+        do {
+            sleepDebt = try await client.getCached("api/stats/sleep-debt")
+        } catch {}
     }
 
     /// `GET api/nutrition/day/:date` + `GET api/nutrition/targets` —
     /// alimente la jauge « Cal. mangées » de « Depuis le réveil »,
     /// `loadSideData()` côté Angular.
-    private func loadNutrition(date: String, sourceChanged: Bool) async {
+    private func loadNutrition(date: String) async {
+        defer { settled.insert(.nutrition) }
+        let targetsQuery = ["date": date]
+        if intake == nil, intakeTarget == nil,
+           let staleDay: HomeNutritionDayResponse = await client.cachedValue("api/nutrition/day/\(date)"),
+           let staleTargets: HomeNutritionTargetsResponse = await client.cachedValue("api/nutrition/targets", query: targetsQuery),
+           intake == nil, intakeTarget == nil {
+            intake = staleDay.entries.isEmpty ? nil : staleDay.totals
+            intakeTarget = staleDay.targets
+            dayTarget = staleTargets.auto
+            settled.insert(.nutrition)
+        }
         do {
-            async let dayTask: HomeNutritionDayResponse = client.get("api/nutrition/day/\(date)")
-            async let targetsTask: HomeNutritionTargetsResponse = client.get(
-                "api/nutrition/targets", query: ["date": date])
+            async let dayTask: HomeNutritionDayResponse = client.getCached("api/nutrition/day/\(date)")
+            async let targetsTask: HomeNutritionTargetsResponse = client.getCached(
+                "api/nutrition/targets", query: targetsQuery)
             let day = try await dayTask
             let targets = try await targetsTask
             // Miroir de `intake.set(day.entries.length > 0 ? day.totals : null)`.
             intake = day.entries.isEmpty ? nil : day.totals
             intakeTarget = day.targets
             dayTarget = targets.auto
-        } catch {
-            if sourceChanged {
-                intake = nil
-                intakeTarget = nil
-                dayTarget = nil
-            }
-        }
+        } catch {}
     }
 
     /// FC en direct — appelée au chargement puis en boucle par la vue

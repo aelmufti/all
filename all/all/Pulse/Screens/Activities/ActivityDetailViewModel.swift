@@ -33,8 +33,12 @@ final class ActivityDetailViewModel {
     /// échec de rechargement ne la vide pas.
     func load() async {
         if case .loaded = state {} else { state = .loading }
+        if case .loading = state, let stale: ActivityDetail = await client.cachedValue("api/activities/\(activityId)"),
+           case .loading = state {
+            state = .loaded(stale)
+        }
         do {
-            let detail: ActivityDetail = try await client.get("api/activities/\(activityId)")
+            let detail: ActivityDetail = try await client.getCached("api/activities/\(activityId)")
             state = .loaded(detail)
         } catch {
             if case .loaded = state {} else { state = .failed(error.localizedDescription) }

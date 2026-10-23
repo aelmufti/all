@@ -483,3 +483,61 @@ struct NutritionLocalTests {
         #expect(suggestions.remaining.kcal == nil)
     }
 }
+
+// MARK: - `nutrition/history` + points du sélecteur
+
+struct NutritionHistoryLocalTests {
+    private func add(_ backend: RealLocalPulseBackend, date: String, kcal: Double, protein: Double) async throws {
+        var body = NutritionLogRequest(date: date, name: "Test")
+        body.grams = 100
+        body.kcal = kcal
+        body.protein = protein
+        _ = try await backend.handle(method: "POST", path: "api/nutrition/log", query: [:], body: try PulseAPIClient.encoder.encode(body))
+    }
+
+    private func history(_ backend: RealLocalPulseBackend, days: String? = nil) async throws -> [NutritionHistoryDay] {
+        let query = days.map { ["days": $0] } ?? [:]
+        let data = try await backend.handle(method: "GET", path: "api/nutrition/history", query: query, body: nil)
+        return try PulseAPIClient.decoder.decode([NutritionHistoryDay].self, from: data)
+    }
+
+    @Test func historyGroupsByDateRoundedAndChronological() async throws {
+        let backend = try makeBackend()
+        try await add(backend, date: "2026-09-03", kcal: 100.4, protein: 10)
+        try await add(backend, date: "2026-09-01", kcal: 200, protein: 5.4)
+        try await add(backend, date: "2026-09-01", kcal: 50.3, protein: 1)
+        let rows = try await history(backend)
+        #expect(rows.map(\.date) == ["2026-09-01", "2026-09-03"])
+        #expect(rows[0].kcal == 250)
+        #expect(rows[0].protein == 6)
+        #expect(rows[1].kcal == 100)
+    }
+
+    @Test func historyKeepsTheMostRecentDaysAndClampsBounds() async throws {
+        let backend = try makeBackend()
+        for d in ["2026-09-01", "2026-09-02", "2026-09-03"] { try await add(backend, date: d, kcal: 10, protein: 1) }
+        #expect(try await history(backend, days: "2").map(\.date) == ["2026-09-02", "2026-09-03"])
+        #expect(try await history(backend, days: "-5").map(\.date) == ["2026-09-03"])
+        #expect(try await history(backend, days: "0").count == 3)
+        #expect(try await history(backend, days: "99999").count == 3)
+        #expect(try await history(makeBackend()).isEmpty)
+    }
+
+    @Test func daysWithDataHelperLoadsFromTheClientAndStaysEmptyOnFailure() async throws {
+        let backend = try makeBackend()
+        try await add(backend, date: "2026-02-10", kcal: 10, protein: 1)
+        try await add(backend, date: "2025-01-05", kcal: 10, protein: 1)
+        let client = PulseAPIClient(baseURLProvider: { nil }, localBackend: backend, modeProvider: { .phone })
+        var got: Set<String> = []
+        await PulseDaysWithData.load(
+            client: client, path: "api/nutrition/history", query: ["days": "366"],
+            dates: { (rows: [NutritionHistoryDay]) in Set(rows.map(\.date)) }, apply: { got = $0 })
+        #expect(got == ["2026-02-10", "2025-01-05"])
+
+        var failed: Set<String> = []
+        await PulseDaysWithData.load(
+            client: client, path: "api/nutrition/inexistant",
+            dates: { (rows: [NutritionHistoryDay]) in Set(rows.map(\.date)) }, apply: { failed = $0 })
+        #expect(failed.isEmpty)
+    }
+}

@@ -154,25 +154,31 @@ struct HomeView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
-            LoadingView(message: "Chargement de l'accueil…")
         case .failed(let message):
             ErrorView(message: message) {
                 Task { await viewModel.reload() }
             }
-        case .loaded:
+        case .loading, .loaded:
+            // La mise en page réelle s'affiche tout de suite ; chaque section
+            // reste en squelette jusqu'à l'arrivée de SES données.
             ScrollView {
                 VStack(spacing: 0) {
                     homeHeader
                     uploadIssueRow
                     NowSection(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.day))
                     WeekTrainingSection(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.activities, .programme, .intensity))
                     if let session = viewModel.session {
                         SessionSection(session: session)
+                            .transition(.opacity)
                     }
                     WakeSection(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.day, .nutrition))
                     NightSection(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.day, .sleepDebt, .programme))
                 }
+                .pulseReveal(viewModel.session?.name)
                 // SCSS `:host{padding-bottom:16px}` — marge basse de toute la page.
                 .padding(.bottom, 16)
             }

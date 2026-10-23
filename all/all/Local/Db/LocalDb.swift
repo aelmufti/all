@@ -1552,6 +1552,30 @@ final class LocalDb {
         return kg
     }
 
+    struct FoodLogHistoryRow {
+        let date: String
+        let kcal: Double?
+        let protein: Double?
+        let carbs: Double?
+        let fiber: Double?
+    }
+
+    /// Miroir de `NutritionController.history` (TS) : totaux par jour arrondis
+    /// à l'unité, les `limit` jours les plus récents, rendus par date croissante.
+    func foodLogHistory(limit: Int) throws -> [FoodLogHistoryRow] {
+        var out: [FoodLogHistoryRow] = []
+        try db.run("""
+            SELECT date, ROUND(SUM(kcal), 0), ROUND(SUM(protein), 0),
+                   ROUND(SUM(carbs), 0), ROUND(SUM(fiber), 0)
+            FROM food_log GROUP BY date ORDER BY date DESC LIMIT ?
+            """, [.int(limit)]) { r in
+            guard let date = r.text(0) else { return }
+            out.append(FoodLogHistoryRow(
+                date: date, kcal: r.double(1), protein: r.double(2), carbs: r.double(3), fiber: r.double(4)))
+        }
+        return out.reversed()
+    }
+
     /// Miroir de la requête `intake` de `NutritionController.getWeekly` (TS).
     func foodLogKcalByDate() throws -> [String: Double] {
         var out: [String: Double] = [:]

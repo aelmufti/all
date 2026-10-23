@@ -26,17 +26,17 @@ struct HealthView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.hasContent {
-                    loaded
-                } else if let message = viewModel.errorMessage {
+                if !viewModel.hasContent, viewModel.day == nil, let message = viewModel.errorMessage {
                     ErrorView(message: message) {
                         Task { await viewModel.retry() }
                     }
                 } else {
-                    LoadingView(message: "Chargement de la santé…")
+                    // Mise en page tout de suite ; les cartes se remplissent à
+                    // l'arrivée de leurs données.
+                    loaded
                 }
             }
-            // Titre porté en contenu (24pt, dans `HealthDayNavigator`) comme
+            // Titre porté en contenu (24pt, dans `PulseDayPickerHeader`) comme
             // les autres écrans : le grand titre système réservait ~96pt vides
             // au-dessus. Barre masquée.
             .toolbar(.hidden, for: .navigationBar)
@@ -58,7 +58,14 @@ struct HealthView: View {
     private var loaded: some View {
         ScrollView {
             VStack(spacing: PulseSpacing.lg) {
-                HealthDayNavigator(viewModel: viewModel)
+                PulseDayPickerHeader(
+                    title: "Santé",
+                    selected: viewModel.date,
+                    range: PulseDayPicker.normalized(
+                        lower: PulseDayPicker.defaultLowerBound,
+                        upper: max(viewModel.maxDate, viewModel.date)),
+                    daysWithData: viewModel.daysWithData
+                ) { key in Task { await viewModel.selectDate(key) } }
                 if let message = viewModel.errorMessage {
                     DashboardInlineError(message: message) { Task { await viewModel.retry() } }
                 }
@@ -66,18 +73,21 @@ struct HealthView: View {
                     SleepCard(viewModel: viewModel, sleep: day.sleep)
                     MetricTabPicker(viewModel: viewModel)
                     HealthMetricChartCard(viewModel: viewModel, day: day)
-                } else if viewModel.isDayLoading {
-                    // Autre date en cours de chargement : mêmes emplacements que
+                } else if viewModel.isDayLoading || viewModel.errorMessage == nil {
+                    // Premier chargement, ou autre date en cours de chargement : mêmes emplacements que
                     // les cartes du jour, jamais les données de l'ancienne date.
                     PulseSkeletonCard(height: 250)
                     MetricTabPicker(viewModel: viewModel)
                     PulseSkeletonCard(height: 230)
                 }
-                if viewModel.day != nil || viewModel.isDayLoading {
+                if viewModel.day != nil || viewModel.isDayLoading || viewModel.errorMessage == nil {
                     IntensityCard(intensity: viewModel.intensity, failed: viewModel.intensityFailed)
+                        .pulseSkeleton(viewModel.intensity == nil && !viewModel.intensityFailed)
                 }
             }
             .padding(PulseSpacing.lg)
+            .pulseReveal(viewModel.day?.date)
+            .pulseReveal(viewModel.intensity != nil)
         }
         .pulseTabBarClearance()
         .background(Color.pulseBackground)

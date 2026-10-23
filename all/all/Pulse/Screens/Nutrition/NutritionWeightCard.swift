@@ -43,11 +43,17 @@ final class WeightViewModel {
     }
 
     func load() async {
+        if weight == nil,
+           let stale: WeightData = await client.cachedValue("api/weight", query: ["days": "3660"]),
+           weight == nil {
+            weight = stale
+            weightInputText = Self.formatKg(shownWeight)
+        }
         do {
             // Fenêtre max serveur : la série/l'historique/la courbe démarrent à
             // la toute première pesée saisie (et non 90 jours en arrière avec du
             // vide avant la 1ʳᵉ saisie).
-            let data: WeightData = try await client.get("api/weight", query: ["days": "3660"])
+            let data: WeightData = try await client.getCached("api/weight", query: ["days": "3660"])
             weight = data
             weightInputText = Self.formatKg(shownWeight)
         } catch {

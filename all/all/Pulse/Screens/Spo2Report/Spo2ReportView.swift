@@ -34,7 +34,7 @@ struct Spo2ReportView: View {
                         Task { await viewModel.retry() }
                     }
                 } else {
-                    LoadingView(message: "Chargement du rapport…")
+                    PulseSkeletonScreen(header: 0, cards: [120, 100, 150, 150])
                 }
             }
             .navigationTitle("Rapport SpO2")

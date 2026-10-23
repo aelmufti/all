@@ -61,8 +61,12 @@ final class RecordsViewModel {
         let generation = loadGeneration
         // Contenu déjà affiché : on le garde pendant un rechargement.
         if payload == nil { state = .loading }
+        if payload == nil, let stale: RecordsPayload = await client.cachedValue("api/stats/records"),
+           payload == nil, generation == loadGeneration {
+            payload = stale
+        }
         do {
-            let result: RecordsPayload = try await client.get("api/stats/records")
+            let result: RecordsPayload = try await client.getCached("api/stats/records")
             guard generation == loadGeneration else { return }
             payload = result
             if let sport, !result.sports.contains(sport) { self.sport = nil }

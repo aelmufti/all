@@ -42,6 +42,9 @@ final class SommeilViewModel {
 
     private(set) var date: String
     private(set) var days30: [WellnessDayRow] = []
+    /// Dates de `api/wellness/dates` (toute l'histoire) : points du sélecteur.
+    /// Vide tant que la source n'a pas répondu.
+    private(set) var daysWithData: Set<String> = []
     private(set) var day: WellnessDayDetail?
     /// Première date disponible (`api/wellness/dates`) — borne basse du
     /// sélecteur de date.
@@ -133,13 +136,15 @@ final class SommeilViewModel {
         // concurrente, un échec des jours ne l'empêche pas.
         async let tonight: Void = refreshTonight()
         lastKnownToday = todayKey
+        if !hasContent { await prefillFromCache() }
         do {
-            async let datesTask: [String] = client.get("api/wellness/dates")
-            let days: [WellnessDayRow] = try await client.get(
-                "api/wellness/days", query: ["limit": "30", "days": "30"]
+            async let datesTask: [String] = client.getCached("api/wellness/dates")
+            let days: [WellnessDayRow] = try await client.getCached(
+                "api/wellness/days", query: Self.daysQuery
             )
             let dates = try await datesTask
             days30 = days
+            daysWithData = Set(dates)
             firstDate = dates.min()
             // Par défaut, la nuit la plus récente RÉELLEMENT dormie (le tout
             // dernier jour peut être aujourd'hui, sans nuit encore mesurée).
@@ -170,6 +175,28 @@ final class SommeilViewModel {
             errorMessage = Self.message(for: error)
         }
         await tonight
+    }
+
+    private static let daysQuery = ["limit": "30", "days": "30"]
+
+    /// Premier affichage : dernière nuit connue (cache), pendant que la lecture
+    /// fraîche part. Même choix de nuit que `load()` ; sans cache, ne fait rien.
+    private func prefillFromCache() async {
+        guard let days: [WellnessDayRow] = await client.cachedValue("api/wellness/days", query: Self.daysQuery),
+              !hasContent else { return }
+        let dates: [String]? = await client.cachedValue("api/wellness/dates")
+        let latest = days.last(where: { $0.sleepDurationS != nil })?.date ?? days.last?.date ?? dates?.last
+        guard !userPickedDate, let latest,
+              let stale: WellnessDayDetail = await client.cachedValue("api/wellness/day/\(latest)"),
+              !hasContent, day == nil else { return }
+        days30 = days
+        if let dates { daysWithData = Set(dates) }
+        firstDate = dates?.min()
+        latestNight = latest
+        date = latest
+        day = stale
+        isDayLoading = false
+        hasContent = true
     }
 
     func retry() async { await reload() }
@@ -237,7 +264,7 @@ final class SommeilViewModel {
     }
 
     private static func fetchReco(client: PulseAPIClient, date: String) async -> DashboardSleepRecommendation? {
-        try? await client.get("api/stats/sleep-recommendation", query: ["days": "30", "date": date])
+        try? await client.getCached("api/stats/sleep-recommendation", query: ["days": "30", "date": date])
     }
 
     // MARK: - « Ce soir » (nuit à venir)
@@ -372,7 +399,7 @@ final class SommeilViewModel {
         let requested = date
         defer { if generation == dayGeneration { isDayLoading = false } }
         do {
-            let detail: WellnessDayDetail = try await client.get("api/wellness/day/\(requested)")
+            let detail: WellnessDayDetail = try await client.getCached("api/wellness/day/\(requested)")
             guard generation == dayGeneration else { return }
             day = detail
             errorMessage = nil
@@ -506,21 +533,6 @@ final class SommeilViewModel {
     var deltaToAvgS: Double? {
         guard let main = day?.sleep.main, let avg = avgDurationS else { return nil }
         return main.durationS - avg
-    }
-
-    // MARK: - Libellés
-
-    var dateLabel: String {
-        guard let parsed = HealthViewModel.parseDate(date) else { return date }
-        return HealthViewModel.dateLabelFormatter
-            .string(from: parsed)
-            .capitalized(with: Locale(identifier: "fr_FR"))
-    }
-
-    var shortLabel: String {
-        date == todayKey
-            ? "aujourd'hui"
-            : HealthViewModel.shortDateLabel(date)
     }
 
     private static func message(for error: Error) -> String {

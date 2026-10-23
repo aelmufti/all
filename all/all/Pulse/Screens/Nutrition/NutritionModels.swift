@@ -141,6 +141,18 @@ struct NutritionTargetInfo: Codable {
     let programme: NutritionProgrammeRef?
 }
 
+// MARK: - `GET api/nutrition/history`
+
+/// Une journée de `GET api/nutrition/history?days=` (totaux arrondis ; seule la
+/// date sert aux points du sélecteur).
+struct NutritionHistoryDay: Codable {
+    let date: String
+    let kcal: Double?
+    let protein: Double?
+    let carbs: Double?
+    let fiber: Double?
+}
+
 // MARK: - `GET api/nutrition/weekly`
 
 struct NutritionWeekly: Codable {

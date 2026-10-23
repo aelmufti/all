@@ -96,8 +96,13 @@ final class ProgrammeViewModel {
     /// pas (bandeau discret `actionError`).
     func load() async {
         if case .loaded = state {} else { state = .loading }
+        if case .loading = state, let stale: ProgrammeCurrent = await client.cachedValue("api/programme"),
+           case .loading = state {
+            apply(stale)
+            state = .loaded
+        }
         do {
-            let result: ProgrammeCurrent = try await client.get("api/programme")
+            let result: ProgrammeCurrent = try await client.getCached("api/programme")
             apply(result)
             state = .loaded
             actionError = nil

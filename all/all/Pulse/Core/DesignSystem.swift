@@ -173,8 +173,108 @@ struct PulseSkeletonCard: View {
             RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
                 .fill(Color.pulseSurfaceAlt)
                 .frame(height: height)
+                .pulsing()
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// Pulsation douce de l'opacité (squelettes). Statique si « Réduire les
+/// animations » est actif.
+private struct PulsingModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(reduceMotion ? 0.7 : (dim ? 0.45 : 0.9))
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                value: dim
+            )
+            .onAppear { if !reduceMotion { dim = true } }
+    }
+}
+
+extension View {
+    /// Pulsation d'opacité douce — pour les formes grisées d'un squelette.
+    func pulsing() -> some View { modifier(PulsingModifier()) }
+
+    /// Squelette d'une section : tant que `isLoading`, le contenu réel est
+    /// rendu en formes grisées (`.redacted`) qui pulsent, sans interaction et
+    /// annoncé UNE seule fois « Chargement » à VoiceOver ; le contenu arrive en
+    /// fondu (sans animation si « Réduire les animations »).
+    func pulseSkeleton(_ isLoading: Bool) -> some View {
+        modifier(SkeletonModifier(isLoading: isLoading))
+    }
+
+    /// Fondu d'apparition quand `value` change (arrivée des données), coupé si
+    /// « Réduire les animations ».
+    func pulseReveal<V: Equatable>(_ value: V) -> some View {
+        modifier(RevealModifier(value: value))
+    }
+}
+
+private struct SkeletonModifier: ViewModifier {
+    let isLoading: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        Group {
+            if isLoading {
+                content
+                    .redacted(reason: .placeholder)
+                    .modifier(PulsingModifier())
+                    .allowsHitTesting(false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Chargement")
+                    .transition(.opacity)
+            } else {
+                content.transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: isLoading)
+    }
+}
+
+private struct RevealModifier<V: Equatable>: ViewModifier {
+    let value: V
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: value)
+    }
+}
+
+/// Squelette plein écran d'un onglet : `header` (hauteur du bandeau de titre,
+/// 0 = aucun) puis une carte grisée par hauteur de `cards`, à la place du
+/// spinner. Annoncé une seule fois « Chargement » (VoiceOver).
+struct PulseSkeletonScreen: View {
+    var header: CGFloat = 44
+    var cards: [CGFloat]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: PulseSpacing.md) {
+                if header > 0 {
+                    RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
+                        .fill(Color.pulseSkeletonShape)
+                        .frame(width: 140, height: header * 0.55)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, PulseSpacing.lg)
+                }
+                ForEach(Array(cards.enumerated()), id: \.offset) { _, height in
+                    PulseSkeletonCard(height: height)
+                }
+            }
+            .padding(.horizontal, PulseSpacing.lg)
+            .padding(.bottom, PulseSpacing.lg)
+            .pulsing()
+        }
+        .scrollDisabled(true)
+        .background(Color.pulseBackground)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Chargement")
     }
 }
 

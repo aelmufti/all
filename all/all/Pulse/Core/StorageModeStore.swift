@@ -76,6 +76,8 @@ final class StorageModeStore {
             // picker segmenté ne déclenche que sur vrai changement, mais on
             // évite une notif superflue si quelqu'un réassigne la même valeur.
             if mode != oldValue {
+                // Le cache des lectures ne doit jamais montrer l'autre mode.
+                PulseResponseCache.shared.invalidateAll()
                 NotificationCenter.default.post(name: .storageModeDidChange, object: nil)
             }
         }

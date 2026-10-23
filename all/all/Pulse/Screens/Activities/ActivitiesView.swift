@@ -64,16 +64,22 @@ struct ActivitiesView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch vm.state {
-        case .loading:
-            LoadingView(message: "Chargement des activités…")
-        case .failed(let message):
-            ErrorView(message: message) {
-                Task { await vm.reload() }
+        Group {
+            switch vm.state {
+            case .loading:
+                PulseSkeletonScreen(cards: [96, 150, 150, 150])
+                    .pulseTabBarClearance()
+                    .transition(.opacity)
+            case .failed(let message):
+                ErrorView(message: message) {
+                    Task { await vm.reload() }
+                }
+            case .loaded(let activities):
+                loaded(activities)
+                    .transition(.opacity)
             }
-        case .loaded(let activities):
-            loaded(activities)
         }
+        .pulseReveal(vm.stateTag)
     }
 
     private func loaded(_ activities: [Activity]) -> some View {

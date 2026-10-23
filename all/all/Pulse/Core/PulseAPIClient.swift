@@ -43,7 +43,7 @@ final class PulseAPIClient {
     /// `AuthStore`. L'initialiseur reste public pour permettre l'injection
     /// d'une session stubée dans les tests (`PulseSocleTests.swift`), sans
     /// jamais toucher au réseau réel.
-    static let shared = PulseAPIClient(saisieSync: SaisieSyncService.shared)
+    static let shared = PulseAPIClient(saisieSync: SaisieSyncService.shared, cache: .shared)
 
     /// `JSONDecoder` partagé par tout le socle — un seul point de vérité pour
     /// la stratégie de décodage.
@@ -92,6 +92,10 @@ final class PulseAPIClient {
     /// `routedBoth`). `nil` = aucun échange (défaut, donc jamais dans les tests qui
     /// ne l'injectent pas) ; seul `.shared` reçoit le service réel.
     private let saisieSync: SaisieSyncing?
+    /// Cache des lectures (`getCached`/`cachedValue`). `nil` = aucun cache (défaut,
+    /// donc jamais dans les tests qui ne l'injectent pas) ; seul `.shared` reçoit
+    /// le cache de l'app.
+    private let cache: PulseResponseCache?
     /// Base d'où vient la dernière lecture de saisies réussie : les identifiants
     /// numériques sont propres à chaque base (contrat §7).
     private let saisieSource = SaisieSourceTracker()
@@ -132,8 +136,10 @@ final class PulseAPIClient {
         baseURLProvider: @escaping () -> URL? = { PulseConfig.baseURL },
         localBackend: LocalPulseBackend = LocalPulseBackendFactory.make(),
         modeProvider: @escaping () -> StorageMode = { StorageModeStore.current },
-        saisieSync: SaisieSyncing? = nil
+        saisieSync: SaisieSyncing? = nil,
+        cache: PulseResponseCache? = nil
     ) {
+        self.cache = cache
         self.session = session
         self.baseURLProvider = baseURLProvider
         self.localBackend = localBackend
@@ -161,12 +167,14 @@ final class PulseAPIClient {
     func post<Body: Encodable, T: Decodable>(_ path: String, body: Body) async throws -> T {
         let bodyData = try encodeBody(body)
         let (data, status) = try await routedData(method: "POST", path: path, query: [:], bodyData: bodyData)
+        invalidateCacheAfterWrite(path: path)
         return try decode(data, path: path, status: status)
     }
 
     /// `POST path` sans corps (ex. `api/auth/logout`).
     func post<T: Decodable>(_ path: String) async throws -> T {
         let (data, status) = try await routedData(method: "POST", path: path, query: [:], bodyData: nil)
+        invalidateCacheAfterWrite(path: path)
         return try decode(data, path: path, status: status)
     }
 
@@ -174,6 +182,7 @@ final class PulseAPIClient {
     func put<Body: Encodable, T: Decodable>(_ path: String, body: Body) async throws -> T {
         let bodyData = try encodeBody(body)
         let (data, status) = try await routedData(method: "PUT", path: path, query: [:], bodyData: bodyData)
+        invalidateCacheAfterWrite(path: path)
         return try decode(data, path: path, status: status)
     }
 
@@ -184,6 +193,51 @@ final class PulseAPIClient {
     /// gère les deux cas).
     func delete(_ path: String) async throws {
         _ = try await routedData(method: "DELETE", path: path, query: [:], bodyData: nil)
+        invalidateCacheAfterWrite(path: path)
+    }
+
+    // MARK: - Cache des lectures (stale-while-revalidate)
+
+    /// Dernière valeur connue de `GET path?query` (mémoire puis disque), décodée ;
+    /// `nil` sans cache, sans entrée ou si elle ne se décode plus (modèle changé).
+    /// Pour afficher aussitôt, avant la lecture fraîche (`getCached`). Hors du main
+    /// actor (lecture disque + décodage).
+    func cachedValue<T: Decodable>(_ path: String, query: [String: String] = [:]) async -> T? {
+        guard let cache, let key = cacheKey(path: path, query: query),
+              let data = cache.data(forKey: key) else { return nil }
+        return try? Self.decoder.decode(T.self, from: data)
+    }
+
+    /// `GET path?query` comme `get`, et garde la réponse brute dans le cache (jamais
+    /// pour `api/auth/*`) pour le prochain affichage immédiat. Sans cache injecté,
+    /// identique à `get`.
+    func getCached<T: Decodable>(_ path: String, query: [String: String] = [:]) async throws -> T {
+        let key = cacheKey(path: path, query: query)
+        let generation = cache?.currentGeneration
+        let (data, status) = try await routedData(method: "GET", path: path, query: query, bodyData: nil)
+        let value: T = try decode(data, path: path, status: status)
+        // Mode changé pendant le vol : la réponse peut venir de l'autre backend.
+        if let cache, let key, key == cacheKey(path: path, query: query) {
+            cache.store(data, forKey: key, ifGeneration: generation)
+        }
+        return value
+    }
+
+    private func cacheKey(path: String, query: [String: String]) -> String? {
+        guard cache != nil, !Self.isServerOnly(path: path) else { return nil }
+        let mode = modeProvider()
+        let identity = mode == .phone ? nil : baseURLProvider()?.absoluteString
+        return PulseResponseCache.key(mode: mode, identity: identity, path: path, query: query)
+    }
+
+    /// Une écriture réussie rend périmées les lectures gardées : on vide tout (les
+    /// écrans relisent juste après). Hors authentification, FC en direct et pilotage
+    /// de synchro, qui ne touchent pas aux données affichées.
+    private func invalidateCacheAfterWrite(path: String) {
+        guard let cache else { return }
+        let normalized = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        if ["api/auth/", "api/live/", "api/sync"].contains(where: normalized.hasPrefix) { return }
+        cache.invalidateAll()
     }
 
     // MARK: - Routage Stockage (serveur vs backend local)

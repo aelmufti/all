@@ -52,6 +52,9 @@ final class HealthViewModel {
     private(set) var date: String = HealthViewModel.todayKey()
     private(set) var maxDate: String = HealthViewModel.todayKey()
     private(set) var days30: [WellnessDayRow] = []
+    /// Toutes les dates de `wellness_days` (`api/wellness/dates`) : points du
+    /// sélecteur. Vide tant que la source n'a pas répondu.
+    private(set) var daysWithData: Set<String> = []
     private(set) var day: WellnessDayDetail?
     private(set) var intensity: IntensityDayDetail?
     /// Distingue « pas encore chargée » de « a échoué » pour `IntensityCard`
@@ -82,34 +85,59 @@ final class HealthViewModel {
         await gate.run(trailing: trailing) { [self] in await self.load() }
     }
 
-    /// Garde tout ce qui est affiché jusqu'à l'arrivée de la réponse.
+    /// Garde tout ce qui est affiché jusqu'à l'arrivée de la réponse. Les 30
+    /// derniers jours et le détail du jour (+ intensité) chargent EN PARALLÈLE :
+    /// chaque carte se remplit dès que ses données arrivent.
     func load() async {
         isLoading = true
         defer { isLoading = false }
-        do {
-            let days: [WellnessDayRow] = try await client.get(
-                "api/wellness/days",
-                query: ["limit": "30", "days": "30"]
-            )
-            days30 = days
-            // Toujours le jour du calendrier, même vide : après minuit le
-            // nouveau jour n'existe côté Pulse qu'à l'ingestion du premier
-            // `.fit` qui le couvre — l'écran se remplit alors. Un jour passé
-            // consulté est conservé (un rechargement ne ramène pas à aujourd'hui).
-            let today = Self.todayKey()
-            let followsToday = !hasContent || isLastDay
-            maxDate = today
-            if followsToday && date != today {
-                date = today
-                day = nil
-                intensity = nil
-                intensityFailed = false
-                isDayLoading = true
-            }
-            await loadDayDetails()
+        // Toujours le jour du calendrier, même vide : après minuit le
+        // nouveau jour n'existe côté Pulse qu'à l'ingestion du premier
+        // `.fit` qui le couvre — l'écran se remplit alors. Un jour passé
+        // consulté est conservé (un rechargement ne ramène pas à aujourd'hui).
+        let today = Self.todayKey()
+        let followsToday = !hasContent || isLastDay
+        maxDate = today
+        if followsToday && date != today {
+            date = today
+            day = nil
+            intensity = nil
+            intensityFailed = false
+        }
+        if day == nil { isDayLoading = true }
+
+        async let datesTask: Void = loadDaysWithData()
+        async let daysTask: Error? = loadDays()
+        async let detailTask: Void = loadDayDetails()
+        let daysError = await daysTask
+        await detailTask
+
+        if let daysError {
+            errorMessage = Self.message(for: daysError)
+        } else {
             hasContent = true
+        }
+        if day != nil { hasContent = true }
+        await datesTask
+    }
+
+    private func loadDaysWithData() async {
+        await PulseDaysWithData.load(
+            client: client, path: "api/wellness/dates",
+            dates: { (dates: [String]) in Set(dates) }, apply: { self.daysWithData = $0 })
+    }
+
+    private func loadDays() async -> Error? {
+        let query = ["limit": "30", "days": "30"]
+        if days30.isEmpty, let stale: [WellnessDayRow] = await client.cachedValue("api/wellness/days", query: query),
+           days30.isEmpty {
+            days30 = stale
+        }
+        do {
+            days30 = try await client.getCached("api/wellness/days", query: query)
+            return nil
         } catch {
-            errorMessage = Self.message(for: error)
+            return error
         }
     }
 
@@ -148,20 +176,37 @@ final class HealthViewModel {
         let generation = dayGeneration
         let requested = date
         defer { if generation == dayGeneration { isDayLoading = false } }
+        async let intensityTask: Void = loadIntensity(for: requested, generation: generation)
+        // Dernière valeur connue de CETTE date, affichée aussitôt (puis remplacée).
+        if day == nil, let stale: WellnessDayDetail = await client.cachedValue("api/wellness/day/\(requested)"),
+           generation == dayGeneration, day == nil {
+            day = stale
+            isDayLoading = false
+        }
         do {
-            let detail: WellnessDayDetail = try await client.get("api/wellness/day/\(requested)")
-            guard generation == dayGeneration else { return }
+            let detail: WellnessDayDetail = try await client.getCached("api/wellness/day/\(requested)")
+            guard generation == dayGeneration else { await intensityTask; return }
             day = detail
             errorMessage = nil
         } catch {
+            await intensityTask
             guard generation == dayGeneration else { return }
             errorMessage = Self.message(for: error)
             return
         }
-        // Intensité : au mieux, comme `IntensityDayCardComponent` côté Angular
-        // (attrape ses propres erreurs sans affecter le reste de l'écran).
+        await intensityTask
+    }
+
+    /// Intensité : au mieux, comme `IntensityDayCardComponent` côté Angular
+    /// (attrape ses propres erreurs sans affecter le reste de l'écran).
+    private func loadIntensity(for requested: String, generation: Int) async {
+        if intensity == nil,
+           let stale: IntensityDayDetail = await client.cachedValue("api/wellness/intensity/day/\(requested)"),
+           generation == dayGeneration, intensity == nil {
+            intensity = stale
+        }
         do {
-            let loaded: IntensityDayDetail = try await client.get("api/wellness/intensity/day/\(requested)")
+            let loaded: IntensityDayDetail = try await client.getCached("api/wellness/intensity/day/\(requested)")
             guard generation == dayGeneration else { return }
             intensity = loaded
             intensityFailed = false
@@ -398,19 +443,6 @@ final class HealthViewModel {
 
     static func formatDate(_ date: Date) -> String {
         keyFormatter.string(from: date)
-    }
-
-    static let dateLabelFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "fr_FR")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "EEEE d MMMM yyyy"
-        return formatter
-    }()
-
-    var dateLabel: String {
-        guard let parsed = Self.parseDate(date) else { return date }
-        return Self.dateLabelFormatter.string(from: parsed).capitalized(with: Locale(identifier: "fr_FR"))
     }
 
     static func shortDateLabel(_ key: String) -> String {

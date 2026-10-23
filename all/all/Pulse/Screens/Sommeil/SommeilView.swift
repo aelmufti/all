@@ -23,12 +23,12 @@ struct SommeilView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.hasContent {
-                    content
-                } else if let message = viewModel.errorMessage {
+                if !viewModel.hasContent, let message = viewModel.errorMessage {
                     ErrorView(message: message) { Task { await viewModel.retry() } }
                 } else {
-                    LoadingView(message: "Chargement du sommeil…")
+                    // Mise en page tout de suite (« Ce soir » a son propre état
+                    // d'attente) ; les cartes de la nuit se remplissent à l'arrivée.
+                    content
                 }
             }
             .background(Color.pulseBackground)
@@ -61,7 +61,12 @@ struct SommeilView: View {
     private var content: some View {
         ScrollView {
             VStack(spacing: PulseSpacing.lg) {
-                SommeilDayNavigator(viewModel: viewModel)
+                PulseDayPickerHeader(
+                    title: "Sommeil",
+                    selected: viewModel.date,
+                    range: viewModel.selectableRange,
+                    daysWithData: viewModel.daysWithData
+                ) { key in Task { await viewModel.selectDate(key) } }
 
                 SommeilTonightCard(card: viewModel.bedtimeCard)
 
@@ -73,8 +78,8 @@ struct SommeilView: View {
                     SommeilNightCard(viewModel: viewModel, main: main)
                     SommeilAnalysisCard(viewModel: viewModel)
                     SommeilCompositionCard(rows: viewModel.compositionRows)
-                } else if viewModel.isDayLoading {
-                    // Autre date en cours de chargement : mêmes emplacements que
+                } else if viewModel.isDayLoading || !viewModel.hasContent {
+                    // Premier chargement, ou autre date en cours de chargement : mêmes emplacements que
                     // les cartes de la nuit, jamais « pas de nuit » ni l'ancienne.
                     PulseSkeletonCard(height: 330)
                     PulseSkeletonCard(height: 190)
@@ -84,135 +89,12 @@ struct SommeilView: View {
                 }
             }
             .padding(PulseSpacing.lg)
+            .pulseReveal(viewModel.hasContent)
+            .pulseReveal(viewModel.day?.date)
         }
         .pulseTabBarClearance()
         .background(Color.pulseBackground)
         .refreshable { await viewModel.reload() }
-    }
-}
-
-// MARK: - Navigation de nuit
-
-private struct SommeilDayNavigator: View {
-    var viewModel: SommeilViewModel
-    @State private var showDatePicker = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            HStack(alignment: .top, spacing: PulseSpacing.md) {
-                Text("Sommeil")
-                    .font(.system(size: 24, weight: .semibold))
-                    .tracking(-0.2)
-                    .foregroundStyle(Color.pulseTextPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Button { Task { await viewModel.shiftDay(by: -1) } } label: {
-                        Text("‹").font(.system(size: 14, design: .rounded))
-                    }
-                    .buttonStyle(SommeilDayPillStyle())
-
-                    // Tap sur la pastille → sélecteur de date (feuille).
-                    Button { showDatePicker = true } label: {
-                        Text(viewModel.shortLabel)
-                            .font(.system(size: 13, design: .rounded))
-                            .foregroundStyle(Color.pulseTextPrimary)
-                            .lineLimit(1)
-                            .fixedSize()
-                            .padding(.horizontal, PulseSpacing.md)
-                            .frame(height: 40)
-                            .background(Color.pulseSurface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .strokeBorder(Color.pulseBorder, lineWidth: 1)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Choisir une date")
-
-                    Button { Task { await viewModel.shiftDay(by: 1) } } label: {
-                        Text("›").font(.system(size: 14, design: .rounded))
-                    }
-                    .buttonStyle(SommeilDayPillStyle())
-                    .disabled(viewModel.isLastDay)
-                }
-            }
-            Text(viewModel.dateLabel)
-                .font(.footnote)
-                .foregroundStyle(Color.pulseTextSecondary)
-        }
-        .sheet(isPresented: $showDatePicker) {
-            SommeilDatePickerSheet(
-                current: viewModel.date, range: viewModel.selectableRange
-            ) { key in Task { await viewModel.selectDate(key) } }
-        }
-    }
-}
-
-// MARK: - Sélecteur de date
-
-/// Feuille avec un `DatePicker` graphique (locale `fr_FR`). Les clés de date
-/// sont en UTC alors que `DatePicker` vit dans le calendrier local : la
-/// conversion passe par `SommeilDatePicking` (composantes année/mois/jour).
-private struct SommeilDatePickerSheet: View {
-    let current: String
-    let range: ClosedRange<String>
-    let onPick: (String) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var selection: Date
-
-    init(current: String, range: ClosedRange<String>, onPick: @escaping (String) -> Void) {
-        self.current = current
-        self.range = range
-        self.onPick = onPick
-        _selection = State(initialValue: SommeilDatePicking.pickerDate(forKey: current) ?? Date())
-    }
-
-    private var bounds: ClosedRange<Date> {
-        let lower = SommeilDatePicking.pickerDate(forKey: range.lowerBound) ?? .distantPast
-        let upper = SommeilDatePicking.pickerDate(forKey: range.upperBound) ?? .distantFuture
-        return min(lower, upper)...upper
-    }
-
-    var body: some View {
-        NavigationStack {
-            DatePicker("Date", selection: $selection, in: bounds, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                .tint(Color.pulseAccent)
-                .environment(\.locale, Locale(identifier: "fr_FR"))
-                .padding(PulseSpacing.lg)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .background(Color.pulseBackground)
-                .navigationTitle("Choisir une nuit")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { SheetCloseButton { dismiss() } }
-                .onChange(of: selection) { _, newValue in
-                    let key = SommeilDatePicking.key(forPickerDate: newValue)
-                    guard key != current else { return }
-                    onPick(key)
-                    dismiss()
-                }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-
-private struct SommeilDayPillStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(width: 40, height: 40)
-            .foregroundStyle(isEnabled ? Color.pulseTextSecondary : Color.pulseAbsent)
-            .background(isEnabled ? Color.pulseSurface : Color.pulseSurfaceAlt)
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(Color.pulseBorder.opacity(isEnabled ? 1 : 0.6), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
 

@@ -50,6 +50,10 @@ enum PulseConfig {
             return url
         }
         set {
+            // Autre serveur : les lectures gardées ne sont plus les siennes.
+            if newValue?.absoluteString != UserDefaults.standard.string(forKey: baseURLKey) {
+                PulseResponseCache.shared.invalidateAll()
+            }
             UserDefaults.standard.set(newValue?.absoluteString, forKey: baseURLKey)
         }
     }

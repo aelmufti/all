@@ -33,18 +33,19 @@ struct StatusView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.state {
-        case .loading:
-            LoadingView(message: "Lecture du statut…")
         case .failed(let message):
             ErrorView(message: message) {
                 Task { await viewModel.load() }
             }
-        case .loaded:
+        case .loading, .loaded:
             ScrollView {
                 VStack(spacing: PulseSpacing.lg) {
                     StatusLinkCard(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.link))
                     StatusAutoSyncCard(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.autoSync))
                     StatusSyncStatusCard(viewModel: viewModel)
+                        .pulseSkeleton(viewModel.isLoading(.syncStatus))
 
                     if let note = viewModel.actionNote {
                         Text(note)
@@ -62,6 +63,7 @@ struct StatusView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(PulseSpacing.lg)
+                .pulseReveal(viewModel.settled)
             }
             .refreshable { await viewModel.load() }
         }

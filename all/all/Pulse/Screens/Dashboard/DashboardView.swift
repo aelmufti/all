@@ -20,19 +20,12 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if viewModel.hasAnyData {
-                    overview
+                if !viewModel.hasAnyData, case .failed(let message) = viewModel.state {
+                    ErrorView(message: message) { viewModel.retry() }
                 } else {
-                    switch viewModel.state {
-                    case .loading:
-                        LoadingView(message: "Chargement des statistiques…")
-                    case .failed(let message):
-                        ErrorView(message: message) { viewModel.retry() }
-                    case .loaded:
-                        // Cas transitoire : données arrivées mais toutes vides,
-                        // le contenu ci-dessous gère l'état "rien sur la période".
-                        overview
-                    }
+                    // Mise en page tout de suite ; chaque carte se remplit à
+                    // l'arrivée de ses données.
+                    overview
                 }
             }
             .background(Color.pulseBackground)
@@ -68,21 +61,25 @@ struct DashboardView: View {
                     DashboardSummaryCard(summary: viewModel.sleepSummary)
                 }
                 .buttonStyle(.plain)
+                .pulseSkeleton(viewModel.isLoading(.sleep))
 
                 NavigationLink(value: DashboardTab.training) {
                     DashboardSummaryCard(summary: viewModel.trainingSummary)
                 }
                 .buttonStyle(.plain)
+                .pulseSkeleton(viewModel.isLoading(.training))
 
                 NavigationLink(value: DashboardTab.health) {
                     DashboardSummaryCard(summary: viewModel.healthSummary)
                 }
                 .buttonStyle(.plain)
+                .pulseSkeleton(viewModel.isLoading(.health))
 
                 NavigationLink(value: DashboardTab.nutrition) {
                     DashboardSummaryCard(summary: viewModel.nutritionSummary)
                 }
                 .buttonStyle(.plain)
+                .pulseSkeleton(viewModel.isLoading(.nutrition))
 
                 NavigationLink(value: DashboardTab.map) {
                     DashboardMapRow()
@@ -95,6 +92,7 @@ struct DashboardView: View {
                 .buttonStyle(.plain)
             }
             .padding(PulseSpacing.lg)
+            .pulseReveal(viewModel.settled)
         }
         .pulseTabBarClearance()
         .refreshable { await viewModel.reload() }

@@ -51,6 +51,9 @@ final class NutritionViewModel {
     var weekly: NutritionWeekly?
     var mealTiming: NutritionMealTiming?
     var frequent: [NutritionFrequentFood] = []
+    /// Dates ayant au moins une entrée (`api/nutrition/history?days=366`, plafond
+    /// serveur) : points du sélecteur. Vide tant que la source n'a pas répondu.
+    private(set) var daysWithData: Set<String> = []
     /// Carte Poids (déplacée depuis Santé) : état à part, une panne
     /// `api/weight` ne fait pas échouer l'écran.
     let weight: WeightViewModel
@@ -121,18 +124,6 @@ final class NutritionViewModel {
         }
     }
 
-    /// Libellé long façon `dateLabel()` Angular (`"lundi 23 septembre 2026"`),
-    /// en interprétant la chaîne calendaire à midi UTC pour ne jamais glisser
-    /// d'un jour selon le fuseau de l'appareil.
-    var dateLabel: String {
-        guard let parsed = Self.dayFormatter.date(from: date) else { return date }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "fr_FR")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "EEEE d MMMM yyyy"
-        return formatter.string(from: parsed)
-    }
-
     func shiftDay(by delta: Int) {
         guard let parsed = Self.dayFormatter.date(from: date) else { return }
         guard let shifted = Calendar(identifier: .gregorian).date(byAdding: .day, value: delta, to: parsed) else { return }
@@ -158,6 +149,7 @@ final class NutritionViewModel {
         targetInfo = nil
         weekly = nil
         mealTiming = nil
+        settled.subtract([.day, .targets, .weekly, .timing])
         isDateLoading = true
     }
 
@@ -171,45 +163,83 @@ final class NutritionViewModel {
         await gate.run(trailing: trailing) { [self] in await self.load() }
     }
 
+    /// Sections de l'écran : chacune se remplit dès que SES données sont
+    /// arrivées (réussies ou non) ; tant qu'elle n'est pas « réglée » la vue
+    /// affiche son squelette.
+    enum Part: Hashable { case day, targets, weekly, timing, frequent }
+    private(set) var settled: Set<Part> = []
+
+    func isLoading(_ part: Part) -> Bool { !settled.contains(part) }
+
     /// Garde le contenu affiché pendant le rechargement ; un échec ne le vide
-    /// pas (bandeau discret `actionError`).
+    /// pas (bandeau discret `actionError`). Les cinq requêtes et le poids
+    /// partent en parallèle, chaque carte apparaît à l'arrivée de la sienne.
     func load() async {
         loadGeneration += 1
         let generation = loadGeneration
-        if case .loaded = state {} else { state = .loading }
-        do {
-            async let dayResult = fetchDay()
-            async let targetResult = fetchTargets()
-            async let weeklyResult = fetchWeekly()
-            async let timingResult = fetchTiming()
-            async let frequentResult = fetchFrequent()
+        var wasLoaded = false
+        if case .loaded = state { wasLoaded = true } else { state = .loading }
 
-            let (day, target, weekly, timing, frequent) = try await (
-                dayResult, targetResult, weeklyResult, timingResult, frequentResult
-            )
-            guard generation == loadGeneration else { return }
-            self.day = day
-            self.targetInfo = target
-            self.weekly = weekly
-            self.mealTiming = timing.meal
-            self.frequent = frequent
-            state = .loaded
-            actionError = nil
-            isDateLoading = false
-            await weight.load()
+        async let dayResult = settle(.day, generation, stale: { await self.client.cachedValue("api/nutrition/day/\(self.date)") }, fetch: { try await self.fetchDay() }, apply: { self.day = $0 })
+        async let targetResult = settle(.targets, generation, stale: { await self.client.cachedValue("api/nutrition/targets", query: ["date": self.date]) }, fetch: { try await self.fetchTargets() }, apply: { self.targetInfo = $0 })
+        async let weeklyResult = settle(.weekly, generation, stale: { await self.client.cachedValue("api/nutrition/weekly", query: ["date": self.date]) }, fetch: { try await self.fetchWeekly() }, apply: { self.weekly = $0 })
+        async let timingResult = settle(.timing, generation, stale: { await self.client.cachedValue("api/nutrition/timing/\(self.date)") }, fetch: { try await self.fetchTiming() }, apply: { self.mealTiming = $0.meal })
+        async let frequentResult = settle(.frequent, generation, stale: { await self.client.cachedValue("api/nutrition/frequent") }, fetch: { try await self.fetchFrequent() }, apply: { self.frequent = $0 })
+        async let weightTask: Void = weight.load()
+        async let historyTask: Void = loadDaysWithData()
+
+        let errors = await [dayResult, targetResult, weeklyResult, timingResult, frequentResult]
+        guard generation == loadGeneration else { return }
+        isDateLoading = false
+        let firstError = errors.compactMap { $0 }.first
+        let hasAnything = day != nil || targetInfo != nil || weekly != nil || !frequent.isEmpty
+        if let firstError, !wasLoaded, !hasAnything {
+            state = .failed(Self.message(for: firstError))
+            await weightTask
+            await historyTask
+            return
+        }
+        state = .loaded
+        actionError = firstError.map(Self.message(for:))
+        await weightTask
+        await historyTask
+    }
+
+    /// Exécute un chargement de section ; ignore la réponse d'une date quittée
+    /// entre-temps. La section est « réglée » même en cas d'échec.
+    private func settle<T>(
+        _ part: Part, _ generation: Int,
+        stale: @MainActor () async -> T?,
+        fetch: @MainActor () async throws -> T, apply: @MainActor (T) -> Void
+    ) async -> Error? {
+        // Dernière valeur connue (cache) affichée aussitôt si la section est vide.
+        if !settled.contains(part), let value = await stale(),
+           generation == loadGeneration, !settled.contains(part) {
+            apply(value)
+            settled.insert(part)
+        }
+        do {
+            let value = try await fetch()
+            guard generation == loadGeneration else { return nil }
+            apply(value)
+            settled.insert(part)
+            return nil
         } catch {
-            guard generation == loadGeneration else { return }
-            isDateLoading = false
-            if case .loaded = state {
-                actionError = Self.message(for: error)
-            } else {
-                state = .failed(Self.message(for: error))
-            }
+            guard generation == loadGeneration else { return nil }
+            settled.insert(part)
+            return error
         }
     }
 
+    private func loadDaysWithData() async {
+        await PulseDaysWithData.load(
+            client: client, path: "api/nutrition/history", query: ["days": "366"],
+            dates: { (rows: [NutritionHistoryDay]) in Set(rows.map(\.date)) },
+            apply: { self.daysWithData = $0 })
+    }
+
     private func fetchDay(for date: String) async throws -> NutritionDay {
-        try await client.get("api/nutrition/day/\(date)")
+        try await client.getCached("api/nutrition/day/\(date)")
     }
 
     private func fetchDay() async throws -> NutritionDay {
@@ -224,24 +254,25 @@ final class NutritionViewModel {
     /// `load()` suivant n'incrémente `loadGeneration` qu'ensuite).
     private func refreshDayAfterWrite(of opDate: String) async throws {
         let refreshed = try await fetchDay(for: opDate)
+        Task { await loadDaysWithData() }
         guard date == opDate else { return }
         day = refreshed
     }
 
     private func fetchTargets() async throws -> NutritionTargetInfo {
-        try await client.get("api/nutrition/targets", query: ["date": date])
+        try await client.getCached("api/nutrition/targets", query: ["date": date])
     }
 
     private func fetchWeekly() async throws -> NutritionWeekly {
-        try await client.get("api/nutrition/weekly", query: ["date": date])
+        try await client.getCached("api/nutrition/weekly", query: ["date": date])
     }
 
     private func fetchTiming() async throws -> NutritionTimingResponse {
-        try await client.get("api/nutrition/timing/\(date)")
+        try await client.getCached("api/nutrition/timing/\(date)")
     }
 
     private func fetchFrequent() async throws -> [NutritionFrequentFood] {
-        try await client.get("api/nutrition/frequent")
+        try await client.getCached("api/nutrition/frequent")
     }
 
     // MARK: - Écritures (read-only par défaut, cf. rendu de l'agent)

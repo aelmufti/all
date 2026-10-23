@@ -304,7 +304,6 @@ struct HealthReloadTests {
         await waitUntil { backend.count("api/wellness/day/\(yesterday)") == 1 }
         #expect(vm.date == yesterday)
         #expect(vm.day == nil)
-        #expect(vm.intensity == nil)
         #expect(vm.isDayLoading)
         #expect(vm.hasContent)  // la page garde sa structure (emplacements réservés)
         backend.release("api/wellness/day/\(yesterday)")
@@ -485,6 +484,7 @@ struct HomeReloadTests {
 
         box.mode = .phone
         backend.fail("api/activities")
+        backend.fail("api/wellness/day/\(HomeViewModel.todayKey())")
         await vm.reload()
         if case .failed = vm.state {} else { Issue.record("échec plein écran attendu après changement de source") }
         #expect(vm.day == nil)
@@ -494,6 +494,7 @@ struct HomeReloadTests {
         if case .failed = vm.state {} else { Issue.record("le réessai doit toujours voir le changement de source") }
 
         backend.set("api/activities", #"{"total":0,"items":[]}"#)
+        backend.set("api/wellness/day/\(HomeViewModel.todayKey())", dayJSON)
         await vm.reload()
         #expect(isLoaded(vm) && vm.day != nil)
 
@@ -813,7 +814,9 @@ struct DashboardSourceChangeTests {
         #expect(vm.state == .loaded && vm.hasAnyData)
 
         box.mode = .phone
-        backend.fail("api/stats/sleep-debt")
+        let statsPaths = ["api/stats/tab-training", "api/stats/tab-health", "api/stats/tab-nutrition",
+                          "api/stats/sleep-debt", "api/stats/sleep-insights", "api/stats/sleep-regularity"]
+        statsPaths.forEach { backend.fail($0) }
         await vm.reload()
         if case .failed = vm.state {} else { Issue.record("échec attendu") }
         #expect(!vm.hasAnyData)  // ni l'ancienne source à l'écran…
@@ -821,7 +824,7 @@ struct DashboardSourceChangeTests {
         await vm.reload()  // …ni oubli du changement au réessai
         #expect(!vm.hasAnyData)
 
-        backend.set("api/stats/sleep-debt", sleepDebtJSON)
+        script(backend)
         await vm.reload()
         #expect(vm.state == .loaded && vm.hasAnyData)
 

@@ -113,68 +113,151 @@ final class DashboardViewModel {
         self.subView = subView
     }
 
+    /// Sections de l'aperçu : chacune se remplit dès que SES données sont
+    /// arrivées (réussies ou non) ; tant qu'elle n'est pas « réglée » la carte
+    /// affiche son squelette.
+    enum Part: Hashable { case training, health, nutrition, sleep }
+    private(set) var settled: Set<Part> = []
+
+    func isLoading(_ part: Part) -> Bool { !settled.contains(part) }
+
     func load() async {
         loadGeneration += 1
         let generation = loadGeneration
         let mode = modeProvider()
-        let sourceChanged = loadedMode != nil && loadedMode != mode
+        // Contenu d'un autre backend : retiré d'emblée, la nouvelle source se
+        // présente en squelette puis se remplit.
+        if loadedMode != nil && loadedMode != mode {
+            training = nil
+            health = nil
+            nutrition = nil
+            sleepDebt = nil
+            sleepInsights = nil
+            sleepRegularity = nil
+            sleepRecommendation = nil
+            wellnessDays = []
+            settled = []
+        }
+        loadedMode = mode
         state = .loading
         let days = String(period.days)
         let daysQuery = ["days": days]
-        do {
-            async let trainingResult: DashboardTrainingTab = client.get("api/stats/tab-training", query: daysQuery)
-            async let healthResult: DashboardHealthTab = client.get("api/stats/tab-health", query: daysQuery)
-            async let nutritionResult: DashboardNutritionTab = client.get("api/stats/tab-nutrition", query: daysQuery)
-            async let sleepDebtResult: DashboardSleepDebt = client.get("api/stats/sleep-debt", query: daysQuery)
-            async let sleepInsightsResult: DashboardSleepInsights = client.get("api/stats/sleep-insights", query: daysQuery)
-            async let sleepRegularityResult: DashboardSleepRegularity = client.get("api/stats/sleep-regularity", query: daysQuery)
-            async let wellnessDaysResult: [DashboardWellnessDayRow] = client.get(
+        let c = client
+        await prefillFromCache(days: days, query: daysQuery, generation: generation)
+
+        async let trainingResult = fetch(.training, generation) { [self] in
+            let v: DashboardTrainingTab = try await c.getCached("api/stats/tab-training", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            training = v
+            return true
+        }
+        async let healthResult = fetch(.health, generation) { [self] in
+            let v: DashboardHealthTab = try await c.getCached("api/stats/tab-health", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            health = v
+            return true
+        }
+        async let nutritionResult = fetch(.nutrition, generation) { [self] in
+            let v: DashboardNutritionTab = try await c.getCached("api/stats/tab-nutrition", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            nutrition = v
+            return true
+        }
+        // Sommeil : quatre sources, la carte se remplit quand toutes ont répondu
+        // (chacune pose sa donnée à l'arrivée).
+        async let sleepDebtResult = fetch(nil, generation) { [self] in
+            let v: DashboardSleepDebt = try await c.getCached("api/stats/sleep-debt", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            sleepDebt = v
+            return true
+        }
+        async let sleepInsightsResult = fetch(nil, generation) { [self] in
+            let v: DashboardSleepInsights = try await c.getCached("api/stats/sleep-insights", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            sleepInsights = v
+            return true
+        }
+        async let sleepRegularityResult = fetch(nil, generation) { [self] in
+            let v: DashboardSleepRegularity = try await c.getCached("api/stats/sleep-regularity", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            sleepRegularity = v
+            return true
+        }
+        async let wellnessDaysResult = fetch(nil, generation) { [self] in
+            let v: [DashboardWellnessDayRow] = try await c.getCached(
                 "api/wellness/days",
                 query: ["limit": days, "days": days, "bodyBattery": "0"]
             )
-            // Reco d'heure de coucher : fetch **non bloquant** — c'est un ajout
-            // récent, un serveur Pulse pas encore à jour renvoie 404 ; on laisse
-            // alors la carte disparaître plutôt que de faire tomber tout l'écran.
-            async let sleepRecommendationResult: DashboardSleepRecommendation? =
-                try? await client.get("api/stats/sleep-recommendation", query: daysQuery)
+            guard generation == loadGeneration else { return false }
+            wellnessDays = v
+            return true
+        }
+        // Reco d'heure de coucher : fetch **non bloquant** — c'est un ajout
+        // récent, un serveur Pulse pas encore à jour renvoie 404 ; on laisse
+        // alors la carte disparaître plutôt que de faire tomber tout l'écran.
+        async let recoResult: DashboardSleepRecommendation? =
+            try? await c.getCached("api/stats/sleep-recommendation", query: daysQuery)
 
-            let (t, h, n, sd, si, sr, wd) = try await (
-                trainingResult, healthResult, nutritionResult,
-                sleepDebtResult, sleepInsightsResult, sleepRegularityResult, wellnessDaysResult
-            )
-            let reco = await sleepRecommendationResult
-            // Chargement dépassé (autre période demandée entre-temps) : le plus
-            // récent a la main sur l'état et les données.
-            guard generation == loadGeneration else { return }
-            training = t
-            health = h
-            nutrition = n
-            sleepDebt = sd
-            sleepInsights = si
-            sleepRegularity = sr
-            // Reco non bloquante : un échec ponctuel garde celle déjà affichée
-            // (sauf changement de source, où elle viendrait de l'autre backend).
-            if reco != nil || sourceChanged { sleepRecommendation = reco }
-            wellnessDays = wd
-            loadedMode = mode
+        let results = await [
+            trainingResult, healthResult, nutritionResult,
+            sleepDebtResult, sleepInsightsResult, sleepRegularityResult, wellnessDaysResult,
+        ]
+        let reco = await recoResult
+        guard generation == loadGeneration else { return }
+        settled.insert(.sleep)
+        // Un échec ponctuel garde la reco déjà affichée.
+        if let reco { sleepRecommendation = reco }
+        if let firstError = results.compactMap({ $0 }).first {
+            state = .failed(firstError.localizedDescription)
+        } else {
             state = .loaded
+        }
+    }
+
+    /// Premier affichage : dernières valeurs connues (cache) de chaque carte encore
+    /// vide, pendant que les lectures fraîches partent.
+    private func prefillFromCache(days: String, query: [String: String], generation: Int) async {
+        let c = client
+        if training == nil, let v: DashboardTrainingTab = await c.cachedValue("api/stats/tab-training", query: query),
+           generation == loadGeneration, training == nil {
+            training = v
+            settled.insert(.training)
+        }
+        if health == nil, let v: DashboardHealthTab = await c.cachedValue("api/stats/tab-health", query: query),
+           generation == loadGeneration, health == nil {
+            health = v
+            settled.insert(.health)
+        }
+        if nutrition == nil, let v: DashboardNutritionTab = await c.cachedValue("api/stats/tab-nutrition", query: query),
+           generation == loadGeneration, nutrition == nil {
+            nutrition = v
+            settled.insert(.nutrition)
+        }
+        guard sleepDebt == nil,
+              let debt: DashboardSleepDebt = await c.cachedValue("api/stats/sleep-debt", query: query),
+              let insights: DashboardSleepInsights = await c.cachedValue("api/stats/sleep-insights", query: query),
+              let regularity: DashboardSleepRegularity = await c.cachedValue("api/stats/sleep-regularity", query: query),
+              let wellness: [DashboardWellnessDayRow] = await c.cachedValue(
+                "api/wellness/days", query: ["limit": days, "days": days, "bodyBattery": "0"]),
+              generation == loadGeneration, sleepDebt == nil
+        else { return }
+        sleepDebt = debt
+        sleepInsights = insights
+        sleepRegularity = regularity
+        wellnessDays = wellness
+        settled.insert(.sleep)
+    }
+
+    /// Exécute le chargement d'une section ; la section est « réglée » même en
+    /// cas d'échec. Renvoie l'erreur éventuelle.
+    private func fetch(_ part: Part?, _ generation: Int, _ body: @MainActor () async throws -> Bool) async -> Error? {
+        do {
+            let applied = try await body()
+            if applied, let part { settled.insert(part) }
+            return nil
         } catch {
-            guard generation == loadGeneration else { return }
-            // Source changée : on ne laisse pas l'ancienne source à l'écran comme si
-            // c'était la nouvelle — plus aucune donnée, donc plein écran d'erreur
-            // (`hasAnyData`). `loadedMode` reste l'ancienne source (le réessai voit
-            // toujours le changement).
-            if sourceChanged {
-                training = nil
-                health = nil
-                nutrition = nil
-                sleepDebt = nil
-                sleepInsights = nil
-                sleepRegularity = nil
-                sleepRecommendation = nil
-                wellnessDays = []
-            }
-            state = .failed(error.localizedDescription)
+            if generation == loadGeneration, let part { settled.insert(part) }
+            return generation == loadGeneration ? error : nil
         }
     }
 

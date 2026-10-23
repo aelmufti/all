@@ -90,7 +90,8 @@ struct ActivityDetailView: View {
     private var content: some View {
         switch vm.state {
         case .loading:
-            LoadingView(message: "Chargement de l'activité…")
+            PulseSkeletonScreen(header: 0, cards: [120, 220, 200, 120])
+                .pulseTabBarClearance()
         case .failed(let message):
             ErrorView(message: message) {
                 Task { await vm.load() }

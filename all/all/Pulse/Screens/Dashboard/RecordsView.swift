@@ -19,7 +19,8 @@ struct RecordsView: View {
             } else {
                 switch viewModel.state {
                 case .loading, .loaded:
-                    LoadingView(message: "Chargement des records…")
+                    PulseSkeletonScreen(header: 0, cards: [64, 190, 150, 150, 120])
+                        .pulseTabBarClearance()
                 case .failed(let message):
                     ErrorView(message: message) { viewModel.retry() }
                 }

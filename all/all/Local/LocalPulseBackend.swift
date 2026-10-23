@@ -251,6 +251,9 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         case ("GET", let r) where r.hasPrefix("nutrition/day/"):
             return try encodeNutritionDay(date: String(r.dropFirst("nutrition/day/".count)))
 
+        case ("GET", "nutrition/history"):
+            return try encodeNutritionHistory(query: query)
+
         case ("GET", "nutrition/frequent"):
             return try encodeNutritionFrequent(query: query)
 
@@ -1022,6 +1025,18 @@ final class RealLocalPulseBackend: LocalPulseBackend {
 
     /// `GET api/nutrition/weekly` — miroir de `NutritionController.getWeekly`
     /// (`computeWeekly`, moyenne 7 j se terminant à `date`).
+    /// `GET api/nutrition/history?days=` — miroir de `NutritionController.history`
+    /// (totaux par jour arrondis à l'unité, `days` borné 1...366 défaut 30, les
+    /// plus récents, rendus par date croissante).
+    private func encodeNutritionHistory(query: [String: String]) throws -> Data {
+        let requested = query["days"].flatMap(Int.init) ?? 30
+        let limit = min(max(requested == 0 ? 30 : requested, 1), 366)
+        let rows = try db.foodLogHistory(limit: limit)
+        return try JSONEncoder().encode(rows.map {
+            LocalNutritionHistoryDTO(date: $0.date, kcal: $0.kcal, protein: $0.protein, carbs: $0.carbs, fiber: $0.fiber)
+        })
+    }
+
     private func encodeNutritionWeekly(query: [String: String]) throws -> Data {
         let end = query["date"] ?? Self.todayDateKey()
         let range = NSRange(end.startIndex..<end.endIndex, in: end)
@@ -2350,6 +2365,14 @@ struct LocalNutritionNetworkError: Error, LocalizedError {
 // `NutritionAutoDetail`/`NutritionWeekly`/`NutritionSuggestionsResponse`/
 // `NutritionSuggestionItem`/`NutritionBarcodeResult`
 // (`Pulse/Screens/Nutrition/NutritionModels.swift`, `NutritionScanView.swift`).
+
+private struct LocalNutritionHistoryDTO: Encodable {
+    let date: String
+    let kcal: Double?
+    let protein: Double?
+    let carbs: Double?
+    let fiber: Double?
+}
 
 private struct LocalNutritionMacrosDTO: Encodable {
     let kcal: Double?

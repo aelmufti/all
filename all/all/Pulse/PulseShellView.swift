@@ -84,6 +84,7 @@ struct PulseShellView: View {
     /// Observé pour masquer les onglets hors montre en mode Téléphone (cf.
     /// `PulseTab.isAvailable(in:)`) et pour re-rendre dès qu'il change.
     @State private var storageMode = StorageModeStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Onglets réellement affichés dans la barre pour le mode courant — cf.
     /// `PulseTab.isAvailable(in:)`.
@@ -98,10 +99,15 @@ struct PulseShellView: View {
                     screen(for: candidate)
                         .opacity(candidate == tab ? 1 : 0)
                         .allowsHitTesting(candidate == tab)
+                        // Un onglet masqué reste instancié : ni touches ni VoiceOver.
+                        .accessibilityHidden(candidate != tab)
                         .zIndex(candidate == tab ? 1 : 0)
                 }
             }
         }
+        // Fondu court entre onglets ; aucune animation si « Réduire les animations ».
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: tab)
+        .sensoryFeedback(.selection, trigger: tab)
         // FAB « + » de la Nutrition : posé AVANT le `safeAreaInset` de la barre
         // pour être inséré dans la zone AU-DESSUS d'elle (il flotte, comme le
         // `.fab` web en `position:fixed; z-index:90`). En overlay du
@@ -126,11 +132,33 @@ struct PulseShellView: View {
         .onChange(of: tab) { _, newTab in
             visited.insert(newTab)
         }
+        // Préchargement : une fois l'Accueil affiché, les autres onglets sont
+        // instanciés un par un (masqués) pour que leurs `.task` chargent en
+        // arrière-plan ; ils sont prêts à la première bascule.
+        .task { await preloadOtherTabs() }
         // Bascule de mode alors qu'un onglet désormais masqué est sélectionné
         // (ex. Nutrition puis passage en Téléphone depuis Réglages) : replie
         // sur Accueil, toujours disponible quel que soit le mode.
         .onChange(of: storageMode.mode) { _, _ in
             if !visibleTabs.contains(tab) { tab = .accueil }
+        }
+    }
+
+    /// Délai avant le premier préchargement (l'Accueil charge d'abord) puis entre
+    /// deux onglets (évite une rafale de requêtes et de rendus d'un coup).
+    private static let preloadStartDelay: Duration = .seconds(1)
+    private static let preloadStepDelay: Duration = .milliseconds(300)
+
+    /// Ajoute chaque onglet visible non encore visité à `visited`, un par un.
+    /// Annulé avec la vue ; un onglet que l'utilisateur ouvre entre-temps est
+    /// simplement déjà dans `visited`. Rien n'est présenté : les onglets restent à
+    /// opacité 0, sans touches ni VoiceOver (cf. `body`).
+    private func preloadOtherTabs() async {
+        try? await Task.sleep(for: Self.preloadStartDelay)
+        for candidate in visibleTabs where !visited.contains(candidate) {
+            if Task.isCancelled { return }
+            visited.insert(candidate)
+            try? await Task.sleep(for: Self.preloadStepDelay)
         }
     }
 

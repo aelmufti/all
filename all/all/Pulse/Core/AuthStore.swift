@@ -70,6 +70,7 @@ final class AuthStore {
             // Ignoré : on efface l'état local même si Pulse est inatteignable
             // ou si la session avait déjà expiré côté serveur.
         }
+        PulseResponseCache.shared.invalidateAll()
         username = nil
     }
 

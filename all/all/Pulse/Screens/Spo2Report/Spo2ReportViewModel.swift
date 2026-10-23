@@ -35,8 +35,11 @@ final class Spo2ReportViewModel {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
+        if report == nil, let stale: Spo2Report = await client.cachedValue("api/wellness/spo2-report"), report == nil {
+            report = stale
+        }
         do {
-            report = try await client.get("api/wellness/spo2-report")
+            report = try await client.getCached("api/wellness/spo2-report")
         } catch {
             errorMessage = Self.message(for: error)
         }

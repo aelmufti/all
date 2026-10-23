@@ -89,6 +89,8 @@ enum LocalDataPurge {
 
         try db.purgeAllData()
         pulledFiles?.removeAll()
+        // Les lectures gardées reflètent la base d'avant la purge.
+        PulseResponseCache.shared.invalidateAll()
         log.info("purge iPhone: \(report.filesDeleted, privacy: .public) fichier(s) supprimé(s), \(report.filesKept, privacy: .public) gardé(s), \(report.filesSkipped, privacy: .public) non supprimé(s)")
         return report
     }

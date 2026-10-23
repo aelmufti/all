@@ -87,7 +87,8 @@ struct ProgrammeView: View {
     private var content: some View {
         switch viewModel.state {
         case .loading:
-            LoadingView(message: "Chargement du programme…")
+            PulseSkeletonScreen(header: 0, cards: [64, 190, 190, 190])
+                .pulseTabBarClearance()
         case .failed(let message):
             ErrorView(message: message) {
                 Task { await viewModel.reload() }

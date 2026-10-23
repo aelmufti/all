@@ -21,6 +21,14 @@ final class ActivitiesViewModel {
     }
 
     private(set) var state: State = .loading
+    /// Pour animer le fondu loading → contenu (la vue ne compare pas `State`).
+    var stateTag: Int {
+        switch state {
+        case .loading: return 0
+        case .loaded: return 1
+        case .failed: return 2
+        }
+    }
     private let client: PulseAPIClient
     /// Fusionne les rechargements (synchro, changement de source, pull-to-refresh)
     /// — cf. `ReloadGate`.
@@ -43,11 +51,13 @@ final class ActivitiesViewModel {
     /// (pas de bandeau d'erreur sur cet écran : on garde simplement la liste).
     func load() async {
         if case .loaded = state {} else { state = .loading }
+        let query = ["limit": "500"]
+        if case .loading = state, let stale: ActivityListResponse = await client.cachedValue("api/activities", query: query),
+           case .loading = state {
+            state = .loaded(stale.items)
+        }
         do {
-            let response: ActivityListResponse = try await client.get(
-                "api/activities",
-                query: ["limit": "500"]
-            )
+            let response: ActivityListResponse = try await client.getCached("api/activities", query: query)
             state = .loaded(response.items)
         } catch {
             if case .loaded = state {} else { state = .failed(error.localizedDescription) }

@@ -58,20 +58,35 @@ final class StatusViewModel {
     /// Garde les cartes affichées pendant le rechargement (pull-to-refresh : le
     /// repasser en `.loading` détruisait la `ScrollView` en plein geste) ; un
     /// échec ne les vide pas.
+    enum Part: Hashable { case link, autoSync, syncStatus }
+    private(set) var settled: Set<Part> = []
+    func isLoading(_ part: Part) -> Bool { !settled.contains(part) }
+
+    /// Les trois lectures partent en parallèle ; chaque carte se remplit à
+    /// l'arrivée de la sienne. Plein écran d'erreur seulement si TOUTES échouent
+    /// et qu'il n'y a rien à montrer.
     func load() async {
-        if case .loaded = state {} else { state = .loading }
-        do {
-            async let linkTask: StatusLinkState = client.get("api/sync/link")
-            async let detailTask: StatusHealthDetail = client.get("api/health/detail")
-            async let statusTask: StatusSyncStatusView = client.get("api/sync/status")
-            let (link, detail, status) = try await (linkTask, detailTask, statusTask)
-            self.linkState = link
+        var wasLoaded = false
+        if case .loaded = state { wasLoaded = true } else { state = .loading }
+        let c = client
+        async let linkTask: Error? = settle(.link) { [self] in self.linkState = try await c.get("api/sync/link") }
+        async let detailTask: Error? = settle(.autoSync) { [self] in
+            let detail: StatusHealthDetail = try await c.get("api/health/detail")
             self.autoSync = detail.sync
-            self.syncStatus = status
-            state = .loaded
-        } catch {
-            if case .loaded = state {} else { state = .failed(Self.message(for: error)) }
         }
+        async let statusTask: Error? = settle(.syncStatus) { [self] in self.syncStatus = try await c.get("api/sync/status") }
+        let errors = await [linkTask, detailTask, statusTask]
+        if !wasLoaded, linkState == nil, autoSync == nil, syncStatus == nil,
+           let error = errors.compactMap({ $0 }).first {
+            state = .failed(Self.message(for: error))
+            return
+        }
+        state = .loaded
+    }
+
+    private func settle(_ part: Part, _ body: @MainActor () async throws -> Void) async -> Error? {
+        defer { settled.insert(part) }
+        do { try await body(); return nil } catch { return error }
     }
 
     // MARK: - Actions
