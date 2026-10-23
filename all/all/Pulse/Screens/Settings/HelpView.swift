@@ -49,14 +49,14 @@ private struct HelpSectionCard: View {
     var body: some View {
         PulseCard {
             Text(section.title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.headline)
                 .foregroundStyle(Color.pulseTextPrimary)
 
             VStack(alignment: .leading, spacing: PulseSpacing.md) {
                 ForEach(section.topics) { topic in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(topic.title)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Color.pulseTextPrimary)
                         Text(topic.body)
                             .font(.footnote)
@@ -151,13 +151,13 @@ private enum HelpContent {
         HelpSection(title: "Réveil & coucher", topics: [
             HelpTopic(
                 title: "Réveil dans l'app",
-                body: "Le réveil se règle ici, dans l'app — ce n'est pas une alarme de l'app Horloge iOS (illisible depuis une app tierce). C'est un rappel sonore : faute d'alertes critiques, il ne sonne ni en silencieux ni en boucle."),
+                body: "Une ligne par jour : l'interrupteur active le réveil, l'heure se règle sur la ligne (enregistrée une fraction de seconde après le dernier changement). Ce n'est pas une alarme de l'app Horloge iOS (illisible depuis une app tierce) mais un rappel sonore : faute d'alertes critiques, il ne sonne ni en silencieux ni en boucle."),
             HelpTopic(
                 title: "Lien avec le coucher",
                 body: "Pour chaque jour où un réveil est réglé, l'heure de coucher conseillée se calcule sur cette heure plutôt que sur ton lever habituel."),
             HelpTopic(
                 title: "Envoyer à la montre",
-                body: "« Envoyer à la montre » règle en plus une alarme native sur la Venu 2 à partir du même planning, quand le lien BLE est actif."),
+                body: "« Envoyer à la montre » règle en plus une alarme native sur la Venu 2 à partir du même planning, quand la montre est connectée."),
         ]),
         HelpSection(title: "Données & synchro", topics: [
             HelpTopic(
@@ -173,8 +173,14 @@ private enum HelpContent {
                 title: "Source de collecte",
                 body: "« garmin-bridge » : le serveur parle à la montre en Bluetooth, sans téléphone. « iPhone (BLE) » : cette app récupère les fichiers et les envoie à Pulse. Basculer ne fait rien perdre — la déduplication par empreinte évite les doublons."),
             HelpTopic(
-                title: "Token d'ingestion",
-                body: "Il autorise l'app à envoyer des fichiers à Pulse quand la source est l'iPhone. Régénérer invalide l'ancien."),
+                title: "Jeton d'envoi",
+                body: "Synchronisation › Jeton d'envoi (source iPhone). Le jeton de l'iPhone doit être celui du serveur, sinon Pulse refuse les envois : « À mettre à jour » indique qu'ils diffèrent, et « Utiliser le jeton du serveur » les aligne. Régénérer, côté serveur, invalide l'ancien jeton."),
+            HelpTopic(
+                title: "Montre",
+                body: "La page affiche l'état du lien, les appareils à choisir tant qu'aucune montre n'est connectée, l'alerte d'envoi (avec « Renvoyer »), la synchro manuelle et le calendrier. « Diagnostic » réunit le technique : radio, connexion, listing GFDI, temps réel et affichage de tous les périphériques ; les métriques du lien sont aussi journalisées dans Console.app (subsystem « CleanYourRoom.all »). « Oublier l'appareil » demande confirmation."),
+            HelpTopic(
+                title: "Profil et adresse",
+                body: "Le profil et l'adresse de Pulse s'enregistrent seuls : à chaque changement de sélecteur, à la validation du clavier ou en quittant la page."),
             HelpTopic(
                 title: "Valeurs au tiret",
                 body: "Un tiret « — » signale une absence de donnée sur la période : les valeurs ne descendent pas à zéro pour autant. Élargis la période ou synchronise la montre."),

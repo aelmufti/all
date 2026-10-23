@@ -11,7 +11,7 @@
 //  `HealthViewModel.loadWeight`).
 //
 //  Écritures : changement de source (`PUT api/sync/source`), régénération du
-//  token d'ingestion (`POST api/sync/ingest-token/regenerate`), sauvegarde du
+//  jeton d'ingestion (`POST api/sync/ingest-token/regenerate`), sauvegarde du
 //  profil (`PUT api/profile`). L'adresse Pulse (`PulseConfig.baseURL`) et la
 //  déconnexion (`AuthStore.shared.logout()`) sont des actions locales, pas des
 //  appels réseau typés par ce fichier — la vue les invoque directement.
@@ -56,15 +56,23 @@ final class SettingsViewModel {
     var heightCmText: String = ""
     var sex: String?
     private(set) var isSavingProfile = false
-    private(set) var profileSaved = false
+    /// Incrémenté à chaque enregistrement réussi : déclencheur du retour haptique
+    /// (`.sensoryFeedback`) — pas de texte « enregistré » à l'écran.
+    private(set) var profileSaveCount = 0
     private(set) var profileError: String?
+    /// Un changement est arrivé pendant qu'une requête était en vol : on
+    /// réenregistre ensuite (une seule requête à la fois) sans écraser les champs
+    /// par la réponse du serveur.
+    private var profileResaveNeeded = false
+    private let profileDebouncer = SettingsDebouncer()
 
     // MARK: - Application (adresse Pulse)
 
     /// Pré-rempli depuis `PulseConfig.baseURL` : la vue n'a pas besoin de lire
     /// le singleton elle-même, elle passe par ce champ.
     var baseURLText: String
-    private(set) var baseURLSaved = false
+    /// Incrémenté à chaque enregistrement de l'adresse (retour haptique).
+    private(set) var baseURLSaveCount = 0
     private(set) var baseURLError: String?
 
     init(client: PulseAPIClient = .shared) {
@@ -172,36 +180,83 @@ final class SettingsViewModel {
         do {
             source = try await client.post("api/sync/ingest-token/regenerate")
         } catch {
-            sourceError = "Régénération du token refusée par le serveur."
+            sourceError = "Régénération du jeton refusée par le serveur."
         }
     }
 
     // MARK: - Profil
 
+    /// Année de naissance et taille pour les sélecteurs (`Picker`) : adossées aux
+    /// champs texte, qui restent la forme échangée avec le serveur. Chaque
+    /// changement programme l'enregistrement automatique.
+    var birthYear: Int? {
+        get { Int(birthYearText.trimmingCharacters(in: .whitespaces)) }
+        set {
+            birthYearText = newValue.map(String.init) ?? ""
+            scheduleProfileSave()
+        }
+    }
+
+    /// Taille arrondie au cm pour l'affichage ; la valeur décimale du serveur
+    /// (« 175.5 ») n'est réécrite que si l'utilisateur touche le sélecteur.
+    var heightCm: Int? {
+        get { Self.parseHeight(heightCmText).map { Int($0.rounded()) } }
+        set {
+            heightCmText = newValue.map(String.init) ?? ""
+            scheduleProfileSave()
+        }
+    }
+
+    /// Le sexe passe par ce point d'entrée (et non un `didSet`) : `applyProfile`
+    /// l'affecte aussi, sans devoir réenregistrer.
+    func setSex(_ value: String?) {
+        sex = value
+        scheduleProfileSave()
+    }
+
+    /// Enregistrement automatique : après ~0,6 s sans nouveau changement. Rien ne
+    /// part tant que l'année et le sexe ne sont pas tous deux renseignés (pas
+    /// d'erreur sur un profil encore en cours de saisie).
+    func scheduleProfileSave() {
+        guard birthYear != nil, sex != nil else { return }
+        profileDebouncer.schedule { [weak self] in await self?.saveProfile() }
+    }
+
+    /// À la sortie de la page : un changement encore en attente part tout de suite.
+    func flushProfileSave() async {
+        if profileDebouncer.cancelPending() { await saveProfile() }
+    }
+
     func saveProfile() async {
         profileError = nil
-        profileSaved = false
-        guard let birthYear = Int(birthYearText.trimmingCharacters(in: .whitespaces)), let sex else {
+        guard birthYear != nil, sex != nil else {
             profileError = "Année de naissance et sexe sont nécessaires au calcul."
             return
         }
-        guard !isSavingProfile else { return }
+        guard !isSavingProfile else {
+            profileResaveNeeded = true
+            return
+        }
         isSavingProfile = true
         defer { isSavingProfile = false }
 
-        var body = SettingsProfileUpdateRequest(birthYear: birthYear, sex: sex)
-        let trimmedHeight = heightCmText.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-        if let heightCm = Double(trimmedHeight), heightCm > 0 {
-            body.heightCm = heightCm
-        }
-
-        do {
-            let updated: SettingsProfile = try await client.put("api/profile", body: body)
-            applyProfile(updated)
-            profileSaved = true
-        } catch {
-            profileError = "Valeurs refusées : vérifie l'année de naissance et la taille."
-        }
+        repeat {
+            profileResaveNeeded = false
+            guard let birthYear, let sex else { return }
+            var body = SettingsProfileUpdateRequest(birthYear: birthYear, sex: sex)
+            if let heightCm = Self.parseHeight(heightCmText) {
+                body.heightCm = heightCm
+            }
+            do {
+                let updated: SettingsProfile = try await client.put("api/profile", body: body)
+                // Un changement plus récent attend : on ne réécrit pas les champs.
+                if !profileResaveNeeded { applyProfile(updated) } else { profile = updated }
+                profileSaveCount += 1
+            } catch {
+                profileError = "Valeurs refusées : vérifie l'année de naissance et la taille."
+                return
+            }
+        } while profileResaveNeeded
     }
 
     /// Poids retenu, en lecture seule (miroir de `profileWeight()`, Angular).
@@ -212,19 +267,33 @@ final class SettingsViewModel {
 
     // MARK: - Application
 
+    /// À la sortie de la page : n'enregistre que si le texte diffère de l'adresse
+    /// déjà retenue (rien à faire sinon, et pas d'erreur sur un champ non touché).
+    func commitBaseURLIfChanged() {
+        let trimmed = baseURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != (PulseConfig.baseURL?.absoluteString ?? "") else { return }
+        saveBaseURL()
+    }
+
     func saveBaseURL() {
         baseURLError = nil
-        baseURLSaved = false
         let trimmed = baseURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil else {
             baseURLError = "Adresse invalide."
             return
         }
         PulseConfig.baseURL = url
-        baseURLSaved = true
+        baseURLSaveCount += 1
     }
 
     // MARK: - Formatage
+
+    /// Taille saisie ou renvoyée par le serveur (virgule ou point) → cm, `nil` si vide/invalide.
+    static func parseHeight(_ text: String) -> Double? {
+        let cleaned = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        guard let value = Double(cleaned), value > 0 else { return nil }
+        return value
+    }
 
     private static func formatHeight(_ value: Double) -> String {
         value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)

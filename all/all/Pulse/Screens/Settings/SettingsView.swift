@@ -5,14 +5,15 @@
 //  Écran Paramètres natif — deux niveaux, façon Réglages iOS.
 //
 //  Racine : uniquement des LIGNES (pastille, nom, valeur courante), en trois
-//  groupes — moi (Profil, Réveil, Programme), données (Stockage,
-//  Synchronisation, Montre), app (Apparence, Aide) — plus la déconnexion
-//  quand il y a un serveur. Aucun contrôle ni texte d'explication à ce niveau.
+//  groupes — moi (Profil, Réveil), données (Stockage, Synchronisation, Montre),
+//  app (Apparence, Aide) — plus la déconnexion quand il y a un serveur. Aucun
+//  contrôle ni texte d'explication à ce niveau. (Programme a son onglet.)
 //
-//  Second niveau : une page par réglage (`SettingsProfilePage`,
-//  `SettingsWakePage`, `SettingsStoragePage`, `SettingsSyncPage`). Programme,
-//  Montre et Aide restent des feuilles (elles ont leur propre navigation).
-//  Les explications vivent dans `HelpView`.
+//  Second niveau : une page par réglage, chacune dans son fichier
+//  (`SettingsProfilePage`, `SettingsWakePage`, `SettingsStoragePage`,
+//  `SettingsSyncPage`, `SettingsWatchPage`), poussées dans la pile de navigation
+//  de cet écran. Seule Aide reste une feuille. Les explications vivent dans
+//  `HelpView`.
 //
 //  Mode Téléphone : pas de serveur, donc ni Synchronisation ni compte ;
 //  `SettingsViewModel.load()` ne charge alors que le profil.
@@ -28,8 +29,6 @@ struct SettingsView: View {
     @State private var viewModel = SettingsViewModel()
     @Environment(\.dismiss) private var dismiss
     @State private var showStatus = false
-    @State private var showWatch = false
-    @State private var showProgramme = false
     @State private var showHelp = false
     @State private var storageMode = StorageModeStore.shared
     @State private var theme = ThemeStore.shared
@@ -73,8 +72,6 @@ struct SettingsView: View {
             Task { await viewModel.reload() }
         }
         .sheet(isPresented: $showStatus) { StatusView() }
-        .sheet(isPresented: $showWatch) { WatchSectionView() }
-        .sheet(isPresented: $showProgramme) { ProgrammeView() }
         .sheet(isPresented: $showHelp) { HelpView() }
         // Ancré à la racine stable (pas sur une Section du Form) — cf. le
         // commentaire de `pendingServerMode`.
@@ -129,9 +126,6 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(icon: "alarm.fill", tint: .pulseSleep, title: "Réveil", value: wakeSummary)
                     }
-                    Button { showProgramme = true } label: {
-                        SettingsRow(icon: "calendar", tint: .pulseSteps, title: "Programme", opensSheet: true)
-                    }
                 }
 
                 Section {
@@ -149,10 +143,12 @@ struct SettingsView: View {
                                 title: "Synchronisation", value: syncSummary)
                         }
                     }
-                    Button { showWatch = true } label: {
+                    NavigationLink {
+                        SettingsWatchPage()
+                    } label: {
                         SettingsRow(
                             icon: "applewatch", tint: .pulseBattery, title: "Montre",
-                            value: ble.connectionState == .connected ? "Connectée" : nil, opensSheet: true)
+                            value: SettingsWatchStatus.label(for: ble.connectionState))
                     }
                 }
 
@@ -203,7 +199,7 @@ struct SettingsView: View {
 // MARK: - Ligne de la racine
 //
 // Pastille colorée + nom + valeur courante, comme les Réglages iOS. `opensSheet`
-// : la ligne est un `Button` qui présente une feuille (Programme, Montre, Aide),
+// : la ligne est un `Button` qui présente une feuille (Aide),
 // il faut alors dessiner le chevron qu'un `NavigationLink` pose tout seul.
 
 private struct SettingsRow: View {
@@ -216,10 +212,11 @@ private struct SettingsRow: View {
     var body: some View {
         HStack(spacing: PulseSpacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 29, height: 29)
                 .background(tint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .accessibilityHidden(true)
             Text(title)
                 .foregroundStyle(Color.pulseTextPrimary)
             Spacer(minLength: PulseSpacing.sm)
@@ -235,248 +232,13 @@ private struct SettingsRow: View {
             }
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 
-// MARK: - Pages de second niveau
-
-// MARK: - Jauge de stockage
+// MARK: - Connexion Pulse depuis la liste des modes de stockage
 //
-// Même lecture que Réglages › Stockage d'iOS : le total, un tube découpé en
-// segments de couleur proportionnels, puis la légende avec la taille de chacun.
-// Le tube représente ce que l'app occupe (pas la capacité de l'appareil : sa
-// part y serait invisible).
-
-private struct SettingsStorageGauge: View {
-    struct Segment: Identifiable {
-        let name: String
-        let bytes: Int64
-        let color: Color
-        var id: String { name }
-    }
-
-    let segments: [Segment]
-
-    private var shown: [Segment] { segments.filter { $0.bytes > 0 } }
-    private var total: Int64 { shown.reduce(0) { $0 + $1.bytes } }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.md) {
-            Text(LocalStorageUsage.formatted(total))
-                .font(.system(size: 28, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.pulseTextPrimary)
-
-            GeometryReader { proxy in
-                let gap: CGFloat = 2
-                // Largeur minimale : un petit poste reste visible dans le tube.
-                let minWidth: CGFloat = 4
-                let available = max(0, proxy.size.width - gap * CGFloat(max(0, shown.count - 1)))
-                HStack(spacing: gap) {
-                    if shown.isEmpty {
-                        Color.pulseEmpty
-                    } else {
-                        ForEach(shown) { segment in
-                            segment.color
-                                .frame(width: max(minWidth, available * CGFloat(segment.bytes) / CGFloat(total)))
-                        }
-                    }
-                }
-                .frame(width: proxy.size.width, alignment: .leading)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-            .frame(height: 22)
-            .accessibilityHidden(true)
-
-            VStack(spacing: PulseSpacing.sm) {
-                ForEach(shown) { segment in
-                    HStack(spacing: PulseSpacing.sm) {
-                        Circle().fill(segment.color).frame(width: 9, height: 9)
-                        Text(segment.name)
-                            .font(.subheadline)
-                            .foregroundStyle(Color.pulseTextPrimary)
-                        Spacer()
-                        Text(LocalStorageUsage.formatted(segment.bytes))
-                            .font(.subheadline)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, PulseSpacing.sm)
-    }
-}
-
-/// Stockage : le choix, et juste dessous l'adresse de Pulse quand il en dépend.
-private struct SettingsStoragePage: View {
-    @Bindable var viewModel: SettingsViewModel
-    let onRequestModeChange: (StorageMode) -> Void
-    @State private var storageMode = StorageModeStore.shared
-    @State private var usage: LocalStorageUsage?
-    @State private var purge = LocalPurgeModel.live()
-    @State private var confirmPurge = false
-    /// `completions` change à chaque fin d'ingestion, d'échange ou d'envoi : les tailles
-    /// et totaux se remesurent alors (`.task(id:)` plus bas).
-    @State private var work = SyncWork.shared
-
-    /// Postes du tube côté iPhone : les `.fit` par type, puis la base.
-    private static func phoneSegments(_ usage: LocalStorageUsage) -> [SettingsStorageGauge.Segment] {
-        let known: [(folder: String, name: String, color: Color)] = [
-            ("ACTIVITY", "Activités", .pulseCalories),
-            ("MONITOR", "Suivi quotidien", .pulseSteps),
-            ("SLEEP", "Sommeil", .pulseSleep),
-        ]
-        var segments = known.map {
-            SettingsStorageGauge.Segment(name: $0.name, bytes: usage.watchFileBytesByType[$0.folder] ?? 0, color: $0.color)
-        }
-        let other = usage.watchFileBytesByType.filter { type, _ in !known.contains { $0.folder == type } }
-            .values.reduce(0, +)
-        segments.append(.init(name: "Autres fichiers", bytes: other, color: .pulseAbsent))
-        segments.append(.init(name: "Base de données", bytes: usage.databaseBytes, color: .pulseSpo2))
-        return segments
-    }
-
-    var body: some View {
-        Form {
-            SettingsStorageSection(onRequestModeChange: onRequestModeChange)
-            if storageMode.mode != .phone {
-                SettingsPulseAddressSection(viewModel: viewModel)
-            }
-            // Ce que l'app occupe sur l'iPhone — dans tous les modes : les `.fit`
-            // de la montre y transitent même quand Pulse est la référence.
-            Section("Sur cet iPhone") {
-                if let usage {
-                    SettingsStorageGauge(segments: Self.phoneSegments(usage))
-                    if let counts = usage.counts {
-                        LabeledContent("Activités", value: "\(counts.activities)")
-                        LabeledContent("Nuits", value: "\(counts.nights)")
-                        LabeledContent("Jours", value: "\(counts.days)")
-                    }
-                    LabeledContent("Fichiers de la montre", value: "\(usage.watchFileCount)")
-                } else {
-                    ProgressView()
-                }
-            }
-            // Ce que le serveur détient (inventaire de Pulse). Les tailles
-            // manquent tant que Pulse n'est pas redéployé : pas de jauge alors.
-            if storageMode.mode != .phone, let inventory = viewModel.inventory {
-                Section("Sur Pulse") {
-                    if let filesBytes = inventory.filesBytes, filesBytes >= 0, let dbBytes = inventory.dbBytes {
-                        SettingsStorageGauge(segments: [
-                            .init(name: "Fichiers de la montre", bytes: filesBytes, color: .pulseSteps),
-                            .init(name: "Base de données", bytes: dbBytes, color: .pulseSpo2),
-                        ])
-                    }
-                    LabeledContent("Activités", value: "\(inventory.activities)")
-                    LabeledContent("Nuits", value: "\(inventory.nights)")
-                    LabeledContent("Jours", value: "\(inventory.days)")
-                    LabeledContent("Fichiers de la montre", value: "\(inventory.onDisk)")
-                }
-            }
-            // Détail de ce qui est effacé, gardé et bloquant : Aide › Données & synchro.
-            Section {
-                Button(role: .destructive) { confirmPurge = true } label: {
-                    HStack {
-                        Text("Purger les données de l'iPhone")
-                        if purge.isPurging { Spacer(); ProgressView() }
-                    }
-                }
-                .disabled(!purge.canPurge)
-            } footer: {
-                if let reason = purge.blockedReason {
-                    Text(reason)
-                } else if purge.failed {
-                    Text("Purge impossible.")
-                }
-            }
-        }
-        .navigationTitle("Stockage")
-        .navigationBarTitleDisplayMode(.inline)
-        // Parcours du disque hors main actor ; remesuré à l'ouverture de la page ET à
-        // chaque fin d'activité (`SyncWork.completions`) — `.task(id:)` annule la mesure
-        // précédente, des fins rapprochées n'en empilent pas.
-        .task(id: work.completions) {
-            await measureUsage()
-            await purge.refresh()
-        }
-        .confirmationDialog("Purger les données de l'iPhone ?", isPresented: $confirmPurge, titleVisibility: .visible) {
-            Button("Purger", role: .destructive) {
-                Task {
-                    if await purge.purge() { await measureUsage() }
-                }
-            }
-        } message: {
-            Text("Efface la base de l'iPhone et les fichiers déjà reçus par Pulse.")
-        }
-    }
-
-    private func measureUsage() async {
-        usage = await Task.detached(priority: .utility) { LocalStorageUsage.measure() }.value
-    }
-}
-
-private struct SettingsWakePage: View {
-    var body: some View {
-        Form {
-            SettingsWakeSection()
-        }
-        .navigationTitle("Réveil")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// Synchronisation (modes avec serveur) : qui collecte, puis l'état.
-private struct SettingsSyncPage: View {
-    var viewModel: SettingsViewModel
-    let onStatus: () -> Void
-
-    var body: some View {
-        Form {
-            SettingsSyncSourceSection(viewModel: viewModel, onStatus: onStatus)
-            SettingsStatusSection(viewModel: viewModel)
-        }
-        .navigationTitle("Synchronisation")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-// MARK: - Stockage (où vivent les données — cf. `StorageModeStore`)
-//
-// Distinct de « Mode de connectivité » ci-dessous (`SettingsSyncSourceSection`,
-// qui dit QUI COLLECTE sur la montre, réglage serveur `api/sync/source`) : ce
-// réglage-ci dit OÙ VIVENT LES DONNÉES de l'app, purement local
-// (`StorageModeStore`, aucun appel réseau pour le lire/l'écrire).
-
-private struct SettingsStorageSection: View {
-    @State private var store = StorageModeStore.shared
-    /// Appelée à CHAQUE choix de mode dans le sélecteur : rien n'est appliqué ici. Le
-    /// parent (`SettingsView`) demande confirmation, puis applique le mode — ou, pour
-    /// Pulse / Les deux sans session active, présente la connexion dans une feuille
-    /// **annulable** (`PulseModeLoginSheet`) qui n'applique le mode qu'une fois
-    /// connecté. Sans cette feuille, basculer sur Pulse virait `ContentView` sur un
-    /// `LoginView` plein écran sans retour clair.
-    let onRequestModeChange: (StorageMode) -> Void
-
-    var body: some View {
-        Section {
-            Picker("Stockage", selection: modeBinding) {
-                ForEach(StorageMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-    }
-
-    private var modeBinding: Binding<StorageMode> {
-        // Le sélecteur ne change JAMAIS le mode lui-même : il demande, la racine
-        // confirme (`StorageModeChangeController`) puis applique ou ouvre la connexion.
-        Binding(get: { store.mode }, set: { onRequestModeChange($0) })
-    }
-}
-
-// MARK: - Connexion Pulse depuis le picker de stockage
-//
-// Présentée par `SettingsStorageSection` quand l'utilisateur choisit
+// Présentée par `SettingsView` quand l'utilisateur choisit
 // « Pulse »/« Les deux » alors qu'aucune session n'est active (typiquement
 // depuis Téléphone, sans compte). Réutilise `PulseCredentialsForm` /
 // `PulseLoginErrorMapper` (extraits de `LoginView`) : MÊME saisie, MÊME mapping
@@ -548,561 +310,6 @@ private struct PulseModeLoginSheet: View {
             } catch {
                 errorMessage = PulseLoginErrorMapper.message(for: error)
             }
-        }
-    }
-}
-
-// MARK: - Réveil (heure de lever, lié au profil)
-//
-// Déplacé depuis l'onglet Sommeil (où il n'avait pas sa place) vers les
-// Paramètres. Réglage réglé DANS l'app — pas une alarme de l'app Horloge iOS
-// (illisible et non pilotable depuis une app tierce). Double rôle : programme
-// un rappel sonore (`WakeAlarmScheduler`) et pilote l'adaptation de la carte
-// « Heure de coucher conseillée » de l'écran Sommeil : dès qu'un réveil est
-// réglé pour le prochain lever, celle-ci se recalcule sur cette heure plutôt
-// que sur l'heure de lever habituelle renvoyée par le serveur.
-//
-// Présenté dans TOUS les modes de stockage (lié au profil, pas à la source de
-// synchro). Restylé en `Form`/`Section` pour cet écran — l'ancienne carte
-// `PulseCard` de l'onglet Sommeil n'aurait pas le bon vocabulaire visuel ici.
-//
-// NOTE (incrément A) : la persistance reste pour l'instant le store global
-// `WakeScheduleStore` (`UserDefaults`, device-wide). Le passage à un stockage
-// lié au profil (serveur en mode Pulse/Les deux via `GET`/`PUT
-// api/wake-schedule`, SQLite local en mode Téléphone) se fait dans les
-// incréments suivants, sans changer l'API lue ici (`store.minutesByWeekday`,
-// `set`, `clear`).
-
-private struct SettingsWakeSection: View {
-    private static let weekdays = [2, 3, 4, 5, 6, 7, 1] // Lun … Dim (Calendar weekday, 1 = dim.)
-    private static let labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
-
-    @State private var time: Date = {
-        var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        components.hour = 7
-        components.minute = 0
-        return Calendar.current.date(from: components) ?? Date()
-    }()
-    @State private var selected: Set<Int> = []
-
-    /// `WakeScheduleStore` étant `@Observable`, lire `minutesByWeekday` ici
-    /// fait redessiner la section après chaque `set`/`clear`.
-    @State private var store = WakeScheduleStore.shared
-
-    /// Accès au lien BLE courant (état de connexion + `GarminSession` active)
-    /// pour le bouton « Envoyer à la montre » — même point d'entrée que le
-    /// reste de l'app (`BLEManager.shared`, ex. `WeightCard` dans
-    /// `HealthSubviews.swift`, qui observe `ble.weightWriteState`).
-    @ObservedObject private var ble = BLEManager.shared
-
-    private var pickedMinutes: Int {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
-        return (c.hour ?? 7) * 60 + (c.minute ?? 0)
-    }
-
-    var body: some View {
-        Section {
-            DatePicker("Heure", selection: $time, displayedComponents: .hourAndMinute)
-
-            weekdayChips
-
-            HStack(spacing: PulseSpacing.sm) {
-                Button {
-                    let minutes = pickedMinutes
-                    let weekdays = selected
-                    Task {
-                        _ = await WakeAlarmScheduler.shared.requestAuthorizationIfNeeded()
-                        WakeScheduleStore.shared.set(minutes: minutes, weekdays: weekdays)
-                    }
-                } label: {
-                    Text("Régler à \(WakeScheduleStore.hhmm(pickedMinutes))")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.pulseOnAccent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
-                                .fill(selected.isEmpty ? Color.pulseEmpty : Color.pulseAccent)
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(selected.isEmpty)
-
-                Button {
-                    WakeScheduleStore.shared.clear(weekdays: selected)
-                } label: {
-                    Text("Désactiver")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(selected.isEmpty ? Color.pulseAbsent : Color.pulseTextPrimary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
-                                .fill(Color.pulseSurface)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
-                                .strokeBorder(Color.pulseBorder, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(selected.isEmpty)
-            }
-            .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
-                                      bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
-
-            // Envoi manuel du planning courant vers la montre (alarme native,
-            // `GarminSession.writeAlarms`) — jamais automatique. Déclenché
-            // indépendamment du rappel téléphone ci-dessus (qui, lui, reste
-            // inchangé).
-            if let session = ble.garminSession {
-                WatchAlarmUploadRow(
-                    session: session,
-                    schedule: store.minutesByWeekday,
-                    isLinkActive: ble.connectionState == .connected
-                )
-            } else {
-                WatchAlarmUploadRow.disconnectedPlaceholder
-            }
-        }
-    }
-
-    private var weekdayChips: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(Self.weekdays.enumerated()), id: \.offset) { index, weekday in
-                let isSelected = selected.contains(weekday)
-                Button {
-                    if isSelected { selected.remove(weekday) } else { selected.insert(weekday) }
-                } label: {
-                    VStack(spacing: 3) {
-                        Text(Self.labels[index])
-                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        if let minutes = store.minutes(for: weekday) {
-                            Text(WakeScheduleStore.hhmm(minutes))
-                                .font(.system(size: 9, design: .rounded))
-                                .foregroundStyle(isSelected ? Color.pulseSurface.opacity(0.85) : Color.pulseSleep)
-                        } else {
-                            Text("—")
-                                .font(.system(size: 9, design: .rounded))
-                                .foregroundStyle(isSelected ? Color.pulseSurface.opacity(0.6) : Color.pulseAbsent)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 42)
-                    .foregroundStyle(isSelected ? Color.pulseSurface : Color.pulseTextSecondary)
-                    .background(isSelected ? Color.pulseTextPrimary : Color.pulseSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(isSelected ? Color.clear : Color.pulseBorder, lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
-                                  bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
-    }
-}
-
-// MARK: - Envoi du planning d'alarmes vers la montre (upload FIT Settings)
-//
-// Bouton manuel (jamais automatique) qui pousse `store.minutesByWeekday` vers
-// la montre via `GarminSession.writeAlarms` (canal d'upload partagé avec le
-// poids, cf. `GarminSession.swift`). Observe directement la `GarminSession`
-// active plutôt que `BLEManager` : contrairement au poids
-// (`BLEManager.weightWriteState`, relayé par un abonnement existant côté
-// `BLEManager`), rien ne relaie encore `GarminSession.$alarmWriteState`
-// jusqu'à `BLEManager` — un `@Published` d'un `ObservableObject` ENFANT ne
-// remonte pas automatiquement à l'`objectWillChange` du parent en
-// SwiftUI/Combine (cf. le commentaire de
-// `BLEManager.garminSessionChangeForwarder`). Ajouter ce relais appartient à
-// `BLEManager.swift`, hors périmètre de cette tâche (lot parallélisé) : cette
-// ligne s'abonne donc elle-même à la session, ce qui suffit à rester à jour
-// sans y toucher.
-private struct WatchAlarmUploadRow: View {
-    @ObservedObject var session: GarminSession
-    let schedule: [Int: Int]
-    let isLinkActive: Bool
-
-    /// Rendu quand aucune `GarminSession` n'est active (pas de lien BLE) —
-    /// bouton désactivé, pas de session à observer.
-    static var disconnectedPlaceholder: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            sendButtonLabel(enabled: false)
-            Text("aucun lien BLE actif")
-                .font(.caption)
-                .foregroundStyle(Color.pulseAbsent)
-        }
-        .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
-                                  bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.xs) {
-            Button {
-                session.writeAlarms(schedule: schedule)
-            } label: {
-                Self.sendButtonLabel(enabled: canSend)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-
-            if session.alarmWriteState != .idle {
-                HStack(spacing: PulseSpacing.xs) {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 11))
-                    Text("Montre : \(session.alarmWriteState.label)")
-                        .font(.caption)
-                }
-                .foregroundStyle(statusColor)
-            }
-        }
-        .listRowInsets(EdgeInsets(top: PulseSpacing.xs, leading: PulseSpacing.md,
-                                  bottom: PulseSpacing.xs, trailing: PulseSpacing.md))
-    }
-
-    private var canSend: Bool {
-        isLinkActive && session.alarmWriteState != .uploading
-    }
-
-    private static func sendButtonLabel(enabled: Bool) -> some View {
-        Text("Envoyer à la montre")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(enabled ? Color.pulseOnAccent : Color.pulseTextSecondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
-                    .fill(enabled ? Color.pulseAccent : Color.pulseEmpty)
-            )
-    }
-
-    private var statusIcon: String {
-        switch session.alarmWriteState {
-        case .sent: return "checkmark.circle.fill"
-        case .refused, .failed: return "exclamationmark.triangle.fill"
-        case .uploading: return "arrow.up.circle"
-        default: return "clock"
-        }
-    }
-
-    private var statusColor: Color {
-        switch session.alarmWriteState {
-        case .sent: return Color.pulseSteps
-        case .refused, .failed: return Color.pulseCalories
-        default: return Color.pulseTextSecondary
-        }
-    }
-}
-
-// MARK: - Mode de connectivité (source + contrôles propres au mode)
-//
-// Colonne vertébrale de l'écran : le sélecteur de source choisit *qui* collecte,
-// et seuls les contrôles du mode retenu s'affichent en dessous. Chaque mode a sa
-// propre histoire matérielle, donc son propre secondaire :
-//   • bridge  → le pont du homelab parle en Bluetooth → accès « Statut du pont »
-//               (lien BLE bridge↔montre, synchro auto ; `StatusView`).
-//   • phone   → cette app est le collecteur → token d'ingestion + « Collecteur
-//               (Montre) » (Diagnostic / Temps réel ; `WatchSectionView`).
-//   • legacy  → adb depuis l'hôte, rien à régler ici.
-// La fraîcheur/l'inventaire (indépendants de la source) restent en section neutre
-// « État de la synchro » (`SettingsStatusSection`).
-
-private struct SettingsSyncSourceSection: View {
-    var viewModel: SettingsViewModel
-    let onStatus: () -> Void
-
-    var body: some View {
-        Section {
-            Picker("Source", selection: sourceBinding) {
-                ForEach(SettingsSyncSourceKind.selectable) { kind in
-                    Text(kind.label).tag(kind.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(viewModel.isChangingSource)
-
-            if let source = viewModel.source {
-                if source.source == "bridge" {
-                    LabeledContent("Adresse", value: source.url)
-                    HStack(spacing: PulseSpacing.xs) {
-                        Circle()
-                            .fill(source.reachable == true ? Color.pulseSuccess : Color.pulseDanger)
-                            .frame(width: 8, height: 8)
-                        Text(source.reachable == true ? "garmin-bridge répond" : "garmin-bridge ne répond pas")
-                            .font(.footnote)
-                    }
-                    if source.reachable != true, let detail = source.detail {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                    Button(action: onStatus) {
-                        HStack {
-                            Text("Statut du pont").foregroundStyle(Color.pulseTextPrimary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.pulseAbsent)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                }
-
-                if source.source == "phone" {
-                    SettingsIngestTokenRow(viewModel: viewModel, token: source.ingestToken)
-                }
-
-                if source.overridden {
-                    Text("Réglé sur « \(source.configured == "bridge" ? "bridge" : "legacy") » dans l'environnement du conteneur, remplacé ici. Ce choix survit aux redémarrages.")
-                        .font(.caption)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
-            }
-
-            // Source serveur sur la chaîne historique (masquée du sélecteur) :
-            // Pulse refuse alors les envois de l'app — on le dit, sinon rien
-            // n'indique pourquoi les données n'arrivent plus.
-            if viewModel.source?.source == SettingsSyncSourceKind.legacy.rawValue {
-                Text("Pulse est réglé sur l'ancienne chaîne par câble : il refuse les envois de cette app. Choisis « iPhone (BLE) » pour reprendre.")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseDanger)
-            }
-
-            if let sourceError = viewModel.sourceError {
-                Text(sourceError)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseDanger)
-            }
-        } header: {
-            Text("Source")
-        }
-    }
-
-    /// Sélection à deux voies : le `Picker` change la source côté vue-modèle
-    /// dès que l'utilisateur touche un segment, `PUT api/sync/source` part
-    /// depuis `SettingsViewModel.setSource`.
-    private var sourceBinding: Binding<String> {
-        Binding(
-            get: { viewModel.source?.source ?? SettingsSyncSourceKind.legacy.rawValue },
-            set: { next in Task { await viewModel.setSource(next) } }
-        )
-    }
-}
-
-/// Bloc token d'ingestion — affiché uniquement pour la source `"phone"`
-/// (miroir du `<div class="token-block">` Angular). Copie locale vers le
-/// presse-papiers, aucune transmission réseau propre à ce geste.
-private struct SettingsIngestTokenRow: View {
-    var viewModel: SettingsViewModel
-    let token: String?
-    @State private var copied = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.sm) {
-            Text("Token d'ingestion")
-                .font(.caption)
-                .foregroundStyle(Color.pulseTextSecondary)
-            Text(token ?? "—")
-                .font(.system(.footnote, design: .rounded))
-                .textSelection(.enabled)
-            HStack(spacing: PulseSpacing.sm) {
-                Button("Copier") {
-                    guard let token else { return }
-                    UIPasteboard.general.string = token
-                    copied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        copied = false
-                    }
-                }
-                .disabled(token == nil)
-
-                Button("Régénérer") {
-                    Task { await viewModel.regenerateIngestToken() }
-                }
-                .disabled(viewModel.isRegeneratingToken)
-
-                if viewModel.isRegeneratingToken {
-                    ProgressView()
-                } else if copied {
-                    Text("copié")
-                        .font(.caption)
-                        .foregroundStyle(Color.pulseSuccess)
-                }
-            }
-        }
-        .padding(.vertical, PulseSpacing.xs)
-    }
-}
-
-// MARK: - Synchronisation > État
-
-private struct SettingsStatusSection: View {
-    var viewModel: SettingsViewModel
-
-    var body: some View {
-        Section("État de la synchro") {
-            if let status = viewModel.status {
-                // État / dernier succès / progression / message décrivent la
-                // collecte faite PAR LE SERVEUR (pont, ou à défaut l'ancienne
-                // chaîne par câble). Quand c'est l'iPhone qui collecte, le
-                // serveur renvoie l'état figé de l'ancienne chaîne — un « Erreur »
-                // permanent sans rapport avec la synchro réelle : on ne
-                // l'affiche pas. La fraîcheur, elle, vient des données reçues.
-                if viewModel.source?.source == SettingsSyncSourceKind.bridge.rawValue {
-                    LabeledContent("État") {
-                        Text(Self.stateLabel(status.state))
-                            .foregroundStyle(Self.stateColor(status.state))
-                    }
-                    if let lastSuccess = status.lastSuccess {
-                        LabeledContent("Dernier succès", value: lastSuccess)
-                    }
-                    if let progress = status.progress, let watchFiles = progress.watchFiles {
-                        LabeledContent(
-                            "Fichiers sur la montre",
-                            value: "\(progress.remainingOnWatch ?? watchFiles) / \(watchFiles)"
-                        )
-                    }
-                    if let message = status.message {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                }
-                LabeledContent("Fraîcheur des données", value: Self.freshnessLabel(status.freshness))
-            }
-        }
-    }
-
-    private static func stateLabel(_ state: String) -> String {
-        switch state {
-        case "running": return "Synchronisation en cours…"
-        case "ok": return "À jour"
-        case "error": return "Erreur"
-        default: return "Inactif"
-        }
-    }
-
-    private static func stateColor(_ state: String) -> Color {
-        switch state {
-        case "running": return .pulseAccent
-        case "ok": return .pulseSuccess
-        case "error": return .pulseDanger
-        // État neutre ("idle") — même jeton que le point du lien BLE côté
-        // écran Statut (`--absent`, distinct de `--text-dim`).
-        default: return .pulseAbsent
-        }
-    }
-
-    private static func freshnessLabel(_ freshness: SettingsSyncFreshness) -> String {
-        guard let age = freshness.ageSec else { return "aucune donnée" }
-        if age < 60 { return "à l'instant" }
-        if age < 3_600 { return "il y a \(age / 60) min" }
-        if age < 86_400 { return "il y a \(age / 3_600) h" }
-        return "il y a \(age / 86_400) j"
-    }
-}
-
-// MARK: - Profil
-
-/// Page « Profil », ouverte depuis la section Compte.
-private struct SettingsProfilePage: View {
-    @Bindable var viewModel: SettingsViewModel
-
-    var body: some View {
-        Form {
-            SettingsProfileSection(viewModel: viewModel)
-        }
-        .navigationTitle("Profil")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct SettingsProfileSection: View {
-    @Bindable var viewModel: SettingsViewModel
-
-    var body: some View {
-        Section {
-            LabeledContent("Année de naissance") {
-                TextField("AAAA", text: $viewModel.birthYearText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-            }
-            LabeledContent("Taille") {
-                HStack(spacing: PulseSpacing.xs) {
-                    TextField("cm", text: $viewModel.heightCmText)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                    Text("cm")
-                        .font(.footnote)
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
-            }
-            Picker("Sexe", selection: $viewModel.sex) {
-                Text("Homme").tag(Optional("male"))
-                Text("Femme").tag(Optional("female"))
-            }
-            .pickerStyle(.segmented)
-
-            LabeledContent("Poids retenu", value: viewModel.profileWeightLabel)
-
-            Button {
-                Task { await viewModel.saveProfile() }
-            } label: {
-                if viewModel.isSavingProfile {
-                    ProgressView()
-                } else {
-                    Text("Enregistrer")
-                }
-            }
-            .disabled(viewModel.isSavingProfile)
-
-            if viewModel.profileSaved {
-                Text("enregistré")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseSuccess)
-            }
-            if let profileError = viewModel.profileError {
-                Text(profileError)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseDanger)
-            }
-        }
-    }
-}
-
-// MARK: - Adresse de Pulse
-
-private struct SettingsPulseAddressSection: View {
-    @Bindable var viewModel: SettingsViewModel
-
-    var body: some View {
-        Section {
-            TextField("https://pulse.<tailnet>.ts.net", text: $viewModel.baseURLText)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            Button("Enregistrer l'adresse") {
-                viewModel.saveBaseURL()
-            }
-
-            if viewModel.baseURLSaved {
-                Text("enregistré")
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseSuccess)
-            }
-            if let baseURLError = viewModel.baseURLError {
-                Text(baseURLError)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseDanger)
-            }
-        } header: {
-            Text("Adresse de Pulse")
         }
     }
 }

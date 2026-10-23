@@ -2,10 +2,18 @@
 //  BLEDiagnosticView.swift
 //  all (bridge-connect)
 //
-//  Vue de diagnostic de l'incrément 1 : donne à voir en direct ce que le
-//  harnais mesure (état radio, état de connexion, compteur de notifications).
-//  Les 5 métriques elles-mêmes sont journalisées côté os.Logger — voir
-//  BLEManager — et se lisent dans Console.app sur device réel, pas ici.
+//  Sous-page « Diagnostic » de Montre (`SettingsWatchPage`) : le technique —
+//  état radio, connexion, listing GFDI, lien vers « Temps réel ». Poussée dans la
+//  pile de navigation des Paramètres : pas de `NavigationStack` propre.
+//
+//  Diagnostic os.Logger : les 5 métriques du harnais BLE (durée de fenêtre,
+//  notifications/fenêtre, latence de reconnexion, restauration d'état,
+//  supervision timeout) sont journalisées côté os.Logger — voir `BLEManager` —
+//  et se lisent dans Console.app (subsystem « CleanYourRoom.all ») sur device
+//  réel, pas dans l'UI.
+//
+//  Ce fichier porte aussi les morceaux partagés avec la page Montre
+//  (`BLEDevicesSection`, `GarminSyncSection`) et les fonctions pures testées.
 //
 
 import CoreBluetooth
@@ -13,173 +21,31 @@ import SwiftUI
 
 struct BLEDiagnosticView: View {
     @ObservedObject private var ble = BLEManager.shared
-    @State private var ingestToken = ""
-    @State private var calendarSyncEnabled = PulseConfig.calendarSyncEnabled
-    /// Masque le token d'ingestion Pulse et le pied de page diagnostic
-    /// os.Logger en mode Téléphone (`StorageModeStore.current == .phone`) :
-    /// sans cible de push Pulse, ces deux blocs n'ont aucun sens pour
-    /// l'utilisateur final — demande directe (« le secret Pulse est là en
-    /// mode Téléphone »). `@State` (pas `StorageModeStore.current`) pour que
-    /// la vue se re-rende si le mode change pendant qu'elle est affichée —
-    /// même idiome que `SettingsStorageSection`/`SettingsView`.
-    @State private var storageMode = StorageModeStore.shared
-    /// Santé de l'envoi vers Pulse (jeton refusé, mauvaise source, fichiers
-    /// rejetés) — cf. `Sync/PulseUploadHealth.swift`.
-    @State private var health = PulseUploadHealth.shared
-    /// Par défaut, la liste de scan masque les périphériques sans nom (bruit
-    /// BLE ambiant) — ce bouton, replié et désactivé par défaut, les
-    /// redémasque pour un usage avancé. Cf. `visibleDevices(_:showAll:)`.
-    @State private var showAllDevices = false
+    /// Même clé que `BLEDevicesSection` : « Afficher tout » vit ici, la liste de
+    /// scan de la page Montre en tient compte.
+    @AppStorage(BLEDevicesSection.showAllKey) private var showAllDevices = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Radio") {
-                    LabeledContent("CBManagerState", value: describe(ble.centralState))
-                }
-                Section("Connexion") {
-                    LabeledContent("État", value: ble.connectionState.rawValue)
-                    LabeledContent("Périphérique", value: ble.peripheralName ?? "—")
-                    LabeledContent("Identifiant", value: ble.peripheralIdentifier ?? "—")
-                    LabeledContent("Notifications (fenêtre courante)", value: "\(ble.notificationCount)")
-                }
-                // Une ligne d'alerte tant qu'un problème d'envoi est connu ; « Renvoyer »
-                // seulement s'il y a des fichiers en quarantaine. Rien en mode
-                // Téléphone (rien ne part vers Pulse).
-                if storageMode.mode != .phone, let issue = health.issue {
-                    Section {
-                        Label(issue.label, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Color.pulseDanger)
-                        if health.rejectedCount > 0 {
-                            Button("Renvoyer") { PulseBacklogPusher.resendRejected() }
-                        }
-                    }
-                }
-                if storageMode.mode != .phone {
-                    Section("Sync Pulse") {
-                        LabeledContent("URL Pulse", value: PulseConfig.baseURL?.absoluteString ?? "— (à définir dans l'onglet Pulse)")
-                        SecureField("Token d'ingestion Pulse", text: $ingestToken)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        Button("Enregistrer le token") {
-                            let trimmed = ingestToken.trimmingCharacters(in: .whitespacesAndNewlines)
-                            PulseConfig.ingestToken = trimmed.isEmpty ? nil : trimmed
-                            health.clearConfigProblem()
-                        }
-                        Text("Le token doit correspondre à un INGEST_TOKENS du serveur Pulse, et la source de synchro doit être réglée sur « phone » côté Pulse.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .onAppear { ingestToken = PulseConfig.ingestToken ?? "" }
-                }
-                Section("Calendrier") {
-                    Toggle("Synchroniser vers la montre", isOn: $calendarSyncEnabled)
-                        .onChange(of: calendarSyncEnabled) { _, isOn in
-                            PulseConfig.calendarSyncEnabled = isOn
-                            // Déclenche l'invite d'accès système à l'activation ;
-                            // si l'utilisateur refuse, on remet le toggle à off.
-                            if isOn {
-                                EventKitCalendarSource.shared.requestAccess { granted in
-                                    DispatchQueue.main.async {
-                                        if !granted {
-                                            calendarSyncEnabled = false
-                                            PulseConfig.calendarSyncEnabled = false
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    Text("La montre récupère les événements à venir pendant qu'elle est connectée et l'app ouverte. Accès en lecture seule au calendrier iOS.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                // Liste de scan masquée dès qu'un lien est établi ou en cours de
-                // revalidation : une fois la montre connectée, la trentaine de
-                // périphériques BLE alentour n'est que du bruit (demande
-                // utilisateur). Elle réapparaît à la déconnexion (via « Oublier
-                // l'appareil ») pour pouvoir rescanner et choisir une cible.
-                if ble.connectionState != .connected && ble.connectionState != .reconnecting {
-                    Section("Périphériques") {
-                        if ble.connectionState == .scanning {
-                            Button("Arrêter le scan", action: ble.stopScan)
-                        } else {
-                            Button("Scanner", action: ble.scan)
-                        }
-                        let visible = visibleDevices(ble.discovered, showAll: showAllDevices)
-                        if visible.isEmpty {
-                            Text(emptyDevicesMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(visible) { device in
-                                Button {
-                                    ble.connect(to: device.id)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            HStack(spacing: PulseSpacing.xs) {
-                                                Text(device.name)
-                                                if isLikelyGarminDevice(device.name) {
-                                                    Text("Probable")
-                                                        .font(.caption2.weight(.semibold))
-                                                        .foregroundStyle(Color.pulseAccent)
-                                                }
-                                            }
-                                            // UUID technique : tenu à l'écart, derrière
-                                            // « Afficher tout » (demande utilisateur —
-                                            // « trop d'options sans nom »).
-                                            if showAllDevices {
-                                                Text(device.id.uuidString)
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.secondary)
-                                                    .lineLimit(1).truncationMode(.middle)
-                                            }
-                                        }
-                                        Spacer()
-                                        Text("\(device.rssi) dBm")
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        // Repliée et désactivée par défaut — n'apparaît que pour un
-                        // usage avancé (cf. commentaire de `showAllDevices`).
-                        Toggle("Afficher tout", isOn: $showAllDevices)
-                            .font(.footnote)
-                    }
-                }
-                if let session = ble.garminSession {
-                    GarminDirectorySection(session: session)
-                }
-                // Rien à oublier tant qu'aucun appareil n'est connu — le bouton ne
-                // s'affiche que si un appareil a déjà été relié au moins une fois
-                // ou est en cours de reconnexion (demande utilisateur : « toujours
-                // présent alors qu'il n'y a rien à oublier »).
-                if shouldShowForgetDeviceButton(peripheralName: ble.peripheralName, connectionState: ble.connectionState) {
-                    Section {
-                        Button("Oublier l'appareil", role: .destructive, action: ble.forgetDevice)
-                    }
-                }
-                if storageMode.mode != .phone {
-                    Section {
-                        Text("Les 5 métriques (durée de fenêtre, notifications/fenêtre, latence de reconnexion, restauration d'état, supervision timeout) sont journalisées via os.Logger — Console.app, filtre subsystem « CleanYourRoom.all ».")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+        List {
+            Section("Radio") {
+                LabeledContent("CBManagerState", value: describe(ble.centralState))
             }
-            .navigationTitle("Diagnostic BLE")
-            .refreshesPulseRejectedCount(health)
+            Section("Connexion") {
+                LabeledContent("État", value: ble.connectionState.rawValue)
+                LabeledContent("Périphérique", value: ble.peripheralName ?? "—")
+                LabeledContent("Identifiant", value: ble.peripheralIdentifier ?? "—")
+                LabeledContent("Notifications (fenêtre courante)", value: "\(ble.notificationCount)")
+            }
+            if let session = ble.garminSession {
+                GarminGFDISection(session: session)
+            }
+            Section {
+                NavigationLink("Temps réel") { RealtimeMetricsView() }
+                Toggle("Afficher tous les périphériques", isOn: $showAllDevices)
+            }
         }
-    }
-
-    private var emptyDevicesMessage: String {
-        if ble.connectionState == .scanning { return "Recherche…" }
-        if ble.discovered.isEmpty { return "Aucun périphérique. Lance un scan." }
-        // Le scan a bien trouvé des périphériques, mais aucun avec un nom —
-        // filtrés par défaut (cf. `visibleDevices`).
-        return "Aucun périphérique nommé pour l'instant. Active « Afficher tout » pour voir les appareils sans nom."
+        .navigationTitle("Diagnostic")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func describe(_ state: CBManagerState) -> String {
@@ -193,6 +59,74 @@ struct BLEDiagnosticView: View {
         @unknown default: return "?"
         }
     }
+}
+
+// MARK: - Liste de scan (partagée avec la page Montre)
+
+/// Section « Périphériques » : Scanner / Arrêter, appareils découverts, repère
+/// « Probable ». Par défaut les périphériques sans nom (bruit BLE ambiant) sont
+/// masqués ; « Afficher tous les périphériques » (page Diagnostic) les redémasque
+/// et montre l'UUID technique. Cf. `visibleDevices(_:showAll:)`.
+struct BLEDevicesSection: View {
+    static let showAllKey = "ble-show-all-devices"
+
+    @ObservedObject private var ble = BLEManager.shared
+    @AppStorage(Self.showAllKey) private var showAllDevices = false
+
+    var body: some View {
+        Section("Périphériques") {
+            if ble.connectionState == .scanning {
+                Button("Arrêter le scan", action: ble.stopScan)
+            } else {
+                Button("Scanner", action: ble.scan)
+            }
+            let visible = visibleDevices(ble.discovered, showAll: showAllDevices)
+            if visible.isEmpty {
+                Text(devicesEmptyMessage(state: ble.connectionState, discoveredCount: ble.discovered.count))
+                    .font(.footnote)
+                    .foregroundStyle(Color.pulseTextSecondary)
+            } else {
+                ForEach(visible) { device in
+                    Button {
+                        ble.connect(to: device.id)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: PulseSpacing.xs) {
+                                    Text(device.name)
+                                        .foregroundStyle(Color.pulseTextPrimary)
+                                    if isLikelyGarminDevice(device.name) {
+                                        Text("Probable")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(Color.pulseAccent)
+                                    }
+                                }
+                                if showAllDevices {
+                                    Text(device.id.uuidString)
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.pulseTextSecondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                }
+                            }
+                            Spacer()
+                            Text("\(device.rssi) dBm")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Message de la liste de scan quand il n'y a rien à montrer.
+func devicesEmptyMessage(state: BLEConnectionState, discoveredCount: Int) -> String {
+    if state == .scanning { return "Recherche…" }
+    if discoveredCount == 0 { return "Aucun périphérique. Lance un scan." }
+    // Le scan a bien trouvé des périphériques, mais aucun avec un nom —
+    // filtrés par défaut (cf. `visibleDevices`).
+    return "Aucun périphérique nommé. « Afficher tous » est dans Diagnostic."
 }
 
 // MARK: - Filtrage/tri de la liste de scan (fonctions pures, testées dans `allTests`)
@@ -235,29 +169,17 @@ func shouldShowForgetDeviceButton(peripheralName: String?, connectionState: BLEC
     peripheralName != nil || connectionState == .connected || connectionState == .reconnecting
 }
 
-/// Section GFDI V2 : état de la poignée de main, manifeste directory (métadonnées
-/// — noms/index, type, taille, date), et déclencheur manuel de téléchargement du
-/// contenu d'un fichier (tap sur une ligne → `GarminSession.downloadFile`).
-/// `@ObservedObject` dédié : `BLEDiagnosticView` n'observe que `BLEManager`, et le
-/// remplacement de `garminSession` (nouveau lien) ne republie pas les mutations
-/// internes d'une session déjà en place (nouvelles entrées listées, changement
-/// d'état) — il faut observer l'objet lui-même pour ça.
-private struct GarminDirectorySection: View {
+/// Ligne d'action « Tout synchroniser maintenant » + compteur de fichiers non
+/// ingérés (journal du spool). `@ObservedObject` dédié : `BLEManager` ne republie
+/// pas les mutations internes d'une `GarminSession` déjà en place.
+struct GarminSyncSection: View {
     @ObservedObject var session: GarminSession
-    /// Fichiers dont l'ingestion locale a échoué (journal du spool). Rafraîchi à
-    /// l'apparition et à chaque avancée de l'ingestion : la session ne publie pas
-    /// ce compteur.
+    /// Fichiers dont l'ingestion locale a échoué. Rafraîchi à l'apparition et à
+    /// chaque avancée de l'ingestion : la session ne publie pas ce compteur.
     @State private var failedIngests = 0
 
     var body: some View {
-        Section("Synchronisation") {
-            LabeledContent("Sync", value: syncStateLabel)
-            LabeledContent("Fichiers", value: "\(session.acquiredFileIndexes.count) acquis · \(session.deliveredFileIndexes.count) livrés")
-            if failedIngests > 0 {
-                Text("\(failedIngests) fichier(s) non ingéré(s)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        Section {
             // Filet de sécurité : la traversée se lance déjà toute seule à la
             // connexion (cf. `GarminSession.finishDownload()`, branche
             // `.directory`) — ce bouton sert pour un rattrapage manuel (ex.
@@ -266,20 +188,41 @@ private struct GarminDirectorySection: View {
                 session.syncNewFiles()
             }
             .disabled(session.downloadingFileIndex != nil || isDownloading)
+            if failedIngests > 0 {
+                LabeledContent("Fichiers non ingérés", value: "\(failedIngests)")
+            }
         }
         .onAppear { failedIngests = session.failedIngestCount() }
         .onReceive(NotificationCenter.default.publisher(for: .spoolIngestDidAdvance)) { _ in
             failedIngests = session.failedIngestCount()
         }
+    }
+
+    private var isDownloading: Bool {
+        if case .downloading = session.syncState { return true }
+        return false
+    }
+}
+
+/// Section GFDI V2 : état de la poignée de main, avancement, manifeste directory
+/// (métadonnées — noms/index, type, taille, date), et déclencheur manuel de
+/// téléchargement du contenu d'un fichier (tap sur une ligne →
+/// `GarminSession.downloadFile`).
+private struct GarminGFDISection: View {
+    @ObservedObject var session: GarminSession
+
+    var body: some View {
         Section("GFDI (montre V2)") {
             LabeledContent("État", value: session.state.label)
             if let firmware = session.firmwareVersion {
                 LabeledContent("Firmware", value: firmware)
             }
+            LabeledContent("Sync", value: syncStateLabel)
+            LabeledContent("Fichiers", value: "\(session.acquiredFileIndexes.count) acquis · \(session.deliveredFileIndexes.count) livrés")
             if session.files.isEmpty {
                 Text("Aucun fichier listé pour l'instant.")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pulseTextSecondary)
             } else {
                 ForEach(session.files) { entry in
                     Button {
@@ -311,14 +254,14 @@ private struct GarminDirectorySection: View {
                         .controlSize(.small)
                 } else if session.deliveredFileIndexes.contains(entry.fileIndex) {
                     Image(systemName: "checkmark.icloud.fill")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.pulseAccent)
                 } else if session.acquiredFileIndexes.contains(entry.fileIndex) {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.pulseSuccess)
                 }
                 Text("#\(entry.fileIndex)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pulseTextSecondary)
             }
             HStack {
                 Text(byteCountFormatter.string(fromByteCount: Int64(entry.sizeBytes)))
@@ -327,7 +270,7 @@ private struct GarminDirectorySection: View {
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Color.pulseTextSecondary)
         }
     }
 
@@ -347,13 +290,8 @@ private struct GarminDirectorySection: View {
         case .done: return "terminé"
         }
     }
-
-    private var isDownloading: Bool {
-        if case .downloading = session.syncState { return true }
-        return false
-    }
 }
 
 #Preview {
-    BLEDiagnosticView()
+    NavigationStack { BLEDiagnosticView() }
 }

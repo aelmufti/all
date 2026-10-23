@@ -26,16 +26,15 @@ struct RealtimeMetricsView: View {
     @ObservedObject private var ble = BLEManager.shared
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let session = ble.realtimeSession {
-                    RealtimeMetricsList(session: session)
-                } else {
-                    disconnectedCard
-                }
+        Group {
+            if let session = ble.realtimeSession {
+                RealtimeMetricsList(session: session)
+            } else {
+                disconnectedCard
             }
-            .navigationTitle("Temps réel")
         }
+        .navigationTitle("Temps réel")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var disconnectedCard: some View {
@@ -46,7 +45,7 @@ struct RealtimeMetricsView: View {
                 .foregroundStyle(.secondary)
             Text("Montre déconnectée")
                 .font(.headline)
-            Text("Connecte la montre (protocole GFDI V2) depuis l'onglet BLE pour activer les métriques temps réel.")
+            Text("Connecte la montre pour activer les métriques temps réel.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -57,7 +56,7 @@ struct RealtimeMetricsView: View {
     }
 }
 
-/// `@ObservedObject` dédié (même raison que `GarminDirectorySection` dans
+/// `@ObservedObject` dédié (même raison que `GarminGFDISection` dans
 /// `BLEDiagnosticView.swift`) : `RealtimeMetricsView` n'observe que
 /// `BLEManager`, et le remplacement de `realtimeSession` (nouveau lien) ne
 /// republie pas les mutations internes d'une session déjà en place.
@@ -185,5 +184,5 @@ private struct RealtimeMetricsList: View {
 }
 
 #Preview {
-    RealtimeMetricsView()
+    NavigationStack { RealtimeMetricsView() }
 }
