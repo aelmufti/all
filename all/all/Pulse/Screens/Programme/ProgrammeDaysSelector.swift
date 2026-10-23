@@ -20,7 +20,7 @@ struct ProgrammeDaysSelector: View {
     private var showPicker: Bool { custom || !suggestion.fromHabits }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+        VStack(alignment: .leading, spacing: 12) {
             if suggestion.fromHabits {
                 optionRow(title: "Tes habitudes", trailing: suggestion.label, selected: !custom) {
                     custom = false
@@ -35,7 +35,7 @@ struct ProgrammeDaysSelector: View {
                 ProgrammeDayPicker(order: programmeDayPickerOrder, picked: $picked) { custom = true }
                 if !suggestion.fromHabits {
                     Text("\(picked.count)/\(perWeek)")
-                        .font(.system(size: 13, design: .rounded))
+                        .font(.programmeMono(12))
                         .foregroundStyle(picked.count < perWeek ? Color.pulseDanger : Color.pulseTextSecondary)
                 }
             }
@@ -50,20 +50,20 @@ struct ProgrammeDaysSelector: View {
 
     private func optionRow(title: String, trailing: String?, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? Color.pulseAccent : Color.pulseAbsent)
-                Text(title).font(.subheadline.weight(.semibold))
+            HStack(spacing: 12) {
+                ProgrammeCheckbox(checked: selected)
+                Text(title)
+                    .font(.system(size: 15, weight: selected ? .medium : .regular))
+                    .foregroundStyle(Color.pulseTextPrimary)
                 Spacer()
                 if let trailing {
                     Text(trailing)
-                        .font(.system(size: 15, design: .rounded))
+                        .font(.programmeMono(13))
                         .foregroundStyle(
                             !selected || picked.count >= perWeek ? Color.pulseTextSecondary : Color.pulseDanger)
                 }
             }
-            .foregroundStyle(Color.pulseTextPrimary)
-            .padding(.vertical, PulseSpacing.xs)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -75,7 +75,6 @@ struct ProgrammeDayPicker: View {
     @Binding var picked: Set<Int>
     var onEdit: () -> Void = {}
 
-    // Web `.dpick { gap:6px }`, `.dbtn { height:46px; min-height:46px }`.
     var body: some View {
         HStack(spacing: 6) {
             ForEach(order, id: \.self) { day in
@@ -85,14 +84,14 @@ struct ProgrammeDayPicker: View {
                     onEdit()
                 } label: {
                     Text(ProgrammeDate.weekdayLetters[day])
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(isOn ? Color.pulseTextPrimary : Color.pulseSurface)
-                        .foregroundStyle(isOn ? Color.pulseSurface : Color.pulseTextSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous))
+                        .font(.programmeMono(12, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .background(isOn ? Color.pulseTextPrimary : Color.clear)
+                        .foregroundStyle(isOn ? Color.pulseBackground : Color.pulseTextSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: PulseRadius.inner, style: .continuous)
-                                .strokeBorder(Color.pulseBorder, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(isOn ? Color.clear : Color.pulseEmpty, lineWidth: 1.5)
                         )
                 }
                 .buttonStyle(.plain)

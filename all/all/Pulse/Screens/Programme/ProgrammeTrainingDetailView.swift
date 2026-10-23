@@ -22,7 +22,7 @@ struct ProgrammeTrainingDetailView: View {
     var body: some View {
         ScrollView {
             if let domain, let active = domain.active, case .training(let detail) = domain.detail {
-                VStack(alignment: .leading, spacing: PulseSpacing.md) {
+                VStack(alignment: .leading, spacing: 16) {
                     weekCard(domain: domain, active: active, detail: detail)
                     sessionsCard(domain: domain, detail: detail)
                     calendarCard(domain: domain, detail: detail)
@@ -31,16 +31,19 @@ struct ProgrammeTrainingDetailView: View {
                     }
                     pushRow
                     if programmeFinished(domain) {
-                        Button("Relancer un cycle aujourd’hui") {
-                            Task { await viewModel.restart(domain) }
+                        VStack(spacing: 0) {
+                            Button("Relancer un cycle aujourd’hui") {
+                                Task { await viewModel.restart(domain) }
+                            }
+                            .buttonStyle(.programmePrimary)
+                            .disabled(viewModel.isBusy)
+                            Button("Bilan") { showBravo = true }
+                                .buttonStyle(.programmeText)
                         }
-                        .buttonStyle(.pulseSecondary)
-                        .disabled(viewModel.isBusy)
-                        Button("Bilan") { showBravo = true }
-                            .buttonStyle(.pulseSecondary)
                     }
                 }
-                .padding(PulseSpacing.lg)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
         }
         .background(Color.pulseBackground)
@@ -60,17 +63,11 @@ struct ProgrammeTrainingDetailView: View {
 
     private func weekCard(domain: ProgrammeDomainView, active: ProgrammeActive, detail: ProgrammeTrainingDetail) -> some View {
         let sessions = weekSessions(detail)
-        return PulseCard {
-            HStack(alignment: .lastTextBaseline, spacing: PulseSpacing.sm) {
-                HStack(alignment: .lastTextBaseline, spacing: 2) {
-                    Text("\(sessions.filter(\.done).count)")
-                        .font(.system(size: 44, weight: .semibold, design: .rounded))
-                    Text("/\(sessions.count)")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.pulseTextSecondary)
-                }
+        return ProgrammeCard {
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                ProgrammeBigNumber(value: "\(sessions.filter(\.done).count)", total: "\(sessions.count)")
                 Text(viewModel.shownWeek == active.week ? "séances cette semaine" : "séances")
-                    .font(.footnote)
+                    .font(.programmeMono(11))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
 
@@ -81,7 +78,7 @@ struct ProgrammeTrainingDetailView: View {
 
             if let focus = detail.focus.first(where: { $0.index == viewModel.shownWeek })?.focus {
                 Text(focus)
-                    .font(.footnote)
+                    .font(.system(size: 13))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
@@ -89,28 +86,18 @@ struct ProgrammeTrainingDetailView: View {
 
     private func weekSegmentsRow(weeks: Int, detail: ProgrammeTrainingDetail) -> some View {
         let segments = programmeWeekSegments(weeks: weeks, sessions: detail.sessions, shownWeek: viewModel.shownWeek)
-        return HStack(spacing: 4) {
-            ForEach(segments) { segment in
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(segmentColor(segment.state))
-                    .frame(height: 6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .strokeBorder(segment.current ? Color.pulseTextPrimary : Color.clear, lineWidth: 1)
-                    )
+        return ProgrammeSegmentBar(segments: segments.map { segment in
+            let state: ProgrammeSegmentBar.State
+            switch segment.state {
+            case "done": state = .done
+            case "part": state = .part
+            default: state = .todo
             }
-        }
+            return (state: state, current: segment.current)
+        })
     }
 
-    private func segmentColor(_ state: String) -> Color {
-        switch state {
-        case "done": return .pulseSuccess
-        case "part": return .pulseSuccess.opacity(0.45)
-        default: return .pulseSurfaceAlt
-        }
-    }
-
-    /// `‹ Semaine N ›`
+    /// `‹ SEMAINE N ›`
     private func weekNav(weeks: Int) -> some View {
         HStack {
             Button { viewModel.shownWeek -= 1 } label: {
@@ -118,15 +105,17 @@ struct ProgrammeTrainingDetailView: View {
             }
             .disabled(viewModel.shownWeek <= 1)
             Spacer()
-            Text("Semaine \(viewModel.shownWeek)")
-                .font(.subheadline.weight(.semibold))
+            ProgrammeLabel("Semaine \(viewModel.shownWeek)")
             Spacer()
             Button { viewModel.shownWeek += 1 } label: {
                 Image(systemName: "chevron.right").frame(width: 44, height: 32)
             }
             .disabled(viewModel.shownWeek >= weeks)
         }
-        .tint(Color.pulseAccent)
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(Color.pulseTextSecondary)
+        .buttonStyle(.plain)
+        .opacity(1)
     }
 
     // MARK: - Séances
@@ -136,7 +125,7 @@ struct ProgrammeTrainingDetailView: View {
         let sessions = weekSessions(detail)
         let extras = programmeWeekExtras(domain: domain, detail: detail, shownWeek: viewModel.shownWeek)
         if !sessions.isEmpty || !extras.isEmpty {
-            PulseCard {
+            ProgrammeCard {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                         ProgrammeSessionRow(
@@ -151,12 +140,12 @@ struct ProgrammeTrainingDetailView: View {
                             }
                         )
                         if index < sessions.count - 1 {
-                            Divider()
+                            ProgrammeHairline()
                         }
                     }
                     ForEach(extras) { extra in
                         if !sessions.isEmpty || extra.id != extras.first?.id {
-                            Divider()
+                            ProgrammeHairline()
                         }
                         ProgrammeExtraRow(extra: extra)
                     }
@@ -169,46 +158,34 @@ struct ProgrammeTrainingDetailView: View {
 
     private func calendarCard(domain: ProgrammeDomainView, detail: ProgrammeTrainingDetail) -> some View {
         let cells = programmeWeekDays(domain: domain, detail: detail, shownWeek: viewModel.shownWeek)
-        return PulseCard {
-            HStack(spacing: 6) {
+        return ProgrammeCard(spacing: 14) {
+            HStack(spacing: 5) {
                 ForEach(cells) { cell in
-                    VStack(spacing: 5) {
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(dayColor(cell.state))
-                            .frame(height: 26)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(cell.state == "missed" ? Color.pulseDanger.opacity(0.55) : Color.clear, lineWidth: 1)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(cell.today ? Color.pulseTextSecondary : Color.clear, style: StrokeStyle(lineWidth: 1, dash: [2]))
-                            )
+                    VStack(spacing: 6) {
+                        ProgrammeBlock(fill: blockFill(cell.state))
                             .accessibilityLabel(Text(cell.title))
                         Text(cell.letter)
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(Color.pulseTextSecondary)
+                            .font(.programmeMono(10, weight: cell.today ? .semibold : .regular))
+                            .foregroundStyle(cell.today ? Color.pulseTextPrimary : Color.pulseTextSecondary)
                     }
                     .frame(maxWidth: .infinity)
                 }
             }
             HStack(spacing: 14) {
-                ProgrammeLegendDot(color: .pulseTextSecondary.opacity(0.34), label: "prévue")
-                ProgrammeLegendDot(color: .pulseTextPrimary, label: "faite")
-                ProgrammeLegendDot(color: .pulseDanger.opacity(0.55), label: "en retard", outlined: true)
+                ProgrammeLegendItem(label: "prévue", dashed: true)
+                ProgrammeLegendItem(label: "faite", color: .pulseTextPrimary)
+                ProgrammeLegendItem(label: "en retard", color: .pulseDanger.opacity(0.55))
             }
-            .font(.system(size: 11, design: .rounded))
         }
     }
 
-    private func dayColor(_ state: String) -> Color {
+    private func blockFill(_ state: String) -> ProgrammeBlock.Fill {
         switch state {
-        case "done": return .pulseTextPrimary
-        case "planned": return .pulseTextSecondary.opacity(0.34)
-        case "extra": return .pulseSteps.opacity(0.55)
-        // « En retard » : pas de remplissage, seul le liseré marque l'état.
-        case "missed": return .clear
-        default: return .pulseSurfaceAlt
+        case "done": return .filled
+        case "planned": return .planned
+        case "extra": return .extra
+        case "missed": return .missed
+        default: return .empty
         }
     }
 
@@ -216,19 +193,15 @@ struct ProgrammeTrainingDetailView: View {
 
     private func nextRow(_ detail: ProgrammeTrainingDetail) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text("Prochaine")
-                .font(.system(size: 11, design: .rounded))
-                .tracking(1.3)
-                .textCase(.uppercase)
-                .foregroundStyle(Color.pulseTextSecondary)
+            ProgrammeLabel("Prochaine", size: 10)
             Text(programmeNextLabel(detail: detail, shownWeek: viewModel.shownWeek))
-                .font(.footnote)
-                .foregroundStyle(Color.pulseTextPrimary)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.pulseTextSecondary)
         }
         .padding(.horizontal, 2)
     }
 
-    /// Une seule rangée : état de l'envoi + bouton.
+    /// Une seule rangée : état de l'envoi + action texte.
     private var pushRow: some View {
         let running = viewModel.pushStatus?.state == "running"
         let status: String
@@ -237,12 +210,12 @@ struct ProgrammeTrainingDetailView: View {
         case "error": status = "Échec de l’envoi"
         default: status = programmePushSummary(filesSent: viewModel.pushFilesSent)
         }
-        return PulseCard {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Montre").font(.subheadline.weight(.semibold))
+        return ProgrammeCard {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgrammeLabel("Montre")
                     Text(status)
-                        .font(.system(size: 11, design: .rounded))
+                        .font(.programmeMono(11))
                         .foregroundStyle(viewModel.pushStatus?.state == "error" ? Color.pulseDanger : Color.pulseTextSecondary)
                 }
                 Spacer()
@@ -251,7 +224,7 @@ struct ProgrammeTrainingDetailView: View {
                 } label: {
                     Text("Envoyer")
                 }
-                .buttonStyle(PulseButtonStyle(kind: .secondary, fullWidth: false))
+                .buttonStyle(.programmeText)
                 .disabled(viewModel.isBusy || running)
             }
         }
@@ -264,22 +237,22 @@ private struct ProgrammeExtraRow: View {
     let extra: ProgrammeExtraActivity
 
     var body: some View {
-        HStack(spacing: PulseSpacing.sm) {
+        HStack(spacing: 12) {
             Image(systemName: ActivitySport.icon(sport: extra.sport))
-                .font(.title3)
+                .font(.system(size: 14))
                 .foregroundStyle(Color.pulseTextSecondary)
-                .frame(width: 38, height: 38)
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(ActivitySport.name(sport: extra.sport))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 15))
                     .foregroundStyle(Color.pulseTextSecondary)
                 Text(programmeExtraMeta(extra))
-                    .font(.system(size: 11, design: .rounded))
+                    .font(.programmeMono(11))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, PulseSpacing.xs)
+        .padding(.vertical, 11)
     }
 }
 
@@ -298,49 +271,48 @@ private struct ProgrammeSessionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: PulseSpacing.sm) {
-                Group {
-                    if isLocked {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color.pulseSuccess)
-                    } else {
-                        Button(action: onToggleDone) {
-                            Image(systemName: session.done ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(session.done ? Color.pulseSuccess : Color.pulseTextSecondary)
-                        }
-                        .disabled(isBusy)
+            HStack(spacing: 12) {
+                if isLocked {
+                    ProgrammeCheckbox(checked: true)
+                } else {
+                    Button(action: onToggleDone) {
+                        ProgrammeCheckbox(checked: session.done)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, -11)
+                    .disabled(isBusy)
                 }
-                .font(.title3)
-                .frame(width: 38, height: 38)
 
                 Button(action: onToggleExpand) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session.session.name)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(session.done ? Color.pulseTextSecondary : Color.pulseTextPrimary)
-                        Text(programmeSessionMeta(session))
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(Color.pulseTextSecondary)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(session.session.name)
+                                .font(.system(size: 15, weight: session.done ? .regular : .medium))
+                                .foregroundStyle(session.done ? Color.pulseTextSecondary : Color.pulseTextPrimary)
+                            Text(programmeSessionMeta(session))
+                                .font(.programmeMono(11))
+                                .foregroundStyle(Color.pulseTextSecondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        ProgrammeChevron()
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 11)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 17))
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .foregroundStyle(isExpanded ? Color.pulseAccent : Color.pulseAbsent)
             }
-            .padding(.vertical, PulseSpacing.xs)
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+                VStack(alignment: .leading, spacing: 12) {
                     ForEach(session.session.items, id: \.name) { item in
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(item.name).font(.system(size: 14))
+                                .foregroundStyle(Color.pulseTextPrimary)
                             Text(item.prescription)
-                                .font(.system(size: 11, design: .rounded))
+                                .font(.programmeMono(11))
                                 .foregroundStyle(Color.pulseTextSecondary)
                             if let note = item.note {
                                 Text(note)
@@ -350,8 +322,8 @@ private struct ProgrammeSessionRow: View {
                         }
                     }
                 }
-                .padding(.leading, 48)
-                .padding(.bottom, PulseSpacing.sm)
+                .padding(.leading, 34)
+                .padding(.bottom, 14)
             }
         }
     }

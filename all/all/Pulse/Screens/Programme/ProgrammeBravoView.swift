@@ -18,58 +18,59 @@ struct ProgrammeBravoView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: PulseSpacing.lg) {
+            VStack(alignment: .leading, spacing: 28) {
                 header
-                PulseCard {
-                    VStack(alignment: .leading, spacing: PulseSpacing.md) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("\(bilan.done)/\(bilan.planned)")
-                                .font(.system(size: 34, weight: .semibold, design: .rounded))
+                ProgrammeCard(spacing: 20) {
+                    HStack(alignment: .lastTextBaseline) {
+                        HStack(alignment: .lastTextBaseline, spacing: 10) {
+                            ProgrammeBigNumber(value: "\(bilan.done)", total: "\(bilan.planned)")
                             Text("séances")
+                                .font(.programmeMono(11))
                                 .foregroundStyle(Color.pulseTextSecondary)
-                            Spacer()
-                            if let percent = bilan.percent {
-                                Text("\(percent) %")
-                                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(Color.pulseSuccess)
-                            }
                         }
-                        weekBars
+                        Spacer()
+                        if let percent = bilan.percent {
+                            Text("\(percent) %")
+                                .font(.programmeMono(17, weight: .semibold))
+                                .foregroundStyle(Color.pulseTextPrimary)
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    weekBars
                 }
-                PulseCard {
-                    VStack(spacing: PulseSpacing.sm) {
-                        statRow("Meilleure série", "\(bilan.bestStreak) semaine\(bilan.bestStreak > 1 ? "s" : "")")
-                        statRow("Hors programme", "\(bilan.extras)")
-                    }
+                VStack(spacing: 0) {
+                    statRow("Meilleure série", "\(bilan.bestStreak) semaine\(bilan.bestStreak > 1 ? "s" : "")")
+                    ProgrammeHairline()
+                    statRow("Hors programme", "\(bilan.extras)")
                 }
-                VStack(spacing: PulseSpacing.sm) {
+                .padding(.horizontal, 2)
+                VStack(spacing: 0) {
                     Button("Relancer le bloc", action: onRestart)
-                        .buttonStyle(.pulsePrimary)
+                        .buttonStyle(.programmePrimary)
                         .disabled(isBusy)
                     Button("Choisir un autre objectif", action: onChooseOther)
-                        .buttonStyle(.pulseSecondary)
+                        .buttonStyle(.programmeText)
                     Button("Fermer", action: onClose)
-                        .buttonStyle(.pulseSecondary)
+                        .buttonStyle(.programmeText)
                 }
             }
-            .padding(PulseSpacing.lg)
+            .padding(16)
         }
         .background(Color.pulseBackground)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Bravo")
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
             Text(active.name)
                 .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
             Text(period)
-                .font(.footnote)
+                .font(.programmeMono(11))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
-        .padding(.top, PulseSpacing.xl)
+        .padding(.top, 24)
     }
 
     private var period: String {
@@ -79,20 +80,20 @@ struct ProgrammeBravoView: View {
     }
 
     private var weekBars: some View {
-        HStack(alignment: .bottom, spacing: 6) {
+        HStack(alignment: .bottom, spacing: 5) {
             ForEach(bilan.weeks) { week in
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     ZStack(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 3).fill(Color.pulseSurfaceAlt)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.pulseSurfaceAlt)
                         if week.planned > 0 {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.pulseSuccess)
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.pulseTextPrimary)
                                 .frame(height: 48 * CGFloat(week.done) / CGFloat(week.planned))
                         }
                     }
                     .frame(height: 48)
                     Text("\(week.week)")
-                        .font(.system(size: 10, design: .rounded))
+                        .font(.programmeMono(10))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 .accessibilityElement(children: .ignore)
@@ -103,11 +104,15 @@ struct ProgrammeBravoView: View {
 
     private func statRow(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).foregroundStyle(Color.pulseTextSecondary)
+            Text(label)
+                .font(.system(size: 14))
+                .foregroundStyle(Color.pulseTextSecondary)
             Spacer()
-            Text(value).font(.system(size: 15, weight: .semibold, design: .rounded))
+            Text(value)
+                .font(.programmeMono(14, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
         }
-        .font(.subheadline)
+        .padding(.vertical, 13)
     }
 }
 

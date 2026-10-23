@@ -99,7 +99,7 @@ struct ProgrammeView: View {
 
     private var loadedContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: PulseSpacing.md) {
+            VStack(alignment: .leading, spacing: 16) {
                 if let message = viewModel.actionError {
                     DashboardInlineError(message: message) { Task { await viewModel.reload() } }
                 }
@@ -114,7 +114,8 @@ struct ProgrammeView: View {
                     }
                 }
             }
-            .padding(PulseSpacing.lg)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .pulseTabBarClearance()
     }
@@ -139,23 +140,25 @@ extension ProgrammeView {
         viewModel.domains.contains { $0.kind != .sleep && $0.active != nil }
     }
 
-    /// Gros bouton quand rien n'est actif ; sinon « Objectif : … » + « Changer ».
+    /// Bouton principal quand rien n'est actif ; sinon « Objectif » + nom + « Changer » (texte).
     @ViewBuilder
     fileprivate var objectiveEntry: some View {
         if !hasAnyTrainingOrNutrition {
             Button("Choisir un objectif") { viewModel.openObjectives() }
-                .buttonStyle(PulseButtonStyle(kind: .primary))
-                .tint(Color.pulseAccent)
+                .buttonStyle(.programmePrimary)
         } else {
-            PulseCard {
-                HStack {
-                    Text("Objectif : \(objectiveName)")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Button("Changer") { viewModel.openObjectives() }
-                        .buttonStyle(PulseButtonStyle(kind: .secondary, fullWidth: false))
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgrammeLabel("Objectif")
+                    Text(objectiveName)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(Color.pulseTextPrimary)
                 }
+                Spacer()
+                Button("Changer") { viewModel.openObjectives() }
+                    .buttonStyle(.programmeText)
             }
+            .padding(.horizontal, 2)
         }
     }
 
@@ -170,7 +173,7 @@ extension ProgrammeView {
 
 // MARK: - Carte résumé d'un domaine
 
-/// Programme actif → lien vers le détail ; sinon carte « Choisir un
+/// Programme actif → lien vers le détail ; sinon rangée « Choisir un
 /// programme » qui ouvre la bibliothèque du domaine.
 private struct ProgrammeSummaryCard: View {
     let domain: ProgrammeDomainView
@@ -181,17 +184,13 @@ private struct ProgrammeSummaryCard: View {
             NavigationLink {
                 destination
             } label: {
-                PulseCard {
-                    VStack(alignment: .leading, spacing: PulseSpacing.sm) {
-                        domainLabel
-                        summary
+                ProgrammeCard(spacing: 14) {
+                    HStack {
+                        ProgrammeLabel(domain.label)
+                        Spacer()
+                        ProgrammeChevron()
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .overlay(alignment: .trailing) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 17))
-                            .foregroundStyle(Color.pulseAbsent)
-                    }
+                    summary
                 }
             }
             .buttonStyle(.plain)
@@ -199,19 +198,17 @@ private struct ProgrammeSummaryCard: View {
             Button {
                 viewModel.openLibrary(for: domain.kind)
             } label: {
-                PulseCard {
+                ProgrammeCard {
                     HStack {
                         Text(domain.label)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Color.pulseTextPrimary)
                         Spacer()
                         Text("Choisir un programme")
-                            .font(.footnote)
+                            .font(.programmeMono(11))
                             .foregroundStyle(Color.pulseTextSecondary)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 17))
-                            .foregroundStyle(Color.pulseAbsent)
+                        ProgrammeChevron()
                     }
-                    .foregroundStyle(Color.pulseTextPrimary)
                 }
             }
             .buttonStyle(.plain)
@@ -225,14 +222,6 @@ private struct ProgrammeSummaryCard: View {
         case .nutrition: ProgrammeNutritionDetailView(viewModel: viewModel)
         case .sleep: ProgrammeSleepDetailView(viewModel: viewModel)
         }
-    }
-
-    private var domainLabel: some View {
-        Text(domain.label)
-            .font(.system(size: 11, design: .rounded))
-            .tracking(1.3)
-            .textCase(.uppercase)
-            .foregroundStyle(Color.pulseTextSecondary)
     }
 
     private var name: String { domain.active?.name ?? domain.label }
@@ -252,14 +241,15 @@ private struct ProgrammeSummaryCard: View {
     }
 
     private func titleLine(trailing: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: PulseSpacing.sm) {
-            Text(name).font(.system(size: 17, weight: .semibold))
-            Text("·").foregroundStyle(Color.pulseTextSecondary)
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(name)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
+            Spacer()
             Text(trailing)
-                .font(.system(size: 15, design: .rounded))
+                .font(.programmeMono(13))
                 .foregroundStyle(Color.pulseTextSecondary)
         }
-        .padding(.trailing, PulseSpacing.xl)
     }
 
     private func trainingSummary(_ detail: ProgrammeTrainingDetail) -> some View {
@@ -267,38 +257,34 @@ private struct ProgrammeSummaryCard: View {
         let week = active?.week ?? 1
         let weekSessions = detail.sessions.filter { $0.week == week }
         let done = weekSessions.filter(\.done).count
-        return VStack(alignment: .leading, spacing: PulseSpacing.sm) {
-            HStack(alignment: .firstTextBaseline, spacing: PulseSpacing.sm) {
-                Text(name).font(.system(size: 17, weight: .semibold))
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(name)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Spacer()
                 if programmeFinished(domain) {
                     Text("Terminé")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.pulseAccent)
+                        .font(.programmeMono(11, weight: .semibold))
+                        .foregroundStyle(Color.pulseTextPrimary)
                 } else if let active, active.weeks > 0 {
                     Text("S\(active.week)/\(active.weeks)")
-                        .font(.system(size: 13, design: .rounded))
+                        .font(.programmeMono(11))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
-            .padding(.trailing, PulseSpacing.xl)
             if !weekSessions.isEmpty {
-                HStack(spacing: PulseSpacing.sm) {
-                    HStack(spacing: 5) {
-                        ForEach(weekSessions) { session in
-                            Circle()
-                                .fill(session.done ? Color.pulseSuccess : Color.pulseSurfaceAlt)
-                                .frame(width: 12, height: 12)
-                        }
-                    }
-                    Text("\(done)/\(weekSessions.count) cette semaine")
-                        .font(.footnote)
+                HStack(alignment: .lastTextBaseline, spacing: 10) {
+                    ProgrammeBigNumber(value: "\(done)", total: "\(weekSessions.count)")
+                    Text("cette semaine")
+                        .font(.programmeMono(11))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
             }
             if !programmeFinished(domain), let next = programmeNextSummary(detail: detail, week: week) {
                 Text(next)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pulseTextPrimary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.pulseTextSecondary)
             }
         }
     }

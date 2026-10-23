@@ -17,10 +17,12 @@ struct ProgrammeObjectiveSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: PulseSpacing.md) {
-                    ForEach(ProgrammeObjective.all) { objective in
-                        objectiveCard(objective)
+                VStack(spacing: 0) {
+                    ForEach(Array(ProgrammeObjective.all.enumerated()), id: \.element.id) { index, objective in
+                        if index > 0 { ProgrammeHairline() }
+                        objectiveRow(objective)
                     }
+                    ProgrammeHairline()
                     Menu {
                         ForEach(viewModel.domains) { domain in
                             Button(domain.label) {
@@ -30,12 +32,14 @@ struct ProgrammeObjectiveSheet: View {
                         }
                     } label: {
                         Text("Programmes un par un")
-                            .font(.footnote)
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Color.pulseTextSecondary)
-                            .padding(.vertical, PulseSpacing.sm)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
+                    .padding(.top, 12)
                 }
-                .padding(PulseSpacing.lg)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
             .background(Color.pulseBackground)
             .navigationTitle("Objectif")
@@ -51,38 +55,36 @@ struct ProgrammeObjectiveSheet: View {
     }
 
     @ViewBuilder
-    private func objectiveCard(_ objective: ProgrammeObjective) -> some View {
+    private func objectiveRow(_ objective: ProgrammeObjective) -> some View {
         let choices = programmeObjectiveChoices(objective, domains: viewModel.domains)
         let isActive = programmeActiveObjective(domains: viewModel.domains) == objective
-        let card = PulseCard {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(objective.name).font(.system(size: 20, weight: .semibold))
-                    Text(objective.tagline)
-                        .font(.subheadline)
+        let row = HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(objective.name)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Text(objective.tagline)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.pulseTextSecondary)
+                if let choices {
+                    Text("\(choices.training.perWeek) séances · \(choices.training.weeks) sem.")
+                        .font(.programmeMono(11))
                         .foregroundStyle(Color.pulseTextSecondary)
-                    if let choices {
-                        Text("\(choices.training.perWeek) séances · \(choices.training.weeks) sem.")
-                            .font(.system(size: 13, design: .rounded))
-                            .foregroundStyle(Color.pulseTextSecondary)
-                    }
-                }
-                Spacer()
-                if isActive {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.pulseSuccess)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 17))
-                        .foregroundStyle(Color.pulseAbsent)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(Color.pulseTextPrimary)
+            if isActive {
+                ProgrammeCheckbox(checked: true)
+            } else {
+                ProgrammeChevron()
+            }
         }
+        .padding(.vertical, 18)
+        .contentShape(Rectangle())
         if choices != nil {
-            NavigationLink(value: objective) { card }.buttonStyle(.plain)
+            NavigationLink(value: objective) { row }.buttonStyle(.plain)
         } else {
-            card.opacity(0.4)
+            row.opacity(0.4)
         }
     }
 }
@@ -99,7 +101,7 @@ private struct ProgrammeObjectiveDaysStep: View {
     var body: some View {
         let perWeek = choices.training.perWeek
         ScrollView {
-            VStack(alignment: .leading, spacing: PulseSpacing.lg) {
+            VStack(alignment: .leading, spacing: 24) {
                 ProgrammeDaysSelector(
                     perWeek: perWeek, suggestion: viewModel.daySuggestion(perWeek: perWeek), picked: $picked)
                 if let message = viewModel.actionError {
@@ -110,11 +112,10 @@ private struct ProgrammeObjectiveDaysStep: View {
                         if await viewModel.activateObjective(choices, days: picked.sorted()) { onClose() }
                     }
                 }
-                .buttonStyle(PulseButtonStyle(kind: .primary))
-                .tint(Color.pulseAccent)
+                .buttonStyle(.programmePrimary)
                 .disabled(viewModel.isBusy || picked.count < perWeek)
             }
-            .padding(PulseSpacing.lg)
+            .padding(16)
         }
         .background(Color.pulseBackground)
         .navigationTitle(objective.name)

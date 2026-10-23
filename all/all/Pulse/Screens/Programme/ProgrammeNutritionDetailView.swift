@@ -18,21 +18,22 @@ struct ProgrammeNutritionDetailView: View {
     var body: some View {
         ScrollView {
             if let domain, case .nutrition(let detail) = domain.detail {
-                PulseCard {
-                    weekStrip(detail)
-
-                    VStack(alignment: .leading, spacing: PulseSpacing.md) {
-                        ForEach(detail.today.rules) { rule in
-                            ProgrammeMacroGaugeRow(rule: rule)
+                VStack(alignment: .leading, spacing: 16) {
+                    ProgrammeCard(spacing: 20) {
+                        weekStrip(detail)
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(detail.today.rules.enumerated()), id: \.element.id) { index, rule in
+                                if index > 0 { ProgrammeHairline() }
+                                ProgrammeMacroGaugeRow(rule: rule)
+                            }
                         }
                     }
-                    .padding(.top, PulseSpacing.xs)
-
                     if detail.weightKg == nil {
                         ProgrammeWarnBox(text: "Aucun poids enregistré : les cibles par kilo restent vides.")
                     }
                 }
-                .padding(PulseSpacing.lg)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
         }
         .background(Color.pulseBackground)
@@ -43,28 +44,28 @@ struct ProgrammeNutritionDetailView: View {
     }
 
     private func weekStrip(_ detail: ProgrammeNutritionDetail) -> some View {
-        HStack(alignment: .bottom, spacing: 6) {
+        HStack(alignment: .bottom, spacing: 5) {
             ForEach(detail.days) { day in
-                VStack(spacing: 5) {
+                VStack(spacing: 6) {
                     ZStack(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(day.logged ? Color.pulseSurfaceAlt : Color.clear)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .strokeBorder(
-                                        day.logged ? Color.clear : Color.pulseBorder,
-                                        style: StrokeStyle(lineWidth: 1, dash: [3])
+                                        day.logged ? Color.clear : Color.pulseEmpty,
+                                        style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
                                     )
                             )
                             .frame(height: 48)
                         if day.logged, day.total > 0 {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.pulseSuccess)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.pulseTextPrimary)
                                 .frame(height: 48 * CGFloat(day.hits) / CGFloat(day.total))
                         }
                     }
                     Text(programmeWeekdayLetter(day.date))
-                        .font(.system(size: 10, design: .rounded))
+                        .font(.programmeMono(10))
                         .foregroundStyle(Color.pulseTextSecondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -80,12 +81,12 @@ private struct ProgrammeMacroGaugeRow: View {
     private var unit: String { programmeMacroUnit(rule.rule.metric) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text(rule.rule.label).font(.system(size: 15, weight: .semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                ProgrammeLabel(rule.rule.label)
                 Spacer()
                 Text(valueText)
-                    .font(.system(size: 19, weight: .semibold, design: .rounded))
+                    .font(.programmeMono(19, weight: .semibold))
                     .foregroundStyle(Color.pulseTextPrimary)
             }
             GeometryReader { geo in
@@ -94,24 +95,23 @@ private struct ProgrammeMacroGaugeRow: View {
                     Capsule().fill(Color.pulseSurfaceAlt)
                     if maxScale > 0, let value = rule.value {
                         Capsule()
-                            .fill(color)
+                            .fill(Color.pulseTextPrimary)
                             .frame(width: width * CGFloat(min(max(value / maxScale, 0), 1)))
                     }
                 }
             }
-            .frame(height: 6)
-            // Puce de statut + libellé (reste/dépassé/dans la cible) à gauche,
-            // cible min–max à droite.
+            .frame(height: 4)
             HStack(spacing: 6) {
-                Circle().fill(color).frame(width: 7, height: 7)
                 Text(stateText)
-                    .font(.system(size: 11, design: .rounded))
+                    .font(.programmeMono(11))
+                    .foregroundStyle(stateColor)
                 Spacer()
                 Text(goalText)
-                    .font(.system(size: 11, design: .rounded))
+                    .font(.programmeMono(11))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
         }
+        .padding(.vertical, 14)
     }
 
     private var valueText: String {
@@ -119,13 +119,12 @@ private struct ProgrammeMacroGaugeRow: View {
         return "\(Int(value.rounded()))\(unit.isEmpty ? "" : " " + unit)"
     }
 
-    /// « Sous la cible » reprend la teinte stress, quel que soit le macro.
-    private var color: Color {
+    /// Seul l'écart (dépassé / sous la cible) garde une teinte : il porte la donnée.
+    private var stateColor: Color {
         switch rule.status {
-        case .hit: return .pulseSuccess
         case .over: return .pulseDanger
         case .under: return .pulseStress
-        case .unknown: return .pulseTextSecondary
+        case .hit, .unknown: return .pulseTextSecondary
         }
     }
 

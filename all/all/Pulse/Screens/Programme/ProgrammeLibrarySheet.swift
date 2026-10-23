@@ -28,12 +28,13 @@ struct ProgrammeLibrarySheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if let choice = picking {
-                    pickingSection(choice)
-                } else {
-                    Section {
-                        ForEach(domain.choices) { choice in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let choice = picking {
+                        pickingSection(choice)
+                    } else {
+                        ForEach(Array(domain.choices.enumerated()), id: \.element.id) { index, choice in
+                            if index > 0 { ProgrammeHairline() }
                             ProgrammeChoiceRow(
                                 choice: choice,
                                 meta: choiceMeta(choice),
@@ -45,7 +46,10 @@ struct ProgrammeLibrarySheet: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
+            .background(Color.pulseBackground)
             .task { if domain.kind == .training { await loadHabits() } }
             .navigationTitle(domain.label)
             .navigationBarTitleDisplayMode(.inline)
@@ -61,13 +65,15 @@ struct ProgrammeLibrarySheet: View {
 
     @ViewBuilder
     private func pickingSection(_ choice: ProgrammeChoice) -> some View {
-        Section {
+        VStack(alignment: .leading, spacing: 24) {
+            Text(choice.name)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
             if domain.kind == .sleep {
-                Text("Réveil imposé")
-                    .font(.subheadline.weight(.semibold))
-                ProgrammeDayPicker(order: programmeDayPickerOrder, picked: $pickedDays)
-                    .listRowInsets(EdgeInsets())
-                    .padding(.vertical, PulseSpacing.xs)
+                VStack(alignment: .leading, spacing: 12) {
+                    ProgrammeLabel("Réveil imposé")
+                    ProgrammeDayPicker(order: programmeDayPickerOrder, picked: $pickedDays)
+                }
             } else {
                 ProgrammeDaysSelector(
                     perWeek: choice.perWeek, suggestion: suggest(choice.perWeek), picked: $pickedDays)
@@ -76,10 +82,10 @@ struct ProgrammeLibrarySheet: View {
                 onActivate(choice.id, pickedDays.sorted())
                 picking = nil
             }
+            .buttonStyle(.programmePrimary)
             .disabled(isBusy || (domain.kind == .training && pickedDays.count < choice.perWeek))
-        } header: {
-            Text(choice.name)
         }
+        .padding(.top, 16)
     }
 
     private func begin(_ choice: ProgrammeChoice) {
@@ -114,27 +120,29 @@ private struct ProgrammeChoiceRow: View {
     let onStop: () -> Void
 
     var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(choice.name).font(.subheadline.weight(.semibold))
-                // Web `.pick-goal { font-size:13px }`.
-                Text(choice.goal).font(.system(size: 13)).foregroundStyle(Color.pulseTextSecondary)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(choice.name)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.pulseTextPrimary)
+                Text(choice.goal)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.pulseTextSecondary)
                 Text("\(meta) · \(choice.source)")
-                    .font(.system(size: 10, design: .rounded))
+                    .font(.programmeMono(10))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
             if isActive {
                 Button("Arrêter", role: .destructive, action: onStop)
-                    .buttonStyle(PulseButtonStyle(kind: .secondary, fullWidth: false))
+                    .buttonStyle(.programmeDestructiveText)
                     .disabled(isBusy)
             } else {
                 Button("Commencer", action: onBegin)
-                    .buttonStyle(PulseButtonStyle(kind: .primary, fullWidth: false))
-                    .tint(Color.pulseAccent)
+                    .buttonStyle(.programmeText)
                     .disabled(isBusy)
             }
         }
-        .padding(.vertical, PulseSpacing.xs)
+        .padding(.vertical, 14)
     }
 }

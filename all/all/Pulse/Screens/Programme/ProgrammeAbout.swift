@@ -48,7 +48,7 @@ struct ProgrammeAboutView: View {
         NavigationStack {
             ScrollView {
                 if let domain, let active = domain.active {
-                    VStack(alignment: .leading, spacing: PulseSpacing.md) {
+                    VStack(alignment: .leading, spacing: 28) {
                         presentation(active)
                         switch domain.detail {
                         case .training(let detail): focusCard(detail, active: active)
@@ -56,10 +56,12 @@ struct ProgrammeAboutView: View {
                         default: EmptyView()
                         }
                         Button("Arrêter le programme", role: .destructive) { confirmStop = true }
-                            .buttonStyle(.pulseSecondary)
+                            .buttonStyle(.programmeDestructiveText)
+                            .frame(maxWidth: .infinity)
                             .disabled(viewModel.isBusy)
                     }
-                    .padding(PulseSpacing.lg)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
             }
             .background(Color.pulseBackground)
@@ -78,14 +80,21 @@ struct ProgrammeAboutView: View {
     }
 
     private func presentation(_ active: ProgrammeActive) -> some View {
-        PulseCard {
-            Text(active.name).font(.system(size: 17, weight: .semibold))
-            Text(active.goal).font(.subheadline)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(active.name)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.pulseTextPrimary)
+            Text(active.goal)
+                .font(.system(size: 15))
+                .foregroundStyle(Color.pulseTextPrimary)
             Text(active.source)
-                .font(.system(size: 11, design: .rounded))
+                .font(.programmeMono(11))
                 .foregroundStyle(Color.pulseTextSecondary)
             ForEach(active.notes, id: \.self) { note in
-                Text(note).font(.system(size: 14))
+                Text(note)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .lineSpacing(3)
             }
         }
     }
@@ -95,15 +104,19 @@ struct ProgrammeAboutView: View {
     private func focusCard(_ detail: ProgrammeTrainingDetail, active: ProgrammeActive) -> some View {
         let focuses = detail.focus.filter { $0.focus != nil }
         if !focuses.isEmpty {
-            PulseCard {
-                ForEach(focuses, id: \.index) { week in
-                    HStack(alignment: .firstTextBaseline, spacing: PulseSpacing.sm) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(focuses.enumerated()), id: \.element.index) { index, week in
+                    if index > 0 { ProgrammeHairline() }
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("S\(week.index)")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .frame(width: 28, alignment: .leading)
-                        Text(week.focus ?? "").font(.footnote)
+                            .font(.programmeMono(12, weight: .semibold))
+                            .foregroundStyle(Color.pulseTextPrimary)
+                            .frame(width: 32, alignment: .leading)
+                        Text(week.focus ?? "")
+                            .font(.system(size: 13))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
+                    .padding(.vertical, 11)
                 }
             }
         }
@@ -111,35 +124,38 @@ struct ProgrammeAboutView: View {
 
     /// Chaque critère : libellé · détail, cible, bande de risque, preuve.
     private func criteriaCard(_ detail: ProgrammeSleepDetail, domain: ProgrammeDomainView) -> some View {
-        PulseCard {
-            VStack(alignment: .leading, spacing: PulseSpacing.md) {
-                ForEach(detail.metrics) { metric in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(metric.label) · \(metric.detail)")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(programmeSleepTargetText(metric))
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(Color.pulseTextSecondary)
-                        if !metric.informative, let band = metric.band {
-                            Text("\(band.label) · \(band.risk)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Color.pulseTextSecondary)
-                        }
-                        if let note = metric.note {
-                            Text(note)
-                                .font(.system(size: 12))
-                                .foregroundStyle(Color.pulseTextSecondary)
-                        }
-                        Text(metric.evidence)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(detail.metrics.enumerated()), id: \.element.id) { index, metric in
+                if index > 0 { ProgrammeHairline() }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(metric.label) · \(metric.detail)")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.pulseTextPrimary)
+                    Text(programmeSleepTargetText(metric))
+                        .font(.programmeMono(11))
+                        .foregroundStyle(Color.pulseTextSecondary)
+                    if !metric.informative, let band = metric.band {
+                        Text("\(band.label) · \(band.risk)")
                             .font(.system(size: 12))
                             .foregroundStyle(Color.pulseTextSecondary)
                     }
+                    if let note = metric.note {
+                        Text(note)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.pulseTextSecondary)
+                    }
+                    Text(metric.evidence)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.pulseTextSecondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
             }
-            Divider()
+            ProgrammeHairline()
             Text(programmeWorkDaysLabel(domain))
-                .font(.system(size: 11, design: .rounded))
+                .font(.programmeMono(11))
                 .foregroundStyle(Color.pulseTextSecondary)
+                .padding(.top, 12)
         }
     }
 }
