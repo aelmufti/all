@@ -11,6 +11,12 @@
 //  `PulseAPIClient`) : `AuthStore` ne le manipule pas directement, il ne fait
 //  que refléter le résultat des appels (`username` posé/effacé).
 //
+//  Session retenue : le dernier `username` connu est gardé (UserDefaults). Au
+//  lancement, la coquille s'ouvre aussitôt avec lui (données en cache) et `check()`
+//  vérifie en arrière-plan ; seul un 401 (ou une adresse absente) ramène au login.
+//  Avant, l'app restait sur « Connexion à Pulse… » jusqu'au délai réseau (60 s) et
+//  toute erreur, même de transport, déconnectait.
+//
 
 import Foundation
 import Observation
@@ -33,9 +39,24 @@ final class AuthStore {
     var isChecking = true
 
     private let client: PulseAPIClient
+    private let defaults: UserDefaults
+    private static let rememberedKey = "pulse.auth.username"
 
-    init(client: PulseAPIClient = .shared) {
+    init(client: PulseAPIClient = .shared, defaults: UserDefaults = .standard) {
         self.client = client
+        self.defaults = defaults
+        // Session retenue : pas d'attente bloquante au lancement (cf. en-tête).
+        username = defaults.string(forKey: Self.rememberedKey)
+        isChecking = username == nil
+    }
+
+    private func remember(_ name: String?) {
+        username = name
+        if let name {
+            defaults.set(name, forKey: Self.rememberedKey)
+        } else {
+            defaults.removeObject(forKey: Self.rememberedKey)
+        }
     }
 
     private struct Credentials: Encodable {
@@ -57,7 +78,7 @@ final class AuthStore {
     func login(username: String, password: String) async throws {
         let credentials = Credentials(username: username, password: password)
         let response: MeResponse = try await client.post("api/auth/login", body: credentials)
-        self.username = response.username
+        remember(response.username)
     }
 
     /// `POST /api/auth/logout`. Best-effort côté réseau : même si l'appel
@@ -71,7 +92,7 @@ final class AuthStore {
             // ou si la session avait déjà expiré côté serveur.
         }
         PulseResponseCache.shared.invalidateAll()
-        username = nil
+        remember(nil)
     }
 
     /// `GET /api/auth/me` — vérifie une session déjà posée (cookie persistant
@@ -79,16 +100,22 @@ final class AuthStore {
     /// une vérification de routine, pas une action utilisateur à faire échouer
     /// bruyamment (ex. `PulseConfig.baseURL` pas encore configurée au premier
     /// lancement → `false`, silencieux, la porte de login s'affiche).
+    /// Session retenue : vérifiée sans bloquer (`isChecking` reste faux) ; une
+    /// erreur de transport ou un 5xx la garde (Pulse injoignable ≠ déconnecté).
     @discardableResult
     func check() async -> Bool {
-        isChecking = true
-        defer { isChecking = false }
+        let blocking = username == nil
+        if blocking { isChecking = true }
+        defer { if blocking { isChecking = false } }
         do {
             let response: MeResponse = try await client.get("api/auth/me")
-            username = response.username
+            remember(response.username)
             return true
+        } catch PulseAPIError.unauthorized, PulseAPIError.notConfigured {
+            remember(nil)
+            return false
         } catch {
-            username = nil
+            if blocking { username = nil }
             return false
         }
     }

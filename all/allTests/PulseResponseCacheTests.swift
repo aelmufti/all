@@ -216,7 +216,7 @@ struct PulseResponseCacheInvalidationTests {
 
     @Test func logoutInvalidates() async {
         let client = PulseAPIClient(baseURLProvider: { nil }, localBackend: StubLocalPulseBackend(), modeProvider: { .pulse })
-        let auth = AuthStore(client: client)
+        let auth = AuthStore(client: client, defaults: UserDefaults(suiteName: UUID().uuidString)!)
         seedShared()
         await auth.logout()
         #expect(!sharedHasSentinel)

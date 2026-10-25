@@ -67,6 +67,11 @@ private func makeStubSession() -> URLSession {
 
 /// Client stubé pointant sur `testBaseURL` — via `baseURLProvider`, jamais
 /// via `PulseConfig.baseURL` (cf. en-tête du fichier).
+/// UserDefaults propre à un test : la session retenue d'`AuthStore` ne fuit pas d'un test à l'autre.
+private func isolatedDefaults() -> UserDefaults {
+    UserDefaults(suiteName: "auth-test-\(UUID().uuidString)")!
+}
+
 private func stubbedClient(baseURL: URL? = testBaseURL) -> PulseAPIClient {
     PulseAPIClient(session: makeStubSession(), baseURLProvider: { baseURL })
 }
@@ -261,7 +266,7 @@ struct PulseSocleTests {
     // MARK: AuthStore
 
     @Test @MainActor func loginSetsUsernameOnSuccess() async throws {
-        let store = AuthStore(client: stubbedClient())
+        let store = AuthStore(client: stubbedClient(), defaults: isolatedDefaults())
         StubURLProtocol.handler = { request in
             jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
         }
@@ -270,7 +275,7 @@ struct PulseSocleTests {
     }
 
     @Test @MainActor func loginKeepsUsernameNilOnUnauthorized() async throws {
-        let store = AuthStore(client: stubbedClient())
+        let store = AuthStore(client: stubbedClient(), defaults: isolatedDefaults())
         StubURLProtocol.handler = { request in
             jsonResponse(request.url!, status: 401, body: Data("{}".utf8))
         }
@@ -281,7 +286,7 @@ struct PulseSocleTests {
     }
 
     @Test @MainActor func checkPopulatesUsernameWhenSessionValid() async throws {
-        let store = AuthStore(client: stubbedClient())
+        let store = AuthStore(client: stubbedClient(), defaults: isolatedDefaults())
         StubURLProtocol.handler = { request in
             jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
         }
@@ -291,7 +296,7 @@ struct PulseSocleTests {
     }
 
     @Test @MainActor func checkReturnsFalseWhenUnauthorized() async throws {
-        let store = AuthStore(client: stubbedClient())
+        let store = AuthStore(client: stubbedClient(), defaults: isolatedDefaults())
         StubURLProtocol.handler = { request in
             jsonResponse(request.url!, status: 401, body: Data("{}".utf8))
         }
@@ -300,8 +305,57 @@ struct PulseSocleTests {
         #expect(store.username == nil)
     }
 
+    @Test @MainActor func rememberedSessionOpensWithoutBlockingAndSurvivesTransportErrors() async throws {
+        let defaults = isolatedDefaults()
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
+        }
+        try await AuthStore(client: stubbedClient(), defaults: defaults).login(username: "ali", password: "secret")
+
+        // Relance : session retenue, coquille tout de suite, pas d'écran d'attente.
+        let relaunched = AuthStore(client: stubbedClient(), defaults: defaults)
+        #expect(relaunched.username == "ali")
+        #expect(!relaunched.isChecking)
+
+        // Pulse injoignable : on reste connecté.
+        StubURLProtocol.handler = { _ in throw URLError(.timedOut) }
+        let ok = await relaunched.check()
+        #expect(!ok)
+        #expect(relaunched.username == "ali")
+        #expect(!relaunched.isChecking)
+    }
+
+    @Test @MainActor func rememberedSessionIsDroppedOnUnauthorized() async throws {
+        let defaults = isolatedDefaults()
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
+        }
+        try await AuthStore(client: stubbedClient(), defaults: defaults).login(username: "ali", password: "secret")
+
+        let relaunched = AuthStore(client: stubbedClient(), defaults: defaults)
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 401, body: Data("{}".utf8))
+        }
+        await relaunched.check()
+        #expect(relaunched.username == nil)
+        #expect(AuthStore(client: stubbedClient(), defaults: defaults).username == nil)
+    }
+
+    @Test @MainActor func logoutForgetsTheRememberedSession() async throws {
+        let defaults = isolatedDefaults()
+        StubURLProtocol.handler = { request in
+            jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
+        }
+        let store = AuthStore(client: stubbedClient(), defaults: defaults)
+        try await store.login(username: "ali", password: "secret")
+        await store.logout()
+        let relaunched = AuthStore(client: stubbedClient(), defaults: defaults)
+        #expect(relaunched.username == nil)
+        #expect(relaunched.isChecking)
+    }
+
     @Test @MainActor func logoutClearsUsernameEvenIfRequestFails() async throws {
-        let store = AuthStore(client: stubbedClient())
+        let store = AuthStore(client: stubbedClient(), defaults: isolatedDefaults())
         StubURLProtocol.handler = { request in
             jsonResponse(request.url!, status: 200, body: Data(#"{"username":"ali"}"#.utf8))
         }
