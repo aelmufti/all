@@ -39,6 +39,7 @@ struct BLEDiagnosticView: View {
             if let session = ble.garminSession {
                 GarminGFDISection(session: session)
             }
+            PulseUploadTimingsSection()
             Section {
                 NavigationLink("Temps réel") { RealtimeMetricsView() }
                 Toggle("Afficher tous les périphériques", isOn: $showAllDevices)
@@ -294,4 +295,51 @@ private struct GarminGFDISection: View {
 
 #Preview {
     NavigationStack { BLEDiagnosticView() }
+}
+
+// MARK: - Envois Pulse (mesure)
+
+/// Derniers envois vers Pulse avec leur décomposition (cf. `PulseUploadTimings`) :
+/// où passe le temps — préparation, réseau + Pulse, retour sur le fil principal.
+private struct PulseUploadTimingsSection: View {
+    @State private var timings = PulseUploadTimings.shared
+
+    var body: some View {
+        Section {
+            if timings.recent.isEmpty {
+                Text("Aucun envoi depuis le lancement")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(timings.recent) { t in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(t.startedAt, format: .dateTime.hour().minute().second())
+                            Spacer()
+                            Text(Self.size(t.sizeBytes))
+                            Text(t.status.map(String.init) ?? "—")
+                                .foregroundStyle(t.status.map { (200...299).contains($0) } ?? false ? Color.secondary : Color.red)
+                        }
+                        .font(.footnote.monospacedDigit())
+                        Text("attente \(Self.s(t.waitS)) · prépa \(Self.s(t.prepS)) · réseau \(Self.s(t.networkS)) · retour \(Self.s(t.mainHopS))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Button("Effacer", role: .destructive) { timings.clear() }
+            }
+        } header: {
+            Text("Envois Pulse")
+        }
+    }
+
+    private static func s(_ seconds: Double?) -> String {
+        guard let seconds else { return "—" }
+        return seconds < 10 ? String(format: "%.2f s", seconds) : String(format: "%.0f s", seconds)
+    }
+
+    private static func size(_ bytes: Int?) -> String {
+        guard let bytes else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
 }

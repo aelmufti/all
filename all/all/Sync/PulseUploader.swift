@@ -250,12 +250,26 @@ final class PulseSpoolUploader: SpoolUploading {
     /// appelée sur un fil de fond (file de préparation ou callback `URLSession`) :
     /// l'appelant ramène lui-même sur son fil (cf. `GarminSession.pumpUploads`).
     func upload(fileURL: URL, watchFilename: String, completion: @escaping (PulseUploadOutcome) -> Void) {
+        let calledAt = Date()
         prepQueue.async { [transport, configuration] in
+            let prepStartedAt = Date()
             guard let config = configuration() else {
                 completion(.keepConfigError)
                 return
             }
-            PulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename, baseURL: config.baseURL, token: config.token, transport: transport) { result in
+            // Mesure de l'envoi (Diagnostic, cf. `PulseUploadTimings`).
+            let timed = TimedUploadTransport(base: transport)
+            PulseUploader.upload(fileURL: fileURL, watchFilename: watchFilename, baseURL: config.baseURL, token: config.token, transport: timed) { result in
+                let respondedAt = Date()
+                let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? NSNumber
+                PulseUploadTimings.report(PulseUploadTiming(
+                    startedAt: calledAt,
+                    sizeBytes: size?.intValue,
+                    waitS: prepStartedAt.timeIntervalSince(calledAt),
+                    prepS: (timed.sentAt ?? respondedAt).timeIntervalSince(prepStartedAt),
+                    networkS: timed.sentAt.map { respondedAt.timeIntervalSince($0) },
+                    status: timed.status
+                ), respondedAt: respondedAt)
                 switch result {
                 case .success(let outcome):
                     completion(outcome)
