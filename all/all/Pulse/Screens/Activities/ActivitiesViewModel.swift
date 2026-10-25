@@ -20,7 +20,13 @@ final class ActivitiesViewModel {
         case failed(String)
     }
 
-    private(set) var state: State = .loading
+    private(set) var state: State = .loading {
+        // Suggestions « Fusionner avec la suivante » calculées une fois par liste :
+        // le menu de chaque ligne les relisait à chaque rendu (O(n²) analyses de
+        // date), ce qui bloquait l'interface pendant la connexion à la montre.
+        didSet { mergeCandidates = Self.mergeCandidates(in: activities) }
+    }
+    @ObservationIgnored private var mergeCandidates: [Int: Activity] = [:]
     /// Pour animer le fondu loading → contenu (la vue ne compare pas `State`).
     var stateTag: Int {
         switch state {
@@ -110,16 +116,29 @@ final class ActivitiesViewModel {
     /// Activité chronologiquement suivante, si elle est du même sport et commence
     /// entre 0 et 30 min après la fin de `activity` (fin = début + durée).
     func nextMergeCandidate(after activity: Activity) -> Activity? {
-        guard let start = ActivityDateFormatting.date(from: activity.startTime) else { return nil }
-        var next: (activity: Activity, start: Date)?
-        for other in activities where other.id != activity.id {
-            guard let s = ActivityDateFormatting.date(from: other.startTime), s > start else { continue }
-            if next == nil || s < next!.start { next = (other, s) }
+        mergeCandidates[activity.id]
+    }
+
+    /// Pour chaque activité, sa suivante fusionnable (cf. `nextMergeCandidate`) :
+    /// un tri, puis un seul passage.
+    static func mergeCandidates(in items: [Activity]) -> [Int: Activity] {
+        let dated = items
+            .compactMap { a in ActivityDateFormatting.date(from: a.startTime).map { (activity: a, start: $0) } }
+            .sorted { $0.start < $1.start }
+        var out: [Int: Activity] = [:]
+        var j = 0
+        for (i, current) in dated.enumerated() {
+            // Suivante = première activité qui commence STRICTEMENT après.
+            if j <= i { j = i + 1 }
+            while j < dated.count, dated[j].start <= current.start { j += 1 }
+            guard j < dated.count else { break }
+            let next = dated[j]
+            guard next.activity.sport == current.activity.sport else { continue }
+            let end = current.start.addingTimeInterval(current.activity.durationS ?? 0)
+            let gap = next.start.timeIntervalSince(end)
+            if gap >= 0 && gap < nextMergeMaxGap { out[current.activity.id] = next.activity }
         }
-        guard let next, next.activity.sport == activity.sport else { return nil }
-        let end = start.addingTimeInterval(activity.durationS ?? 0)
-        let gap = next.start.timeIntervalSince(end)
-        return gap >= 0 && gap < Self.nextMergeMaxGap ? next.activity : nil
+        return out
     }
 
     @discardableResult
