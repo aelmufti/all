@@ -99,6 +99,10 @@ final class PulseAPIClient {
     /// Base d'où vient la dernière lecture de saisies réussie : les identifiants
     /// numériques sont propres à chaque base (contrat §7).
     private let saisieSource = SaisieSourceTracker()
+    /// Idem pour les activités (mode « Les deux ») : les `id` d'activité sont propres à
+    /// chaque base, une modification doit viser celle d'où l'écran a lu. Distinct de
+    /// `saisieSource` : une lecture d'activités ne dit rien des `id` d'aliment.
+    private let activitySource = SaisieSourceTracker()
 
     /// - Parameters:
     ///   - session: session HTTP à utiliser. Par défaut, une session dédiée
@@ -186,6 +190,13 @@ final class PulseAPIClient {
         return try decode(data, path: path, status: status)
     }
 
+    /// `DELETE path` dont la réponse est décodée (ex. `api/activities/:id/edit` renvoie le détail).
+    func delete<T: Decodable>(_ path: String) async throws -> T {
+        let (data, status) = try await routedData(method: "DELETE", path: path, query: [:], bodyData: nil)
+        invalidateCacheAfterWrite(path: path)
+        return try decode(data, path: path, status: status)
+    }
+
     /// `DELETE path`. Pas de corps de réponse exploité par le socle (les
     /// endpoints de suppression de Pulse renvoient un petit accusé JSON, mais
     /// aucun écran n'en a besoin pour l'instant) — seul le statut HTTP compte
@@ -263,10 +274,12 @@ final class PulseAPIClient {
         case .phone:
             let data = try await localBackend.handle(method: method, path: path, query: query, body: bodyData)
             if SaisieRoute.isRead(method: method, path: path) { saisieSource.record(.local) }
+            if SaisieRoute.isActivityRead(method: method, path: path) { activitySource.record(.local) }
             return (data, nil)
         case .pulse:
             let result = try await serverData(method: method, path: path, query: query, bodyData: bodyData)
             if SaisieRoute.isRead(method: method, path: path) { saisieSource.record(.pulse) }
+            if SaisieRoute.isActivityRead(method: method, path: path) { activitySource.record(.pulse) }
             return result
         case .both:
             return try await routedBoth(method: method, path: path, query: query, bodyData: bodyData)
@@ -300,7 +313,8 @@ final class PulseAPIClient {
             // suppose Pulse (échec explicite plutôt qu'un `id` appliqué à la mauvaise
             // base).
             let result: (Data, Int?)
-            if saisieSource.last == .local {
+            let source = SaisieRoute.isActivityEditWrite(method: method, path: path) ? activitySource : saisieSource
+            if source.last == .local {
                 result = (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
             } else {
                 result = try await serverData(method: method, path: path, query: query, bodyData: bodyData)
@@ -313,6 +327,7 @@ final class PulseAPIClient {
         do {
             result = try await serverData(method: method, path: path, query: query, bodyData: bodyData)
             if isRead { saisieSource.record(.pulse) }
+            if SaisieRoute.isActivityRead(method: method, path: path) { activitySource.record(.pulse) }
         } catch PulseAPIError.transport(_), PulseAPIError.notConfigured {
             // Repli local si Pulse est injoignable : erreur de transport
             // (DNS/TLS/offline/timeout) OU aucune adresse Pulse configurée
@@ -322,6 +337,7 @@ final class PulseAPIClient {
             // remontent tels quels — cf. en-tête et `docs/stockage-local.md`.
             result = (try await localBackend.handle(method: method, path: path, query: query, body: bodyData), nil)
             if isRead { saisieSource.record(.local) }
+            if SaisieRoute.isActivityRead(method: method, path: path) { activitySource.record(.local) }
         }
         if isWrite { saisieSync?.requestExchange() }
         return result
@@ -595,5 +611,31 @@ struct LocalPulseUnavailableError: Error, LocalizedError {
 struct StubLocalPulseBackend: LocalPulseBackend {
     func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data {
         throw LocalPulseUnavailableError()
+    }
+}
+
+// MARK: - Modification et fusion d'activités (`activity-edits-contract.md` §5)
+
+extension PulseAPIClient {
+    /// `PUT api/activities/:id/edit` : champ présent = remplacé, `.clear` = effacé,
+    /// `.unchanged` = omis. Renvoie le détail recalculé.
+    func editActivity(id: Int, _ patch: ActivityEditPatch) async throws -> ActivityDetail {
+        try await put("api/activities/\(id)/edit", body: patch)
+    }
+
+    /// `DELETE api/activities/:id/edit` : retire fenêtre, sport, nom et note (garde la fusion).
+    func resetActivityEdit(id: Int) async throws -> ActivityDetail {
+        try await delete("api/activities/\(id)/edit")
+    }
+
+    /// `POST api/activities/merge` : fusionne (≥ 2 `ids`, même sport, sans chevauchement) ;
+    /// renvoie l'id de la principale (la plus ancienne).
+    func mergeActivities(ids: [Int]) async throws -> ActivityMergeResponse {
+        try await post("api/activities/merge", body: ActivityMergeRequest(ids: ids))
+    }
+
+    /// `POST api/activities/:id/split` : rétablit les activités d'origine d'une fusion.
+    func splitActivity(id: Int) async throws -> ActivitySplitResponse {
+        try await post("api/activities/\(id)/split")
     }
 }

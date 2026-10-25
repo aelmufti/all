@@ -25,7 +25,7 @@
 //  réelle, `activities`/`LocalDb.activities(limit:offset:)`) et
 //  `GET api/activities/:id` (détail — résumé + flux/segments recalculés à la
 //  volée depuis le `.fit` brut retrouvé dans le spool, cf.
-//  `findSpoolFileURL`/`FitActivityExtractor`, miroir de
+//  `ActivityFitLocator`/`FitActivityExtractor`, miroir de
 //  `ActivitiesController.detail`). `activities`/`sportCalories` dans
 //  `day/:date` restent `[]`/`0` (pas dans le périmètre de `WellnessController.day`
 //  ni côté serveur, cf. commentaire déjà présent sur `LocalWellnessDayDetailDTO`).
@@ -105,7 +105,7 @@ struct URLSessionOpenFoodFactsTransport: OpenFoodFactsTransport {
 final class RealLocalPulseBackend: LocalPulseBackend {
     private let db: LocalDb
     /// Source des octets bruts `.fit` pour `GET api/activities/:id`
-    /// (`findSpoolFileURL`) — `nil` si `SpoolStore` n'a pas pu s'ouvrir (même
+    /// (`ActivityFitLocator`) — `nil` si `SpoolStore` n'a pas pu s'ouvrir (même
     /// politique de repli que `LocalDb`, cf. `LocalPulseBackendFactory`) :
     /// le détail retombe alors systématiquement sur la branche « fichier
     /// absent » (résumé seul), jamais un crash.
@@ -121,12 +121,21 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     /// Cache mémoire des ajustements de `stats/sleep-recommendation` (cf.
     /// `SleepModelCache`) — propre à ce backend, donc à sa base.
     let sleepModelCache = SleepModelCache()
+    /// Retrouve les `.fit` par hash (détail d'activité, modifications/fusions).
+    private let fitLocator: ActivityFitLocator
+    /// Modification et fusion d'activités (routes `activities/:id/edit|split`, `activities/merge`).
+    private let activityEdits: ActivityEditService
 
     init() throws {
-        db = try LocalDb()
-        spool = try? SpoolStore()
-        pulledFiles = try? PulseFilesStore.standard()
+        let db = try LocalDb()
+        let spool = try? SpoolStore()
+        let pulledFiles = try? PulseFilesStore.standard()
+        self.db = db
+        self.spool = spool
+        self.pulledFiles = pulledFiles
         offTransport = URLSessionOpenFoodFactsTransport()
+        fitLocator = ActivityFitLocator(spool: spool, pulledFiles: pulledFiles)
+        activityEdits = ActivityEditService(db: db, locator: fitLocator)
     }
 
     /// Init testable : base (et spool, optionnel, et transport OFF factice
@@ -139,6 +148,8 @@ final class RealLocalPulseBackend: LocalPulseBackend {
         self.spool = spool
         self.pulledFiles = pulledFiles
         self.offTransport = offTransport
+        fitLocator = ActivityFitLocator(spool: spool, pulledFiles: pulledFiles)
+        activityEdits = ActivityEditService(db: db, locator: fitLocator)
     }
 
     func handle(method: String, path: String, query: [String: String], body: Data?) async throws -> Data {
@@ -164,6 +175,28 @@ final class RealLocalPulseBackend: LocalPulseBackend {
 
         case ("GET", let r) where r.hasPrefix("activities/"):
             return try encodeActivityDetail(idString: String(r.dropFirst("activities/".count)))
+
+        // Modification et fusion d'activités (`activity-edits-contract.md` §5).
+        case ("POST", "activities/merge"):
+            let id = try activityEdits.merge(body: body)
+            return try JSONEncoder().encode(LocalActivityMergeResponseDTO(id: id))
+
+        case ("PUT", let r) where r.hasPrefix("activities/") && r.hasSuffix("/edit"):
+            let idString = String(r.dropFirst("activities/".count).dropLast("/edit".count))
+            guard let id = Int(idString) else { throw LocalActivityNotFoundError(idString: idString) }
+            try activityEdits.update(id: id, body: body)
+            return try encodeActivityDetail(idString: idString)
+
+        case ("DELETE", let r) where r.hasPrefix("activities/") && r.hasSuffix("/edit"):
+            let idString = String(r.dropFirst("activities/".count).dropLast("/edit".count))
+            guard let id = Int(idString) else { throw LocalActivityNotFoundError(idString: idString) }
+            try activityEdits.clear(id: id)
+            return try encodeActivityDetail(idString: idString)
+
+        case ("POST", let r) where r.hasPrefix("activities/") && r.hasSuffix("/split"):
+            let idString = String(r.dropFirst("activities/".count).dropLast("/split".count))
+            guard let id = Int(idString) else { throw LocalActivityNotFoundError(idString: idString) }
+            return try JSONEncoder().encode(LocalActivitySplitResponseDTO(ids: try activityEdits.split(id: id)))
 
         case ("GET", let r) where r.hasPrefix("wellness/day/"):
             let date = String(r.dropFirst("wellness/day/".count))
@@ -539,44 +572,19 @@ final class RealLocalPulseBackend: LocalPulseBackend {
     /// seul avec flux/segments vides (`track: []`, `streams: null`), miroir
     /// EXACT de la branche `!fs.existsSync(filePath)` côté serveur.
     private func encodeActivityDetail(idString: String) throws -> Data {
-        guard let id = Int(idString), let found = try db.activity(id: id) else {
+        guard let id = Int(idString), (try db.activity(id: id)) != nil else {
             throw LocalActivityNotFoundError(idString: idString)
-        }
-        guard let fileURL = findSpoolFileURL(hash: found.fileHash) else {
-            return try JSONEncoder().encode(LocalActivityDetailDTO(
-                row: found.row, track: [], streams: nil, laps: [], sets: [], splits: [], hrZones: []))
         }
         // Pas de garde try/catch ici : un `.fit` illisible/corrompu doit
         // remonter une erreur exploitable à l'écran (`ActivityDetailViewModel`
         // l'affiche via `error.localizedDescription`, cf. `FitDecodeError`),
         // pas un détail silencieusement vide — même esprit que le serveur, où
         // un `parseDetail` en échec produirait une exception non rattrapée.
-        let data = try Data(contentsOf: fileURL)
-        let file = try FitDecoder.decode(data)
-        let detail = FitActivityExtractor.extractDetail(messages: file.messages)
-        return try JSONEncoder().encode(LocalActivityDetailDTO(row: found.row, detail: detail))
-    }
-
-    /// Retrouve les octets bruts d'une activité par son hash — le spool
-    /// (`SpoolStore.entries`) est indexé par identité MONTRE
-    /// (`WatchFileID`), pas par hash de contenu, donc pas de raccourci : on
-    /// hache chaque entrée à la volée (`PulseUploader.sha256Hex`, même
-    /// fonction que `LocalIngestor`) jusqu'à trouver la correspondance.
-    /// Coût O(n) sur le nombre d'entrées du spool — acceptable à l'échelle
-    /// d'un usage personnel (dizaines à quelques centaines de fichiers), pas
-    /// d'index dédié en L3.
-    private func findSpoolFileURL(hash: String) -> URL? {
-        // Activité rapatriée de Pulse : nommée par son hash, aucun parcours.
-        if let url = pulledFiles?.activityURL(hash: hash) { return url }
-        guard let spool else { return nil }
-        // Entrée purgée = `.fit` supprimé (jamais une activité en pratique, cf.
-        // `SpoolPurger`) : inutile de tenter de le hacher.
-        for entry in spool.entries.values where entry.purgedAt == nil {
-            let url = spool.fileURL(for: entry)
-            guard let entryHash = try? PulseUploader.sha256Hex(ofFileAt: url) else { continue }
-            if entryHash == hash { return url }
-        }
-        return nil
+        // Id connu mais `.fit` brut introuvable : résumé seul avec flux/segments
+        // vides (`track: []`, `streams: nil`), miroir de la branche
+        // `!fs.existsSync` côté serveur.
+        let bundle = try activityEdits.detail(id: id)
+        return try JSONEncoder().encode(LocalActivityDetailDTO(bundle))
     }
 
     // MARK: - Nutrition (incrément L5-Nutrition + L5-Nutrition-analytics,
@@ -2179,6 +2187,11 @@ private struct LocalActivityListItemDTO: Encodable {
     let calories: Double?
     let avgHr: Double?
     let maxHr: Double?
+    // Champs additifs de `activity-edits-contract.md` §5 (les anciens clients les ignorent).
+    let name: LocalExplicitNull<String>
+    let note: LocalExplicitNull<String>
+    let edited: Bool
+    let mergedCount: Int
 
     init(_ row: LocalDb.ActivityRow) {
         id = row.id
@@ -2191,7 +2204,48 @@ private struct LocalActivityListItemDTO: Encodable {
         calories = row.calories
         avgHr = row.avgHr
         maxHr = row.maxHr
+        name = LocalExplicitNull(row.name)
+        note = LocalExplicitNull(row.note)
+        edited = row.edited
+        mergedCount = row.mergedCount
     }
+}
+
+/// Encode `null` explicite quand la valeur manque (le `Optional` synthétisé omettrait la
+/// clé) : le contrat §5 demande `name`, `note`, `source`, `edit` toujours présents.
+struct LocalExplicitNull<T: Encodable>: Encodable {
+    let value: T?
+    init(_ value: T?) { self.value = value }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        if let value { try c.encode(value) } else { try c.encodeNil() }
+    }
+}
+
+private struct LocalActivityMergeResponseDTO: Encodable {
+    let id: Int
+}
+
+private struct LocalActivitySplitResponseDTO: Encodable {
+    let ids: [Int]
+}
+
+private struct LocalActivitySourceDTO: Encodable {
+    let startTime: String
+    let endTime: String
+}
+
+private struct LocalActivityEditDTO: Encodable {
+    let startAt: LocalExplicitNull<String>
+    let endAt: LocalExplicitNull<String>
+    let sport: LocalExplicitNull<String>
+    let subSport: LocalExplicitNull<String>
+}
+
+private struct LocalActivityMemberDTO: Encodable {
+    let id: Int
+    let startTime: LocalExplicitNull<String>
+    let durationS: LocalExplicitNull<Double>
 }
 
 private struct LocalActivityListResponseDTO: Encodable {
@@ -2301,11 +2355,20 @@ private struct LocalActivityDetailDTO: Encodable {
     let sets: [LocalActivitySetDTO]
     let splits: [LocalActivitySplitDTO]
     let hrZones: [LocalHrZoneDTO]
+    // Champs additifs de `activity-edits-contract.md` §5.
+    let name: LocalExplicitNull<String>
+    let note: LocalExplicitNull<String>
+    let edited: Bool
+    let mergedCount: Int
+    let source: LocalExplicitNull<LocalActivitySourceDTO>
+    let edit: LocalExplicitNull<LocalActivityEditDTO>
+    let members: [LocalActivityMemberDTO]
 
-    /// Fichier brut introuvable dans le spool — résumé seul, tout le reste vide/`nil`.
-    init(row: LocalDb.ActivityRow, track: [[Double]], streams: LocalActivityStreamsDTO?,
-         laps: [LocalActivityLapDTO], sets: [LocalActivitySetDTO], splits: [LocalActivitySplitDTO],
-         hrZones: [LocalHrZoneDTO]) {
+    /// `.fit` brut introuvable : résumé seul, tout le reste vide/`nil` (`detail == nil`) ;
+    /// sinon `detail` vient de `FitActivityExtractor.extractDetail` (activité non modifiée)
+    /// ou de `FitActivityEdit.compute` (fenêtre / fusion).
+    init(_ bundle: ActivityEditService.DetailBundle) {
+        let row = bundle.row
         id = row.id
         fileName = row.fileName
         sport = row.sport
@@ -2316,24 +2379,31 @@ private struct LocalActivityDetailDTO: Encodable {
         calories = row.calories
         avgHr = row.avgHr
         maxHr = row.maxHr
-        self.track = track
-        self.streams = streams
-        self.laps = laps
-        self.sets = sets
-        self.splits = splits
-        self.hrZones = hrZones
-    }
-
-    /// Fichier brut retrouvé et reparsé — `detail` vient de
-    /// `FitActivityExtractor.extractDetail`.
-    init(row: LocalDb.ActivityRow, detail: FitActivityExtractor.Detail) {
-        self.init(
-            row: row, track: detail.track,
-            streams: LocalActivityStreamsDTO(detail.streams),
-            laps: detail.laps.map(LocalActivityLapDTO.init),
-            sets: detail.sets.map(LocalActivitySetDTO.init),
-            splits: detail.splits.map(LocalActivitySplitDTO.init),
-            hrZones: detail.hrZones.map(LocalHrZoneDTO.init))
+        let detail = bundle.detail
+        track = detail?.track ?? []
+        streams = detail.map { LocalActivityStreamsDTO($0.streams) }
+        laps = detail?.laps.map(LocalActivityLapDTO.init) ?? []
+        sets = detail?.sets.map(LocalActivitySetDTO.init) ?? []
+        splits = detail?.splits.map(LocalActivitySplitDTO.init) ?? []
+        hrZones = detail?.hrZones.map(LocalHrZoneDTO.init) ?? []
+        name = LocalExplicitNull(row.name)
+        note = LocalExplicitNull(row.note)
+        edited = row.edited
+        mergedCount = row.mergedCount
+        source = LocalExplicitNull(bundle.source.map {
+            LocalActivitySourceDTO(startTime: ActivityEditTime.format($0.start), endTime: ActivityEditTime.format($0.end))
+        })
+        let edit = bundle.edit
+        if let edit, edit.hasWindow || edit.sport != nil {
+            self.edit = LocalExplicitNull(LocalActivityEditDTO(
+                startAt: LocalExplicitNull(edit.startAt), endAt: LocalExplicitNull(edit.endAt),
+                sport: LocalExplicitNull(edit.sport), subSport: LocalExplicitNull(edit.subSport)))
+        } else {
+            self.edit = LocalExplicitNull(nil)
+        }
+        members = bundle.members.map {
+            LocalActivityMemberDTO(id: $0.id, startTime: LocalExplicitNull($0.startTime), durationS: LocalExplicitNull($0.durationS))
+        }
     }
 }
 

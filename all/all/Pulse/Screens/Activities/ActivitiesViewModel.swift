@@ -63,4 +63,85 @@ final class ActivitiesViewModel {
             if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
     }
+
+    // MARK: - Sélection et fusion
+
+    private(set) var isSelecting = false
+    private(set) var selected: Set<Int> = []
+    private(set) var isMerging = false
+    /// Erreur de fusion (400 chevauchement…) ; la sélection est conservée.
+    var mergeError: String?
+    /// Incrémenté à chaque fusion réussie (haptique de succès).
+    private(set) var mergeSuccessCount = 0
+
+    /// Écart maximal entre la fin d'une activité et le début de la suivante
+    /// pour proposer « Fusionner avec la suivante ».
+    static let nextMergeMaxGap: TimeInterval = 30 * 60
+
+    var activities: [Activity] {
+        if case .loaded(let items) = state { return items }
+        return []
+    }
+
+    func startSelecting() { isSelecting = true; selected = []; mergeError = nil }
+    func cancelSelecting() { isSelecting = false; selected = []; mergeError = nil }
+
+    func toggle(_ id: Int) {
+        if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
+    }
+
+    /// ≥ 2 activités sélectionnées, toutes du même sport.
+    var canMerge: Bool {
+        let chosen = activities.filter { selected.contains($0.id) }
+        guard chosen.count >= 2, !isMerging else { return false }
+        return Set(chosen.map { $0.sport ?? "" }).count == 1
+    }
+
+    var selectedCount: Int { selected.count }
+
+    /// Fusionne la sélection. Succès : sortie du mode sélection + rechargement ;
+    /// échec : message, sélection conservée.
+    @discardableResult
+    func mergeSelected() async -> Bool {
+        guard canMerge else { return false }
+        return await performMerge(ids: Array(selected))
+    }
+
+    /// Activité chronologiquement suivante, si elle est du même sport et commence
+    /// entre 0 et 30 min après la fin de `activity` (fin = début + durée).
+    func nextMergeCandidate(after activity: Activity) -> Activity? {
+        guard let start = ActivityDateFormatting.date(from: activity.startTime) else { return nil }
+        var next: (activity: Activity, start: Date)?
+        for other in activities where other.id != activity.id {
+            guard let s = ActivityDateFormatting.date(from: other.startTime), s > start else { continue }
+            if next == nil || s < next!.start { next = (other, s) }
+        }
+        guard let next, next.activity.sport == activity.sport else { return nil }
+        let end = start.addingTimeInterval(activity.durationS ?? 0)
+        let gap = next.start.timeIntervalSince(end)
+        return gap >= 0 && gap < Self.nextMergeMaxGap ? next.activity : nil
+    }
+
+    @discardableResult
+    func mergeWithNext(_ activity: Activity) async -> Bool {
+        guard !isMerging, let next = nextMergeCandidate(after: activity) else { return false }
+        return await performMerge(ids: [activity.id, next.id])
+    }
+
+    private func performMerge(ids: [Int]) async -> Bool {
+        isMerging = true
+        mergeError = nil
+        defer { isMerging = false }
+        do {
+            _ = try await client.mergeActivities(ids: ids)
+        } catch {
+            mergeError = ActivityEditErrors.message(error)
+            return false
+        }
+        mergeSuccessCount += 1
+        isSelecting = false
+        selected = []
+        await load()
+        return true
+    }
 }

@@ -65,7 +65,9 @@ final class LocalDb {
     /// `LocalDb+Saisies.swift`.
     /// 2 : fichiers rapatriés de Pulse à ne plus redemander (`pulse_pull_marks`), cf.
     /// `LocalDb+PulsePull.swift`.
-    static let migrations: [String] = [saisieSyncMigration, pulsePullMigration]
+    /// 3 : modification et fusion d'activités (`activity_edits`, `activities_merged`,
+    /// colonnes de `activities`), cf. `LocalDb+ActivityEdits.swift`.
+    static let migrations: [String] = [saisieSyncMigration, pulsePullMigration, activityEditsMigration]
 
     /// Applique les migrations manquantes, dans l'ordre, chacune dans sa
     /// transaction avec l'avancement de version. La version est relue DANS la
@@ -395,9 +397,8 @@ final class LocalDb {
     /// réingérer deux fois le même fichier ferait échouer l'`INSERT` sur la
     /// contrainte UNIQUE (remonterait en `.error`, pas `.duplicate`).
     func isActivityImported(hash: String) throws -> Bool {
-        var found = false
-        try db.run("SELECT 1 FROM activities WHERE file_hash = ?", [.text(hash)]) { _ in found = true }
-        return found
+        // Une activité absorbée par une fusion reste connue (`activities_merged`).
+        try isActivityKnown(hash: hash)
     }
 
     /// Miroir de la branche `activity` d'`IngestService.ingestBuffer` — même
@@ -443,6 +444,10 @@ final class LocalDb {
         let calories: Double?
         let avgHr: Double?
         let maxHr: Double?
+        let name: String?
+        let note: String?
+        let edited: Bool
+        let mergedCount: Int
     }
 
     func activitiesCount() throws -> Int {
@@ -456,11 +461,11 @@ final class LocalDb {
         var out: [ActivityRow] = []
         try db.run(
             """
-            SELECT id, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr
+            SELECT id, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr, name, note, edited, merged_count
             FROM activities ORDER BY start_time DESC LIMIT ? OFFSET ?
             """,
             [.int(limit), .int(offset)]) { r in
-            out.append(Self.activityRow(from: r))
+            out.append(Self.activityRow(from: r, extra: 10))
         }
         return out
     }
@@ -473,21 +478,24 @@ final class LocalDb {
         var result: (row: ActivityRow, fileHash: String)?
         try db.run(
             """
-            SELECT id, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr, file_hash
+            SELECT id, file_name, sport, sub_sport, start_time, duration_s, distance_m, calories, avg_hr, max_hr, file_hash, name, note, edited, merged_count
             FROM activities WHERE id = ?
             """,
             [.int(id)]) { r in
-            result = (Self.activityRow(from: r), r.text(10) ?? "")
+            result = (Self.activityRow(from: r, extra: 11), r.text(10) ?? "")
         }
         return result
     }
 
-    private static func activityRow(from r: SQLiteRow) -> ActivityRow {
+    /// `extra` : index de `name` (suivi de `note`, `edited`, `merged_count`).
+    private static func activityRow(from r: SQLiteRow, extra: Int32) -> ActivityRow {
         ActivityRow(
             id: Int(r.double(0) ?? 0), fileName: r.text(1) ?? "",
             sport: r.text(2), subSport: r.text(3), startTime: r.text(4),
             durationS: r.double(5), distanceM: r.double(6), calories: r.double(7),
-            avgHr: r.double(8), maxHr: r.double(9))
+            avgHr: r.double(8), maxHr: r.double(9),
+            name: r.text(extra), note: r.text(extra + 1), edited: (r.double(extra + 2) ?? 0) != 0,
+            mergedCount: Int(r.double(extra + 3) ?? 0))
     }
 
     // MARK: - Lecture (`wellness/days`, `wellness/dates` — cf. `RealLocalPulseBackend`)
@@ -2334,10 +2342,10 @@ final class LocalDb {
     }
 }
 
-private func sqliteOptional(_ value: Double?) -> SQLiteValue {
+func sqliteOptional(_ value: Double?) -> SQLiteValue {
     value.map(SQLiteValue.double) ?? .null
 }
 
-private func sqliteOptionalText(_ value: String?) -> SQLiteValue {
+func sqliteOptionalText(_ value: String?) -> SQLiteValue {
     value.map(SQLiteValue.text) ?? .null
 }

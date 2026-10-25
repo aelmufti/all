@@ -118,6 +118,17 @@ private enum HelpContent {
                 title: "Éveils & oxygénation",
                 body: "À ne pas lire comme un dépistage d'apnée. Tes éveils sont surtout de longs réveils, pas les micro-éveils de quelques secondes qui suivent une apnée ; l'écart avec les désaturations vient le plus souvent d'un artefact de mouvement du capteur au réveil."),
         ]),
+        HelpSection(title: "Activités", topics: [
+            HelpTopic(
+                title: "Rogner une séance",
+                body: "« Modifier » permet de corriger le début et la fin, par exemple si tu as oublié d'arrêter la montre. La courbe de fréquence cardiaque montre la zone gardée ; le reste est estompé. Les calories sont recalculées sur la zone gardée et réparties d'après ta fréquence cardiaque."),
+            HelpTopic(
+                title: "Fusionner des activités",
+                body: "« Sélectionner » puis « Fusionner » réunit des activités du même sport qui ne se chevauchent pas, par exemple une course coupée par erreur. Le temps écoulé entre les deux n'est pas compté. Depuis le menu d'une ligne, « Fusionner avec la suivante » est proposé quand la suivante est du même sport et commence moins de 30 minutes après."),
+            HelpTopic(
+                title: "Séparer ou rétablir",
+                body: "« Séparer » défait une fusion et rend les activités d'origine. « Rétablir l'original » retire la fenêtre rognée, le sport corrigé, le nom et la note, en gardant la fusion."),
+        ]),
         HelpSection(title: "Alimentation", topics: [
             HelpTopic(
                 title: "Journée vide ≠ zéro",

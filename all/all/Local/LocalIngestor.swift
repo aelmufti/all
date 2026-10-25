@@ -69,7 +69,13 @@ enum LocalIngestor {
     /// base SQLite en échec (ouverture, `isImported`, `store*`) ou lecture
     /// refusée par la protection des données. L'appelant (`ingestPending`)
     /// continue avec les fichiers suivants dans les deux cas.
-    static func ingest(fileURL: URL, hash: String, fileName: String, into db: LocalDb) -> LocalIngestResult {
+    ///
+    /// `locator` : où retrouver les `.fit` des autres membres d'une fusion, pour la
+    /// matérialisation des modifications d'activité (§6 du contrat `activity-edits`) ;
+    /// par défaut le vrai spool, ouvert seulement s'il y a une modification en jeu.
+    static func ingest(
+        fileURL: URL, hash: String, fileName: String, into db: LocalDb, locator: ActivityFitLocator? = nil
+    ) -> LocalIngestResult {
         func result(_ kind: LocalIngestKind) -> LocalIngestResult { LocalIngestResult(fileName: fileName, kind: kind) }
         func storageFailure(_ error: Error) -> LocalIngestResult {
             log.error("Ingestion locale: base en échec pour \(fileName, privacy: .public) : \(error.localizedDescription, privacy: .public)")
@@ -122,11 +128,28 @@ enum LocalIngestor {
                 if try db.isActivityImported(hash: hash) { return result(.duplicate) }
                 let summary = FitActivityExtractor.extractSummary(messages: file.messages)
                 try db.storeActivity(summary, hash: hash, fileName: fileName)
+                materializeEdits(for: hash, in: db, locator: locator ?? .standard(known: [hash: fileURL]))
                 return result(.activity)
             }
             return result(.skipped)
         } catch {
             return storageFailure(error)
+        }
+    }
+
+    /// §6 : après l'ingestion d'une activité, rejoue la matérialisation de ses
+    /// modifications, de sa principale et des membres qui la désignent (une modification
+    /// peut arriver avant son `.fit`). Sans aucune modification en base : rien à faire.
+    /// N'échoue jamais l'ingestion : l'activité est déjà écrite (une nouvelle tentative la
+    /// verrait `.duplicate`) ; l'état se rattrape à la prochaine modification du groupe.
+    private static func materializeEdits(for hash: String, in db: LocalDb, locator: ActivityFitLocator) {
+        do {
+            guard try db.hasAnyActivityEdits() else { return }
+            try db.db.transaction {
+                try ActivityEditMaterializer(db: db, locator: locator).rematerialize(hashes: [hash])
+            }
+        } catch {
+            log.error("Ingestion locale: matérialisation des modifications échouée pour \(hash, privacy: .public) : \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -232,6 +255,8 @@ enum LocalIngestor {
             .filter { $0.ingest == nil && $0.purgedAt == nil }
             .sorted { ($0.acquiredAt, $0.id.index) < ($1.acquiredAt, $1.id.index) }
         var report = PassReport()
+        // Une seule fois par passe : les fichiers hachés ici servent aux fusions.
+        let locator = ActivityFitLocator.standard()
         if !pending.isEmpty { progress(pending.count) }
         for (position, entry) in pending.enumerated() {
             // `defer` : le décompte descend aussi sur les `continue` ci-dessous.
@@ -264,7 +289,8 @@ enum LocalIngestor {
                 }
                 continue
             }
-            let result = ingest(fileURL: url, hash: hash, fileName: fileName, into: db)
+            locator.register(hash: hash, url: url)
+            let result = ingest(fileURL: url, hash: hash, fileName: fileName, into: db, locator: locator)
             record(result.kind, hash: hash)
         }
         return report

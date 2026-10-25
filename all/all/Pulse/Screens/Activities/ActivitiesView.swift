@@ -38,6 +38,7 @@ struct ActivitiesView: View {
     // donc la liste telle quelle au retour ; le rafraîchissement passe par le
     // pull-to-refresh (`.refreshable`).
     @State private var hasLoaded = false
+    @State private var confirmMerge = false
 
     var body: some View {
         NavigationStack {
@@ -51,7 +52,7 @@ struct ActivitiesView: View {
                     hasLoaded = true
                 }
                 .navigationDestination(for: Int.self) { id in
-                    ActivityDetailView(activityId: id)
+                    ActivityDetailView(activityId: id, onChanged: { Task { await vm.reload() } })
                 }
         }
         // Synchro montre en mode Téléphone/Les deux pendant que l'écran est
@@ -85,13 +86,18 @@ struct ActivitiesView: View {
     private func loaded(_ activities: [Activity]) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: PulseSpacing.lg) {
-                ActivitiesHeader(count: activities.count)
+                ActivitiesHeader(
+                    count: activities.count,
+                    isSelecting: vm.isSelecting,
+                    canSelect: activities.count > 1,
+                    onToggleSelecting: { vm.isSelecting ? vm.cancelSelecting() : vm.startSelecting() }
+                )
 
                 if activities.isEmpty {
                     emptyState
                 } else {
                     ForEach(groups(of: activities), id: \.key) { group in
-                        ActivitiesDayGroup(label: group.label, activities: group.activities)
+                        ActivitiesDayGroup(label: group.label, activities: group.activities, vm: vm)
                     }
                 }
             }
@@ -102,8 +108,47 @@ struct ActivitiesView: View {
             .padding(.top, PulseSpacing.lg)
             .padding(.bottom, PulseSpacing.lg)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if vm.isSelecting { mergeBar }
+        }
         .pulseTabBarClearance()
         .refreshable { await vm.reload() }
+        .sensoryFeedback(.success, trigger: vm.mergeSuccessCount)
+        .confirmationDialog(
+            "Fusionner \(vm.selectedCount) activités ?",
+            isPresented: $confirmMerge,
+            titleVisibility: .visible
+        ) {
+            Button("Fusionner") { Task { await vm.mergeSelected() } }
+            Button("Annuler", role: .cancel) {}
+        }
+        .alert(
+            "Fusion impossible",
+            isPresented: Binding(get: { vm.mergeError != nil }, set: { if !$0 { vm.mergeError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(vm.mergeError ?? "")
+        }
+    }
+
+    /// Barre du bas du mode sélection : « Fusionner (n) ».
+    private var mergeBar: some View {
+        Button {
+            confirmMerge = true
+        } label: {
+            HStack(spacing: PulseSpacing.sm) {
+                if vm.isMerging { ProgressView() }
+                Text("Fusionner (\(vm.selectedCount))")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(.pulsePrimary)
+        .tint(Color.pulseAccent)
+        .disabled(!vm.canMerge)
+        .padding(.horizontal, PulseSpacing.lg)
+        .padding(.vertical, PulseSpacing.sm)
+        .background(.bar)
     }
 
     private var emptyState: some View {
@@ -165,6 +210,9 @@ struct ActivitiesView: View {
 /// visuel que la maquette.
 private struct ActivitiesHeader: View {
     let count: Int
+    let isSelecting: Bool
+    let canSelect: Bool
+    let onToggleSelecting: () -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -176,6 +224,12 @@ private struct ActivitiesHeader: View {
             Text(countLabel)
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(Color.pulseTextSecondary)
+            if canSelect || isSelecting {
+                Button(isSelecting ? "Annuler" : "Sélectionner", action: onToggleSelecting)
+                    .font(.subheadline)
+                    .tint(Color.pulseAccent)
+                    .padding(.leading, PulseSpacing.sm)
+            }
         }
     }
 
@@ -191,6 +245,7 @@ private struct ActivitiesHeader: View {
 private struct ActivitiesDayGroup: View {
     let label: String
     let activities: [Activity]
+    let vm: ActivitiesViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: PulseSpacing.sm) {
@@ -200,10 +255,29 @@ private struct ActivitiesDayGroup: View {
                 .foregroundStyle(Color.pulseTextSecondary)
 
             ForEach(activities) { activity in
-                NavigationLink(value: activity.id) {
-                    ActivityRow(activity: activity)
+                if vm.isSelecting {
+                    Button {
+                        vm.toggle(activity.id)
+                    } label: {
+                        ActivityRow(activity: activity, selection: vm.selected.contains(activity.id))
+                    }
+                    .buttonStyle(ActivityRowButtonStyle())
+                    .accessibilityAddTraits(vm.selected.contains(activity.id) ? .isSelected : [])
+                } else {
+                    NavigationLink(value: activity.id) {
+                        ActivityRow(activity: activity, selection: nil)
+                    }
+                    .buttonStyle(ActivityRowButtonStyle())
+                    .contextMenu {
+                        if vm.nextMergeCandidate(after: activity) != nil {
+                            Button {
+                                Task { await vm.mergeWithNext(activity) }
+                            } label: {
+                                Label("Fusionner avec la suivante", systemImage: "arrow.triangle.merge")
+                            }
+                        }
+                    }
                 }
-                .buttonStyle(ActivityRowButtonStyle())
             }
         }
     }
@@ -214,9 +288,17 @@ private struct ActivitiesDayGroup: View {
 /// sinon durée) — 1-1 avec la maquette, lignes 1047-1054.
 private struct ActivityRow: View {
     let activity: Activity
+    /// `nil` hors mode sélection ; sinon coché ou non.
+    let selection: Bool?
 
     var body: some View {
         HStack(spacing: PulseSpacing.md) {
+            if let selection {
+                Image(systemName: selection ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(selection ? Color.pulseAccent : Color.pulseTextSecondary)
+                    .accessibilityHidden(true)
+            }
             Text(ActivitySport.emoji(sport: activity.sport))
                 .font(.system(size: 22))
                 .frame(width: 30, height: 30)
@@ -224,7 +306,7 @@ private struct ActivityRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(ActivitySport.label(sport: activity.sport, subSport: activity.subSport))
+                Text(title)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Color.pulseTextPrimary)
                 Text(ActivityDateFormatting.clock(ActivityDateFormatting.date(from: activity.startTime)))
@@ -248,6 +330,11 @@ private struct ActivityRow: View {
 
     /// Couleur par sport — équivalent `<app-sport-icon>` (Angular) : jamais
     /// l'accent bleu générique, cf. `ActivitySport.color`.
+    private var title: String {
+        if let name = activity.name, !name.isEmpty { return name }
+        return ActivitySport.label(sport: activity.sport, subSport: activity.subSport)
+    }
+
     private var sportTint: Color {
         ActivitySport.color(sport: activity.sport)
     }

@@ -44,6 +44,7 @@ extension LocalDb {
             """
             SELECT hash FROM imported_files
             UNION SELECT file_hash FROM activities
+            UNION SELECT file_hash FROM activities_merged
             UNION SELECT hash FROM pulse_pull_marks
             """) { r in
             if let hash = r.text(0) { known.insert(hash) }

@@ -62,9 +62,12 @@ import MapKit
 
 struct ActivityDetailView: View {
     @State private var vm: ActivityDetailViewModel
+    @State private var editing: ActivityDetail?
+    @State private var confirmSplit = false
+    @Environment(\.dismiss) private var dismiss
 
-    init(activityId: Int) {
-        _vm = State(initialValue: ActivityDetailViewModel(activityId: activityId))
+    init(activityId: Int, onChanged: @escaping @MainActor () -> Void = {}) {
+        _vm = State(initialValue: ActivityDetailViewModel(activityId: activityId, onChanged: onChanged))
     }
 
     var body: some View {
@@ -79,6 +82,32 @@ struct ActivityDetailView: View {
             // sortir.
             .toolbar(isLoaded ? .hidden : .visible, for: .navigationBar)
             .task { await vm.load() }
+            .sensoryFeedback(.success, trigger: vm.successCount)
+            .onChange(of: vm.didSplit) { _, done in
+                if done { dismiss() }
+            }
+            .sheet(item: Binding(get: { editing.map { EditTarget(detail: $0) } }, set: { editing = $0?.detail })) { target in
+                ActivityEditSheet(detail: target.detail) { updated in
+                    vm.apply(updated)
+                }
+            }
+            .confirmationDialog("Séparer cette fusion ?", isPresented: $confirmSplit, titleVisibility: .visible) {
+                Button("Séparer") { Task { await vm.split() } }
+                Button("Annuler", role: .cancel) {}
+            }
+            .alert(
+                "Séparation impossible",
+                isPresented: Binding(get: { vm.actionError != nil }, set: { if !$0 { vm.dismissActionError() } })
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(vm.actionError ?? "")
+            }
+    }
+
+    private struct EditTarget: Identifiable {
+        let detail: ActivityDetail
+        var id: Int { detail.id }
     }
 
     private var isLoaded: Bool {
@@ -99,12 +128,18 @@ struct ActivityDetailView: View {
         case .loaded(let detail):
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ActivityHeaderRow(detail: detail)
+                    ActivityHeaderRow(detail: detail, onEdit: { editing = detail })
                         .padding(.horizontal, PulseSpacing.lg)
                         .padding(.bottom, PulseSpacing.md)
 
                     VStack(alignment: .leading, spacing: PulseSpacing.md) {
                         ActivityStatsCard(detail: detail)
+
+                        if let members = detail.members, (detail.mergedCount ?? 0) > 0, !members.isEmpty {
+                            ActivityMergedCard(members: members, isWorking: vm.isWorking) {
+                                confirmSplit = true
+                            }
+                        }
 
                         if detail.track.count > 1 {
                             ActivityMapCard(coordinates: coordinates(from: detail.track), sport: detail.sport)
@@ -144,9 +179,27 @@ struct ActivityDetailView: View {
 /// carte) — maquette lignes 1119-1125.
 private struct ActivityHeaderRow: View {
     let detail: ActivityDetail
+    let onEdit: () -> Void
     @Environment(\.dismiss) private var dismiss
 
+    private var title: String {
+        if let name = detail.name, !name.isEmpty { return name }
+        return ActivitySport.label(sport: detail.sport, subSport: detail.subSport)
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: PulseSpacing.sm) {
+            titleRow
+            if let note = detail.note, !note.isEmpty {
+                Text(note)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.pulseTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var titleRow: some View {
         HStack(alignment: .center, spacing: PulseSpacing.md) {
             Button {
                 dismiss()
@@ -165,14 +218,60 @@ private struct ActivityHeaderRow: View {
             .accessibilityLabel("Retour")
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(ActivitySport.label(sport: detail.sport, subSport: detail.subSport))
+                Text(title)
                     .font(.system(size: 20, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundStyle(Color.pulseTextPrimary)
-                Text(ActivityDateFormatting.rangeLabel(ActivityDateFormatting.date(from: detail.startTime)))
+                Text(subtitle)
                     .font(.system(size: 12, design: .rounded))
                     .foregroundStyle(Color.pulseTextSecondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Modifier", action: onEdit)
+                .font(.subheadline)
+                .tint(Color.pulseAccent)
+                .accessibilityHint("Ouvre la feuille de modification de l'activité")
+        }
+    }
+
+    private var subtitle: String {
+        let range = ActivityDateFormatting.rangeLabel(ActivityDateFormatting.date(from: detail.startTime))
+        return detail.edited == true ? "\(range) · Modifiée" : range
+    }
+}
+
+// MARK: - Activités fusionnées
+
+private struct ActivityMergedCard: View {
+    let members: [ActivityMember]
+    let isWorking: Bool
+    let onSplit: () -> Void
+
+    var body: some View {
+        PulseCard {
+            Text("Activités fusionnées")
+                .font(.headline)
+                .foregroundStyle(Color.pulseTextPrimary)
+            ForEach(members) { member in
+                HStack {
+                    Text(ActivityDateFormatting.clock(ActivityDateFormatting.date(from: member.startTime)))
+                        .font(.subheadline)
+                        .foregroundStyle(Color.pulseTextPrimary)
+                    Spacer()
+                    Text(ActivityFormat.duration(member.durationS))
+                        .font(.subheadline)
+                        .foregroundStyle(Color.pulseTextSecondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            Button(role: .destructive, action: onSplit) {
+                HStack(spacing: PulseSpacing.sm) {
+                    if isWorking { ProgressView() }
+                    Text("Séparer")
+                }
+            }
+            .disabled(isWorking)
         }
     }
 }

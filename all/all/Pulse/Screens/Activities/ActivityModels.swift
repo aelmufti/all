@@ -37,6 +37,13 @@ struct Activity: Decodable, Identifiable, Hashable {
     let calories: Double?
     let avgHr: Double?
     let maxHr: Double?
+    // Champs additifs de `activity-edits-contract.md` §5 : absents d'un serveur plus ancien.
+    var name: String? = nil
+    var note: String? = nil
+    /// Fenêtre rognée, sport corrigé ou fusion.
+    var edited: Bool? = nil
+    /// Nombre d'activités absorbées par une fusion.
+    var mergedCount: Int? = nil
 }
 
 struct ActivityListResponse: Decodable {
@@ -114,4 +121,84 @@ struct ActivityDetail: Decodable {
     let sets: [ActivitySet]
     let splits: [ActivitySplit]
     let hrZones: [HrZone]
+    // Champs additifs de `activity-edits-contract.md` §5 (absents d'un serveur plus ancien).
+    var name: String? = nil
+    var note: String? = nil
+    var edited: Bool? = nil
+    var mergedCount: Int? = nil
+    /// Bornes d'origine (tous membres confondus), pour l'écran d'édition.
+    var source: ActivitySource? = nil
+    /// Fenêtre / sport posés ; `nil` sans modification de ce genre.
+    var edit: ActivityEditInfo? = nil
+    /// Principale + absorbées, par heure de début ; vide hors fusion.
+    var members: [ActivityMember]? = nil
+}
+
+struct ActivitySource: Decodable, Hashable {
+    /// ISO 8601 UTC (`yyyy-MM-ddTHH:mm:ss.SSSZ`).
+    let startTime: String
+    let endTime: String
+}
+
+struct ActivityEditInfo: Decodable, Hashable {
+    let startAt: String?
+    let endAt: String?
+    let sport: String?
+    let subSport: String?
+}
+
+struct ActivityMember: Decodable, Identifiable, Hashable {
+    let id: Int
+    let startTime: String?
+    let durationS: Double?
+}
+
+struct ActivityMergeRequest: Encodable {
+    let ids: [Int]
+}
+
+struct ActivityMergeResponse: Decodable {
+    let id: Int
+}
+
+struct ActivitySplitResponse: Decodable {
+    let ids: [Int]
+}
+
+/// Valeur d'un champ de `PUT api/activities/:id/edit` : omis, effacé (`null`) ou remplacé.
+enum ActivityEditValue<T: Encodable & Equatable>: Equatable {
+    case unchanged
+    case clear
+    case set(T)
+}
+
+/// Corps de `PUT api/activities/:id/edit`. Les dates sont des ISO 8601 UTC
+/// (`ActivityEditTime.format(unixSeconds)` en produit au format du serveur). `sport` et
+/// `subSport` vont ensemble : `sport: .clear` efface aussi `subSport`.
+struct ActivityEditPatch: Encodable, Equatable {
+    var startAt: ActivityEditValue<String> = .unchanged
+    var endAt: ActivityEditValue<String> = .unchanged
+    var sport: ActivityEditValue<String> = .unchanged
+    var subSport: ActivityEditValue<String> = .unchanged
+    var name: ActivityEditValue<String> = .unchanged
+    var note: ActivityEditValue<String> = .unchanged
+
+    private enum CodingKeys: String, CodingKey { case startAt, endAt, sport, subSport, name, note }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        func put(_ value: ActivityEditValue<String>, _ key: CodingKeys) throws {
+            switch value {
+            case .unchanged: break
+            case .clear: try c.encodeNil(forKey: key)
+            case .set(let v): try c.encode(v, forKey: key)
+            }
+        }
+        try put(startAt, .startAt)
+        try put(endAt, .endAt)
+        try put(sport, .sport)
+        try put(subSport, .subSport)
+        try put(name, .name)
+        try put(note, .note)
+    }
 }

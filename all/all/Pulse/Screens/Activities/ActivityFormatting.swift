@@ -94,6 +94,12 @@ enum ActivitySport {
         "cardio": "Cardio",
     ]
 
+    /// Sports proposés à la correction manuelle (ordre d'affichage).
+    static let editable: [String] = [
+        "running", "walking", "cycling", "training", "swimming",
+        "rockClimbing", "floorClimbing", "rowing", "racket", "generic",
+    ]
+
     static func name(sport: String?) -> String {
         labelsFR[sport ?? ""] ?? sport ?? "Autre"
     }

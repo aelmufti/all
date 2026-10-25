@@ -952,9 +952,9 @@ struct PulseFilesPullPurgeTests {
     @Test func theMigrationIsAppendedAndTheTableIsCoveredByThePurgeScan() throws {
         let rig = try Rig()
         defer { rig.cleanup() }
-        #expect(LocalDb.migrations.count == 2)
+        #expect(LocalDb.migrations.count == 3)
         #expect(LocalDb.migrations.first == LocalDb.saisieSyncMigration, "les migrations existantes ne bougent pas")
-        #expect(try LocalDb.schemaVersion(rig.db.db) == 2)
+        #expect(try LocalDb.schemaVersion(rig.db.db) == 3)
         var names: [String] = []
         try rig.db.db.run("SELECT name FROM sqlite_master WHERE type = 'table'") { r in if let n = r.text(0) { names.append(n) } }
         #expect(names.contains("pulse_pull_marks"), "la purge vide toutes les tables lues dans sqlite_master")

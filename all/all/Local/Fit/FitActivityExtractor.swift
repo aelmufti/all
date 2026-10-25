@@ -98,11 +98,11 @@ enum FitActivityExtractor {
     /// Nombre max de points de flux — miroir de `MAX_POINTS` (TS). Aucun des
     /// 3 échantillons d'activité (jusqu'à 1726 `recordMesgs`) ne dépasse ce
     /// seuil, mais le downsample reste porté pour les activités plus longues.
-    private static let maxStreamPoints = 2000
+    static let maxStreamPoints = 2000
 
     /// Miroir `SEMICIRCLE_TO_DEG` (TS, `fit-parser.service.ts`) — un
     /// "semicircle" FIT vaut `180 / 2^31` degré.
-    private static let semicircleToDegree = 180.0 / 2_147_483_648.0
+    static let semicircleToDegree = 180.0 / 2_147_483_648.0
 
     // MARK: - `extractSummary` (miroir `FitParserService.extractSummary`)
 
@@ -183,7 +183,7 @@ enum FitActivityExtractor {
 
     // MARK: - Segments
 
-    private static func extractLaps(_ messages: [FitMessage]) -> [Lap] {
+    static func extractLaps(_ messages: [FitMessage]) -> [Lap] {
         var out: [Lap] = []
         for lap in messages where lap.globalMessageNumber == FitProfile.mesgLap {
             out.append(Lap(
@@ -199,7 +199,7 @@ enum FitActivityExtractor {
     /// Miroir `extractSets` (TS) — ne garde que les séries "actives" (jamais
     /// les paliers de repos, `setType == 0`), catégorie = premier élément
     /// nommé et différent d'« unknown » du tableau `category`.
-    private static func extractSets(_ messages: [FitMessage]) -> [SetRow] {
+    static func extractSets(_ messages: [FitMessage]) -> [SetRow] {
         var out: [SetRow] = []
         for set in messages where set.globalMessageNumber == FitProfile.mesgSet {
             guard set.double(5) == FitProfile.setTypeActive else { continue }
@@ -215,7 +215,7 @@ enum FitActivityExtractor {
         return out
     }
 
-    private static func extractSplits(_ messages: [FitMessage]) -> [Split] {
+    static func extractSplits(_ messages: [FitMessage]) -> [Split] {
         var out: [Split] = []
         for split in messages where split.globalMessageNumber == FitProfile.mesgSplit {
             out.append(Split(
@@ -263,7 +263,7 @@ enum FitActivityExtractor {
     /// Miroir exact de `downsample` (TS, `fit-parser.service.ts`) : garde le
     /// dernier point tel quel après le rééchantillonnage régulier (jamais
     /// tronqué avant la fin réelle de l'activité).
-    private static func downsample<T>(_ items: [T], max: Int) -> [T] {
+    static func downsample<T>(_ items: [T], max: Int) -> [T] {
         guard items.count > max else { return items }
         let step = Double(items.count) / Double(max)
         var result: [T] = []
@@ -285,7 +285,7 @@ enum FitActivityExtractor {
 
     /// `new Date((FIT_EPOCH_S + value) * 1000).toISOString()` — réutilise
     /// `FitWellnessExtractor.fitEpochS`, même constante que le sommeil/bien-être.
-    private static func isoDateTime(_ fitSeconds: Double) -> String {
+    static func isoDateTime(_ fitSeconds: Double) -> String {
         isoDateTimeFormatter.string(from: Date(timeIntervalSince1970: fitSeconds + FitWellnessExtractor.fitEpochS))
     }
 }

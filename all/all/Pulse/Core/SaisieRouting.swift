@@ -48,8 +48,32 @@ enum SaisieRoute {
     ]
     private static let writePrefixes = ["nutrition/foods/", "nutrition/log/", "weight/"]
 
+    /// Lectures d'activités (liste, détail) : pas des saisies, mais leurs `id` sont propres
+    /// à chaque base — l'écriture d'une modification doit viser la base d'où l'écran a lu.
+    static func isActivityRead(method: String, path: String) -> Bool {
+        guard method == "GET" else { return false }
+        let route = normalized(path)
+        return route == "activities" || route.hasPrefix("activities/")
+    }
+
+    /// Modification / fusion / séparation d'activités (`activity-edits-contract.md` §5) :
+    /// `POST activities/merge`, `PUT|DELETE activities/:id/edit`, `POST activities/:id/split`.
+    /// Toutes désignent des activités par `id` numérique de base.
+    static func isActivityEditWrite(method: String, path: String) -> Bool {
+        let route = normalized(path)
+        if method == "POST", route == "activities/merge" { return true }
+        func scoped(_ suffix: String) -> Bool {
+            guard route.hasPrefix("activities/"), route.hasSuffix(suffix) else { return false }
+            let id = route.dropFirst("activities/".count).dropLast(suffix.count)
+            return !id.isEmpty && id.allSatisfy(\.isNumber)
+        }
+        if (method == "PUT" || method == "DELETE"), scoped("/edit") { return true }
+        return method == "POST" && scoped("/split")
+    }
+
     static func isWrite(method: String, path: String) -> Bool {
         guard method == "POST" || method == "PUT" || method == "DELETE" else { return false }
+        if isActivityEditWrite(method: method, path: path) { return true }
         let route = normalized(path)
         if writeRoutes.contains(route) { return true }
         return writePrefixes.contains { route.hasPrefix($0) && route.count > $0.count }
@@ -59,6 +83,7 @@ enum SaisieRoute {
     /// `:id` sous `nutrition/`, ou `POST nutrition/log` dont le corps porte un
     /// `foodId` (§7).
     static func carriesLocalId(method: String, path: String, body: Data?) -> Bool {
+        if isActivityEditWrite(method: method, path: path) { return true }
         let route = normalized(path)
         if method == "PUT" || method == "DELETE" {
             for prefix in ["nutrition/foods/", "nutrition/log/"] where route.hasPrefix(prefix) && route.count > prefix.count {

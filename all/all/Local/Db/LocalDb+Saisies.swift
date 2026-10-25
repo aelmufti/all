@@ -106,7 +106,9 @@ struct SaisieChange: Equatable, Codable {
 
 extension LocalDb {
     /// Ressources, dans l'ordre d'application du contrat §4.
-    static let saisieResources = ["food", "foodLog", "weight", "setting", "programme", "programmeDone"]
+    /// `activityEdit` (modifications d'activités, `activity-edits-contract.md` §7) vient
+    /// APRÈS `programmeDone` : les pointages sont posés avant que la fusion ne repointe.
+    static let saisieResources = ["food", "foodLog", "weight", "setting", "programme", "programmeDone", "activityEdit"]
 
     /// Liste blanche STRICTE des réglages journalisés (contrat §2) : `settings`
     /// contient d'autres clés (secrets, source de synchro…) qui ne sortent jamais.
@@ -120,7 +122,7 @@ extension LocalDb {
     /// UPDATE` et NON `INSERT OR REPLACE` : dans un trigger, la politique de conflit
     /// de l'instruction EXTÉRIEURE (ici l'`ON CONFLICT DO UPDATE` des écritures de
     /// poids/séances) écrase un `OR REPLACE` interne, qui échouait alors sur la clé.
-    private static func journalSQL(_ resource: String, key: String, deleted: String) -> String {
+    static func journalSQL(_ resource: String, key: String, deleted: String) -> String {
         """
         INSERT INTO saisie_changes (resource, key, updated_at, deleted, rev)
         VALUES ('\(resource)', \(key), \(sqlNowMs), \(deleted), (SELECT COALESCE(MAX(rev), 0) + 1 FROM saisie_changes))
@@ -128,7 +130,7 @@ extension LocalDb {
         """
     }
 
-    private static func trigger(
+    static func trigger(
         _ name: String, _ event: String, on table: String, when: String, _ resource: String, key: String, deleted: String
     ) -> String {
         """
@@ -359,6 +361,13 @@ extension LocalDb {
                 [.text(id), .int(week), .text(session)]) { r in
                 out = ["date": .string(r.text(0) ?? ""), "activityFileHash": .opt(r.text(1))]
             }
+        case "activityEdit":
+            if let e = try activityEdit(hash: key) {
+                out = [
+                    "startAt": .opt(e.startAt), "endAt": .opt(e.endAt), "sport": .opt(e.sport), "subSport": .opt(e.subSport),
+                    "name": .opt(e.name), "note": .opt(e.note), "mergedInto": .opt(e.mergedInto),
+                ]
+            }
         default:
             return nil
         }
@@ -410,8 +419,13 @@ extension LocalDb {
     /// avance jusqu'au `rev` d'APRÈS application — les lignes que ce même échange
     /// vient d'écrire ne repartiront pas en écho. Sinon on s'arrête à `sentMaxRev`
     /// (le changement survenu pendant l'échange doit partir au prochain).
+    ///
+    /// - `activityLocator` : où retrouver les `.fit` pour matérialiser une modification
+    ///   d'activité reçue (par défaut le vrai spool, ouvert seulement si une telle
+    ///   modification arrive).
     func applySaisieResponse(
-        cursor: Int, changes: [SaisieChange], sentMaxRev: Int?, markInitialDone: Bool
+        cursor: Int, changes: [SaisieChange], sentMaxRev: Int?, markInitialDone: Bool,
+        activityLocator: ActivityFitLocator? = nil
     ) throws -> SaisieApplyResult {
         var result = SaisieApplyResult()
         try db.transaction {
@@ -429,7 +443,7 @@ extension LocalDb {
                 try db.execute("SAVEPOINT saisie_change")
                 do {
                     var one = SaisieApplyResult()
-                    if try applyOne(change, into: &one) {
+                    if try applyOne(change, into: &one, locator: activityLocator) {
                         one.applied = 1
                     } else {
                         one.skipped = 1
@@ -481,7 +495,7 @@ extension LocalDb {
     }
 
     /// `true` si appliqué, `false` si ignoré (plus ancien, égal, inconnu à supprimer…).
-    private func applyOne(_ change: SaisieChange, into result: inout SaisieApplyResult) throws -> Bool {
+    private func applyOne(_ change: SaisieChange, into result: inout SaisieApplyResult, locator: ActivityFitLocator?) throws -> Bool {
         guard Self.saisieResources.contains(change.resource), !change.key.isEmpty else { return false }
 
         // Règle (§4) : inconnu → appliquer ; connu → le téléphone n'applique que si
@@ -491,6 +505,13 @@ extension LocalDb {
             "SELECT updated_at FROM saisie_changes WHERE resource = ? AND key = ?",
             [.text(change.resource), .text(change.key)]) { r in localUpdatedAt = r.double(0).map { Int($0) } }
         if let localUpdatedAt, change.updatedAt <= localUpdatedAt { return false }
+
+        // Racine de la chaîne de fusion AVANT la modification : elle doit se recalculer
+        // sans le membre qui la quitte.
+        var previousRoots: [String] = []
+        if change.resource == "activityEdit" {
+            previousRoots = [ActivityEditGraph(try allActivityEdits()).root(of: change.key)]
+        }
 
         if change.deleted {
             guard localUpdatedAt != nil else {
@@ -509,7 +530,7 @@ extension LocalDb {
             try deleteRow(change)
         } else {
             guard let data = change.data else { throw SaisieSkip() }
-            try writeRow(change, data: data)
+            try writeRow(change, data: data, locator: locator)
         }
 
         // Les triggers ont journalisé avec « maintenant » : on réécrit l'`updated_at`
@@ -517,6 +538,14 @@ extension LocalDb {
         try db.run(
             "UPDATE saisie_changes SET updated_at = ? WHERE resource = ? AND key = ?",
             [.int(change.updatedAt), .text(change.resource), .text(change.key)])
+
+        // §7 : après application d'une modification d'activité, matérialisation (§6) de
+        // ce hash, de son ancienne et de sa nouvelle principale.
+        if change.resource == "activityEdit" {
+            // Fenêtre vide reçue : conservée, le calcul retombe sur l'origine (cf. materializer).
+            try ActivityEditMaterializer(db: self, locator: locator ?? .standard())
+                .rematerialize(hashes: [change.key], previousRoots: previousRoots)
+        }
 
         if change.resource == "weight" || (change.resource == "setting" && change.key == "weightKg") {
             result.weightChanged = true
@@ -531,7 +560,7 @@ extension LocalDb {
         case "weight": return isDateKey(key)
         case "setting": return saisieSettingKeys.contains(key)
         case "programmeDone": return splitDoneKey(key) != nil
-        case "food", "foodLog", "programme": return !key.isEmpty
+        case "food", "foodLog", "programme", "activityEdit": return !key.isEmpty
         default: return false
         }
     }
@@ -556,6 +585,7 @@ extension LocalDb {
             try db.run(
                 "DELETE FROM programme_done WHERE programme_id = ? AND week = ? AND session = ?",
                 [.text(id), .int(week), .text(session)])
+        case "activityEdit": try db.run("DELETE FROM activity_edits WHERE file_hash = ?", [.text(key)])
         default: throw SaisieSkip()
         }
     }
@@ -568,7 +598,7 @@ extension LocalDb {
         datePattern.firstMatch(in: s, range: NSRange(s.startIndex..<s.endIndex, in: s)) != nil
     }
 
-    private func writeRow(_ change: SaisieChange, data: [String: SaisieJSON]) throws {
+    private func writeRow(_ change: SaisieChange, data: [String: SaisieJSON], locator: ActivityFitLocator?) throws {
         switch change.resource {
         case "food": try writeFood(uid: change.key, data)
         case "foodLog": try writeFoodLog(uid: change.key, data)
@@ -576,6 +606,7 @@ extension LocalDb {
         case "setting": try writeSetting(key: change.key, data)
         case "programme": try writeProgramme(id: change.key, data)
         case "programmeDone": try writeProgrammeDone(key: change.key, data)
+        case "activityEdit": try writeActivityEdit(hash: change.key, data, locator: locator)
         default: throw SaisieSkip()
         }
     }
@@ -763,6 +794,13 @@ extension LocalDb {
             try db.run("SELECT id FROM activities WHERE file_hash = ?", [.text(hash)]) { r in
                 if let value = r.double(0) { activityId = .int(Int(value)) }
             }
+            // Activité absorbée par une fusion : le pointage vise sa principale.
+            if case .null = activityId, try mergedActivity(hash: hash) != nil {
+                let root = ActivityEditGraph(try allActivityEdits()).root(of: hash)
+                try db.run("SELECT id FROM activities WHERE file_hash = ?", [.text(root)]) { r in
+                    if let value = r.double(0) { activityId = .int(Int(value)) }
+                }
+            }
         }
         try db.run(
             """
@@ -770,5 +808,53 @@ extension LocalDb {
             ON CONFLICT(programme_id, week, session) DO UPDATE SET date = excluded.date, activity_id = excluded.activity_id
             """,
             [.text(id), .int(week), .text(session), .text(date), activityId])
+    }
+
+    /// `activityEdit` : mêmes bornes que les routes (`ActivityEditService`), hors contrôle
+    /// des bornes de l'activité si le `.fit` n'est pas encore là ; invalide → ligne ignorée.
+    private func writeActivityEdit(hash: String, _ data: [String: SaisieJSON], locator: ActivityFitLocator?) throws {
+        func time(_ key: String) throws -> String? {
+            guard let raw = try text(data, key) else { return nil }
+            guard let unix = ActivityEditTime.parse(raw) else { throw SaisieSkip() }
+            return ActivityEditTime.format(unix)
+        }
+        func label(_ key: String, max: Int) throws -> String? {
+            guard let s = try text(data, key) else { return nil }
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count <= max else { throw SaisieSkip() }
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        func sportName(_ key: String) throws -> String? {
+            guard let raw = try text(data, key) else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, trimmed.count <= ActivityEditService.maxSportLength else { throw SaisieSkip() }
+            return trimmed
+        }
+        var edit = ActivityEdit(fileHash: hash)
+        edit.startAt = try time("startAt")
+        edit.endAt = try time("endAt")
+        if let s = edit.startAt.flatMap(ActivityEditTime.parse), let e = edit.endAt.flatMap(ActivityEditTime.parse), s >= e {
+            throw SaisieSkip()
+        }
+        edit.sport = try sportName("sport")
+        edit.subSport = try sportName("subSport")
+        if edit.sport == nil && edit.subSport != nil { throw SaisieSkip() }
+        edit.name = try label("name", max: ActivityEditService.maxNameLength)
+        edit.note = try label("note", max: ActivityEditService.maxNoteLength)
+        if let parent = try text(data, "mergedInto") {
+            guard PulseFilesStore.isHash(parent), parent != hash else { throw SaisieSkip() }
+            edit.mergedInto = parent
+        }
+        // Aucune valeur : la ligne locale est supprimée (retour à l'origine).
+        if edit.isEmpty {
+            try db.run("DELETE FROM activity_edits WHERE file_hash = ?", [.text(hash)])
+            return
+        }
+        do {
+            try ActivityEditService(db: self, locator: locator ?? .standard()).validateWindow(edit, checkEmpty: false)
+        } catch is LocalActivityEditValidationError {
+            throw SaisieSkip()
+        }
+        try saveActivityEdit(edit)
     }
 }
