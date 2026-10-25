@@ -92,29 +92,30 @@ struct SleepCard: View {
                     hypnogramAxis
                     stageLegend
                 }
-                if let spo2 = viewModel.nightSpo2 {
-                    Divider()
-                    // Miroir de `<a class="spo2-row" routerLink="/rapport-spo2">`
-                    // (Angular) — toute la ligne est cliquable, chevron `--absent`.
-                    Button {
-                        showingSpo2Report = true
-                    } label: {
-                        HStack {
-                            Text("SpO2 nocturne")
-                                .font(.footnote)
-                                .foregroundStyle(Color.pulseTextSecondary)
-                            Spacer()
-                            Text("\(spo2.mean) % · \(spo2.min) – \(spo2.max)")
-                                .font(PulseFont.metricUnit)
-                                .foregroundStyle(Color.pulseTextPrimary)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color.pulseAbsent)
-                        }
-                        .contentShape(Rectangle())
+                // Ligne toujours présente dès qu'il y a une nuit : son apparition
+                // tardive faisait grandir la carte au changement de jour.
+                Divider()
+                // Miroir de `<a class="spo2-row" routerLink="/rapport-spo2">`
+                // (Angular) — toute la ligne est cliquable, chevron `--absent`.
+                Button {
+                    showingSpo2Report = true
+                } label: {
+                    HStack {
+                        Text("SpO2 nocturne")
+                            .font(.footnote)
+                            .foregroundStyle(Color.pulseTextSecondary)
+                        Spacer()
+                        Text(viewModel.nightSpo2.map { "\($0.mean) % · \($0.min) – \($0.max)" } ?? "—")
+                            .font(PulseFont.metricUnit)
+                            .foregroundStyle(viewModel.nightSpo2 == nil ? Color.pulseTextSecondary : Color.pulseTextPrimary)
+                            .contentTransition(.numericText())
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.pulseAbsent)
                     }
-                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
             .sheet(isPresented: $showingSpo2Report) {
                 Spo2ReportView()
